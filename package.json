@@ -1,0 +1,32 @@
+{
+  "name": "superreferrer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "contracts:compile": "hardhat compile"
+  },
+  "dependencies": {
+    "@0gfoundation/0g-ts-sdk": "latest",
+    "@openzeppelin/contracts": "latest",
+    "ethers": "latest",
+    "lucide-react": "latest",
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "samsar-js": "file:../samsar_one/samsar-js",
+    "viem": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "hardhat": "2.26.3",
+    "ts-node": "^10.9.2",
+    "typescript": "latest"
+  }
+}
