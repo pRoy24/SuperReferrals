@@ -9,6 +9,8 @@ export async function createKeeperPaymentIntent({
   amount,
   tokenAddress,
   settlementTokenAddress,
+  paymentAmountAtomic,
+  paymentRecipientAddress,
   amountUsd,
   chainId,
   reason
@@ -18,6 +20,8 @@ export async function createKeeperPaymentIntent({
   amount: string;
   tokenAddress?: string;
   settlementTokenAddress?: string;
+  paymentAmountAtomic?: string;
+  paymentRecipientAddress?: string;
   amountUsd?: number;
   chainId: number;
   reason: string;
@@ -32,6 +36,8 @@ export async function createKeeperPaymentIntent({
         payerAddress,
         recipientAddress,
         amount,
+        paymentAmountAtomic,
+        paymentRecipientAddress,
         tokenAddress,
         settlementTokenAddress,
         amountUsd,
@@ -57,6 +63,8 @@ export async function createKeeperPaymentIntent({
         recipientAddress,
         amount,
         amountUsd,
+        paymentAmountAtomic,
+        paymentRecipientAddress,
         paymentTokenAddress: tokenAddress,
         settlementTokenAddress,
         tokenAddress,
@@ -85,7 +93,7 @@ export async function createKeeperPaymentIntent({
       tokenAddress,
       chainId,
       gasLimitMultiplier: "1.2",
-      metadata: { reason, payerAddress, amountUsd, settlementTokenAddress }
+      metadata: { reason, payerAddress, amountUsd, settlementTokenAddress, paymentAmountAtomic, paymentRecipientAddress }
     })
   });
   const data = await response.json();

@@ -5,7 +5,14 @@ import { buildINFTAssistantSystemPrompt } from "./assistant-prompt";
 import { deriveAgentWallet, mintINFT } from "./inft";
 import { bytes32From, createId, nowIso, normalizeWallet } from "./ids";
 import { createKeeperPaymentIntent, executeKeeperRefund } from "./keeperhub";
-import { amountToAtomic, findPaymentToken, getTransactionChainConfig, getTransactionChainId, settlementTokenForCurrency } from "./payment-tokens";
+import {
+  amountToAtomic,
+  findPaymentToken,
+  getTransactionChainConfig,
+  getTransactionChainId,
+  settlementTokenForCurrency,
+  type PaymentToken
+} from "./payment-tokens";
 import { verifyRenderPaymentTransaction } from "./payment-verification";
 import { countImages, priceGeneration, refundAmountForFailure } from "./pricing";
 import {
@@ -191,18 +198,7 @@ export async function quotePayment(input: {
   ) {
     throw new Error("KEEPERHUB_PAYMENT_WORKFLOW_ID is required for non-stable token payments so KeeperHub can run the swap before settlement.");
   }
-  const route = paymentRail === "keeperhub"
-    ? await createKeeperPaymentIntent({
-      payerAddress: input.swapper || "",
-      recipientAddress: customer.ownerWallet,
-      amount: pricing.totalUsd.toFixed(2),
-      amountUsd: pricing.totalUsd,
-      tokenAddress: paymentToken.native ? undefined : paymentToken.address,
-      settlementTokenAddress: settlementToken.address,
-      chainId,
-      reason: `SuperReferrals quote for ${pricing.durationSeconds} second render`
-    })
-    : paymentRail === "uniswap" && !sameToken && input.swapper
+  const conversionQuote = !sameToken && input.swapper
     ? await createUniswapQuote({
       type: "EXACT_OUTPUT",
       amount: settlementAmountAtomic,
@@ -213,6 +209,41 @@ export async function quotePayment(input: {
       swapper: input.swapper,
       nativeEthInput: paymentToken.native
     })
+    : undefined;
+  const paymentAmountAtomic = sameToken
+    ? settlementAmountAtomic
+    : resolvePaymentAmountAtomic({
+      conversionQuote,
+      paymentToken,
+      amountUsd: pricing.totalUsd
+    });
+  const paymentRecipientAddress = paymentRail === "keeperhub" && !sameToken
+    ? normalizeWallet(env("KEEPERHUB_PLATFORM_WALLET_ADDRESS", customer.ownerWallet))
+    : customer.ownerWallet;
+  const keeperIntent = paymentRail === "keeperhub"
+    ? await createKeeperPaymentIntent({
+      payerAddress: input.swapper || "",
+      recipientAddress: customer.ownerWallet,
+      amount: pricing.totalUsd.toFixed(2),
+      paymentAmountAtomic,
+      paymentRecipientAddress,
+      amountUsd: pricing.totalUsd,
+      tokenAddress: paymentToken.native ? undefined : paymentToken.address,
+      settlementTokenAddress: settlementToken.address,
+      chainId,
+      reason: `SuperReferrals quote for ${pricing.durationSeconds} second render`
+    })
+    : undefined;
+  const route = paymentRail === "keeperhub"
+    ? withKeeperConversionMetadata(keeperIntent, {
+      conversionQuote,
+      paymentAmountAtomic,
+      paymentRecipientAddress,
+      paymentTokenAddress: paymentToken.address,
+      settlementTokenAddress: settlementToken.address
+    })
+    : paymentRail === "uniswap" && !sameToken && conversionQuote
+    ? conversionQuote
     : {
       quote: {
         routing: sameToken ? "DIRECT_TOKEN" : "PENDING_SWAPPER",
@@ -242,6 +273,8 @@ export async function quotePayment(input: {
     settlementCurrency: settlementToken.symbol,
     paymentRail,
     paymentTokenAddress: paymentToken.address,
+    paymentAmountAtomic,
+    paymentRecipientAddress,
     settlementTokenAddress: settlementToken.address,
     settlementAmountAtomic,
     checkoutUrl: paymentRail === "uniswap"
@@ -252,6 +285,73 @@ export async function quotePayment(input: {
     createdAt: nowIso()
   };
   return mutateStore((mutableStore) => addQuote(mutableStore, quote));
+}
+
+function withKeeperConversionMetadata(
+  keeperIntent: unknown,
+  metadata: {
+    conversionQuote?: unknown;
+    paymentAmountAtomic: string;
+    paymentRecipientAddress: string;
+    paymentTokenAddress: string;
+    settlementTokenAddress: string;
+  }
+) {
+  return {
+    ...(isRecord(keeperIntent) ? keeperIntent : { keeperIntent }),
+    conversionQuote: metadata.conversionQuote,
+    paymentAmountAtomic: metadata.paymentAmountAtomic,
+    paymentRecipientAddress: metadata.paymentRecipientAddress,
+    paymentTokenAddress: metadata.paymentTokenAddress,
+    settlementTokenAddress: metadata.settlementTokenAddress
+  };
+}
+
+function resolvePaymentAmountAtomic({
+  conversionQuote,
+  paymentToken,
+  amountUsd
+}: {
+  conversionQuote?: unknown;
+  paymentToken: PaymentToken;
+  amountUsd: number;
+}) {
+  const quotedAmount = atomicAmountFromConversionQuote(conversionQuote);
+  if (quotedAmount) {
+    return quotedAmount;
+  }
+  if (!isProviderMock("UNISWAP") && !isMockMode()) {
+    throw new Error(`Unable to determine ${paymentToken.symbol} payment amount from Uniswap quote.`);
+  }
+  return fallbackPaymentAmountAtomic(paymentToken, amountUsd);
+}
+
+function atomicAmountFromConversionQuote(conversionQuote: unknown) {
+  const route = isRecord(conversionQuote) ? conversionQuote : undefined;
+  const quote = isRecord(route?.quote) ? route.quote : route;
+  if (!quote || firstString(quote, ["routing"]) === "MOCK") {
+    return "";
+  }
+  const input = isRecord(quote.input) ? quote.input : undefined;
+  const rawAmount =
+    firstString(input, ["amount", "amountIn", "amountInMaximum", "maximumAmountIn", "value"]) ||
+    firstString(quote, ["inputAmount", "amountIn", "amountInMaximum", "maximumAmountIn", "estimatedAmountIn"]);
+  if (!/^[0-9]+$/.test(rawAmount) || BigInt(rawAmount) <= 0n) {
+    return "";
+  }
+  return rawAmount;
+}
+
+function fallbackPaymentAmountAtomic(paymentToken: PaymentToken, amountUsd: number) {
+  if (["USDC", "USDT"].includes(paymentToken.symbol)) {
+    return amountToAtomic(amountUsd, paymentToken.decimals);
+  }
+  const priceUsd = Number(env(`${paymentToken.symbol}_USD_PRICE_HINT`)) ||
+    Number(env("KEEPERHUB_ETH_USD_PRICE_HINT")) ||
+    Number(env("ETH_USD_PRICE_HINT")) ||
+    3000;
+  const bufferedTokenAmount = (amountUsd / priceUsd) * 1.03;
+  return amountToAtomic(bufferedTokenAmount, paymentToken.decimals);
 }
 
 export async function createGeneration(input: {
@@ -303,6 +403,14 @@ export async function createGeneration(input: {
   }
   const expectedSettlementAmountAtomic = quote?.settlementAmountAtomic ||
     amountToAtomic(priced.totalUsd, expectedSettlementToken.decimals);
+  const expectedPaymentToken =
+    findPaymentToken(quote?.paymentTokenAddress || input.payment?.tokenAddress || "", paymentChainId) ||
+    expectedSettlementToken;
+  const expectedPaymentAmountAtomic = quote?.paymentAmountAtomic ||
+    (expectedPaymentToken.address.toLowerCase() === expectedSettlementToken.address.toLowerCase()
+      ? expectedSettlementAmountAtomic
+      : amountToAtomic(priced.totalUsd, expectedPaymentToken.decimals));
+  const expectedPaymentRecipient = quote?.paymentRecipientAddress || customer.ownerWallet;
   const paymentConfirmation = await resolvePaymentConfirmation({
     paymentRail,
     txHash: input.payment?.txHash,
@@ -310,9 +418,9 @@ export async function createGeneration(input: {
     expectedPayment: {
       chainId: paymentChainId,
       payerWallet: input.payment?.payerWallet || subAccount.wallet,
-      recipientWallet: customer.ownerWallet,
-      tokenAddress: expectedSettlementToken.address,
-      amountAtomic: expectedSettlementAmountAtomic
+      recipientWallet: expectedPaymentRecipient,
+      tokenAddress: expectedPaymentToken.address,
+      amountAtomic: expectedPaymentAmountAtomic
     }
   });
   const generationId = createId("gen");
@@ -322,8 +430,8 @@ export async function createGeneration(input: {
     payerWallet: input.payment?.payerWallet || subAccount.wallet,
     txHash: input.payment?.txHash || paymentConfirmation.txHash,
     quoteId: input.payment?.quoteId || quote?.id,
-    tokenAddress: expectedSettlementToken.address,
-    tokenSymbol: quote?.settlementCurrency || expectedSettlementToken.symbol,
+    tokenAddress: expectedPaymentToken.address,
+    tokenSymbol: quote?.paymentCurrency || input.payment?.tokenSymbol || expectedPaymentToken.symbol,
     paymentRail,
     chainId: paymentChainId,
     status: paymentConfirmation.status,

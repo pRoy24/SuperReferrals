@@ -113,6 +113,8 @@ export interface PaymentQuote {
   settlementCurrency?: PaymentCurrencySymbol;
   paymentRail?: PaymentRail;
   paymentTokenAddress?: string;
+  paymentAmountAtomic?: string;
+  paymentRecipientAddress?: string;
   settlementTokenAddress?: string;
   settlementAmountAtomic?: string;
   checkoutUrl?: string;

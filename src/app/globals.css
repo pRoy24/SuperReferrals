@@ -479,6 +479,23 @@ button.item {
   line-height: 1.4;
 }
 
+.render-status {
+  margin-top: 12px;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  background: rgba(239, 246, 255, 0.74);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.render-status.fail {
+  border-color: rgba(220, 38, 38, 0.2);
+  background: #fff1f2;
+}
+
+.render-status .subtle {
+  margin: 6px 0 8px;
+}
+
 .payment-summary {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

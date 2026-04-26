@@ -48,6 +48,13 @@ type GenerationFormState = {
   txHash: string;
 };
 
+type RenderFlowState = {
+  status: "idle" | "payment" | "confirming" | "starting" | "started" | "completed" | "failed";
+  message: string;
+  txHash?: string;
+  generationId?: string;
+};
+
 declare global {
   interface Window {
     ethereum?: EthereumProvider;
@@ -115,6 +122,7 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
   const [paymentRail, setPaymentRail] = useState<PaymentRail>("keeperhub");
   const [quote, setQuote] = useState<PaymentQuote | null>(null);
   const [autoPolling, setAutoPolling] = useState(false);
+  const [renderFlow, setRenderFlow] = useState<RenderFlowState>({ status: "idle", message: "" });
 
   async function load() {
     const response = await fetch("/api/bootstrap", { cache: "no-store" });
@@ -158,6 +166,9 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
   const userGenerations = connectedSubAccount
     ? store?.generations.filter((generation) => generation.subAccountId === connectedSubAccount.id) || []
     : [];
+  const trackedGeneration = renderFlow.generationId
+    ? userGenerations.find((generation) => generation.id === renderFlow.generationId)
+    : undefined;
   const pollingGenerationIds = useMemo(
     () => userGenerations
       .filter((generation) => ["QUEUED", "PROCESSING", "PAYMENT_CONFIRMED"].includes(generation.status))
@@ -281,6 +292,30 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
     };
   }, [pollingKey]);
 
+  useEffect(() => {
+    if (!trackedGeneration || !renderFlow.generationId) {
+      return;
+    }
+    if (trackedGeneration.status === "COMPLETED" && renderFlow.status !== "completed") {
+      updateRenderFlow({
+        status: "completed",
+        message: `Render task ${trackedGeneration.id} finished and was persisted${trackedGeneration.storage?.video?.uri ? " to 0G storage" : ""}.`,
+        txHash: trackedGeneration.payment.txHash,
+        generationId: trackedGeneration.id
+      });
+    }
+    if (trackedGeneration.status === "FAILED" && renderFlow.status !== "failed") {
+      updateRenderFlow({
+        status: "failed",
+        message: trackedGeneration.errorMessage
+          ? `Render task ${trackedGeneration.id} failed: ${trackedGeneration.errorMessage}`
+          : `Render task ${trackedGeneration.id} failed.`,
+        txHash: trackedGeneration.payment.txHash,
+        generationId: trackedGeneration.id
+      });
+    }
+  }, [trackedGeneration?.status, trackedGeneration?.updatedAt, renderFlow.generationId, renderFlow.status]);
+
   async function connectWallet() {
     setBusy("wallet");
     setMessage("");
@@ -392,6 +427,11 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
     }
   }
 
+  function updateRenderFlow(next: RenderFlowState) {
+    setRenderFlow(next);
+    setMessage(next.message);
+  }
+
   async function executePaymentForRender(activeQuote: PaymentQuote, account: SubAccount) {
     const manualTxHash = generationForm.txHash.trim();
     if (manualTxHash) {
@@ -412,11 +452,17 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
     const activeSettlementToken =
       findPaymentToken(activeQuote.settlementTokenAddress || "", transactionChain.id) || settlementToken;
     const sameToken = paymentToken.address.toLowerCase() === activeSettlementToken.address.toLowerCase();
+    const paymentAmountAtomic = activeQuote.paymentAmountAtomic || activeQuote.settlementAmountAtomic;
+    const paymentRecipient = activeQuote.paymentRecipientAddress || customer.ownerWallet;
 
     if (activeQuote.paymentRail === "uniswap" && !sameToken) {
-      setMessage("Requesting Uniswap swap transaction from the wallet.");
-      const swapTxHash = await requestUniswapSwap(window.ethereum, activeQuote, account.wallet);
-      setMessage(`Swap ${shortHash(swapTxHash)} submitted. Waiting for settlement tokens before transfer.`);
+      updateRenderFlow({ status: "payment", message: "Requesting Uniswap swap transaction from the wallet." });
+      const swapTxHash = await requestUniswapSwap(window.ethereum, activeQuote, account.wallet, transactionChain.name);
+      updateRenderFlow({
+        status: "confirming",
+        message: `Swap ${shortHash(swapTxHash)} submitted. Waiting for settlement tokens before transfer.`,
+        txHash: swapTxHash
+      });
       const swapReceipt = await waitForWalletReceipt(window.ethereum, swapTxHash, 120000);
       if (!swapReceipt) {
         throw new Error("Timed out waiting for the swap transaction to mine. Paste the final settlement transfer hash after the wallet confirms.");
@@ -424,15 +470,21 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
       if (!isSuccessfulReceipt(swapReceipt)) {
         throw new Error("Swap transaction reverted; render was not started.");
       }
-      setMessage("Swap mined. Requesting settlement transfer.");
+      updateRenderFlow({ status: "payment", message: "Swap mined. Requesting settlement transfer.", txHash: swapTxHash });
       const settlementTxHash = await requestTokenTransfer({
         provider: window.ethereum,
         from: account.wallet,
         token: activeSettlementToken,
         recipient: customer.ownerWallet,
-        amountAtomic: activeQuote.settlementAmountAtomic
+        amountAtomic: activeQuote.settlementAmountAtomic,
+        label: "Settlement transfer",
+        chainName: transactionChain.name
       });
-      setMessage(`Settlement transfer ${shortHash(settlementTxHash)} submitted. Waiting for confirmation.`);
+      updateRenderFlow({
+        status: "confirming",
+        message: `Settlement transfer ${shortHash(settlementTxHash)} submitted. Waiting for confirmation.`,
+        txHash: settlementTxHash
+      });
       const settlementReceipt = await waitForWalletReceipt(window.ethereum, settlementTxHash, 120000);
       if (!settlementReceipt) {
         throw new Error("Timed out waiting for the settlement transfer to mine. Paste the transfer hash once it confirms.");
@@ -443,19 +495,54 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
       return settlementTxHash;
     }
 
+    if (activeQuote.paymentRail === "keeperhub" && !sameToken) {
+      updateRenderFlow({
+        status: "payment",
+        message: `Requesting ${paymentToken.symbol} payment for KeeperHub ${activeSettlementToken.symbol} settlement.`
+      });
+      const keeperPaymentTxHash = await requestTokenTransfer({
+        provider: window.ethereum,
+        from: account.wallet,
+        token: paymentToken,
+        recipient: paymentRecipient,
+        amountAtomic: paymentAmountAtomic,
+        label: "KeeperHub payment",
+        chainName: transactionChain.name
+      });
+      updateRenderFlow({
+        status: "confirming",
+        message: `KeeperHub payment ${shortHash(keeperPaymentTxHash)} submitted. Waiting for confirmation before starting render.`,
+        txHash: keeperPaymentTxHash
+      });
+      const keeperPaymentReceipt = await waitForWalletReceipt(window.ethereum, keeperPaymentTxHash, 120000);
+      if (!keeperPaymentReceipt) {
+        throw new Error("Timed out waiting for the KeeperHub payment to mine. Paste the payment transaction hash once it confirms.");
+      }
+      if (!isSuccessfulReceipt(keeperPaymentReceipt)) {
+        throw new Error("KeeperHub payment reverted; render was not started.");
+      }
+      return keeperPaymentTxHash;
+    }
+
     if (!sameToken) {
       throw new Error("Selected payment token differs from the settlement token. Choose Uniswap for swap payment or pay directly with the settlement token.");
     }
 
-    setMessage(`Requesting ${activeSettlementToken.symbol} transfer from the wallet.`);
+    updateRenderFlow({ status: "payment", message: `Requesting ${activeSettlementToken.symbol} transfer from the wallet.` });
     const transferTxHash = await requestTokenTransfer({
       provider: window.ethereum,
       from: account.wallet,
       token: activeSettlementToken,
       recipient: customer.ownerWallet,
-      amountAtomic: activeQuote.settlementAmountAtomic
+      amountAtomic: activeQuote.settlementAmountAtomic,
+      label: "Payment transfer",
+      chainName: transactionChain.name
     });
-    setMessage(`Payment transfer ${shortHash(transferTxHash)} submitted. Waiting for confirmation.`);
+    updateRenderFlow({
+      status: "confirming",
+      message: `Payment transfer ${shortHash(transferTxHash)} submitted. Waiting for confirmation.`,
+      txHash: transferTxHash
+    });
     const transferReceipt = await waitForWalletReceipt(window.ethereum, transferTxHash, 120000);
     if (!transferReceipt) {
       throw new Error("Timed out waiting for the payment transfer to mine. Paste the transfer hash once it confirms.");
@@ -470,10 +557,16 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
     if (!customer) return;
     setBusy("generation");
     setMessage("");
+    setRenderFlow({ status: "payment", message: "Preparing payment before starting the render." });
     try {
       const account = await ensureWalletSubAccount();
       const activeQuote = quote || await requestQuote(account);
       const paymentTxHash = await executePaymentForRender(activeQuote, account);
+      updateRenderFlow({
+        status: "starting",
+        message: `Payment transaction ${shortHash(paymentTxHash)} confirmed. Starting video render task.`,
+        txHash: paymentTxHash
+      });
       const generationPayload = buildGenerationPayload(generationForm, account.referrerCode);
       const response = await fetch("/api/generations", {
         method: "POST",
@@ -487,8 +580,8 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
             txHash: paymentTxHash,
             payerWallet: account.wallet,
             amountUsd: activeQuote.totalUsd,
-            tokenAddress: activeQuote.settlementTokenAddress,
-            tokenSymbol: activeQuote.settlementCurrency,
+            tokenAddress: activeQuote.paymentTokenAddress,
+            tokenSymbol: activeQuote.paymentCurrency,
             paymentRail: activeQuote.paymentRail,
             chainId: activeQuote.chainId,
             route: activeQuote.route
@@ -498,14 +591,33 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
       const data = await assertOk(response);
       await load();
       const created = data.generation as Generation | undefined;
+      if (!created) {
+        throw new Error("Render API did not return a render task.");
+      }
       if (created?.status === "PAYMENT_PENDING") {
-        setMessage(`Payment is pending for render task ${created.id}. Confirm the payment before credits are granted.`);
+        updateRenderFlow({
+          status: "confirming",
+          message: `Payment is pending for render task ${created.id}. Confirm the payment before credits are granted.`,
+          txHash: paymentTxHash,
+          generationId: created.id
+        });
       } else {
         const grantedCredits = created?.payment.samsarCreditGrant?.creditsGranted;
-        setMessage(`Payment transaction ${shortHash(paymentTxHash)} accepted${grantedCredits ? `, ${grantedCredits} Samsar credits granted` : ""}, and render task ${created?.id || ""} started. Auto-polling is active until completion.`);
+        updateRenderFlow({
+          status: "started",
+          message: `Payment transaction ${shortHash(paymentTxHash)} accepted${grantedCredits ? `, ${grantedCredits} Samsar credits granted` : ""}, and render task ${created?.id || ""} started. Auto-polling is active until completion.`,
+          txHash: paymentTxHash,
+          generationId: created?.id
+        });
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Render request failed");
+      const errorMessage = formatErrorMessage(error, "Render request failed");
+      updateRenderFlow({
+        status: "failed",
+        message: errorMessage.includes("render was not started") || errorMessage.includes("Render was not started")
+          ? errorMessage
+          : `${errorMessage} Render was not started.`
+      });
     } finally {
       setBusy("");
     }
@@ -699,6 +811,7 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
               )}
               {autoPolling && <span className="badge ok">polling renders</span>}
             </div>
+            <RenderFlowNotice state={renderFlow} />
           </div>
 
           <div className="panel">
@@ -717,6 +830,31 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
         </section>
       </div>
     </main>
+  );
+}
+
+function RenderFlowNotice({ state }: { state: RenderFlowState }) {
+  if (state.status === "idle") {
+    return null;
+  }
+  const statusLabel =
+    state.status === "failed" ? "Render not started" :
+      state.status === "completed" ? "Render finished" :
+        state.status === "started" ? "Render started" :
+          state.status === "starting" ? "Starting render" :
+            state.status === "confirming" ? "Confirming payment" :
+              "Payment required";
+  const badgeClass = state.status === "failed" ? "badge fail" : state.status === "completed" || state.status === "started" ? "badge ok" : "badge";
+  return (
+    <div className={`render-status ${state.status === "failed" ? "fail" : ""}`}>
+      <div className="item-title">
+        <strong>{statusLabel}</strong>
+        <span className={badgeClass}>{state.status}</span>
+      </div>
+      <p className="subtle">{state.message}</p>
+      {state.txHash && <div className="mono">tx {state.txHash}</div>}
+      {state.generationId && <div className="mono">task {state.generationId}</div>}
+    </div>
   );
 }
 
@@ -796,6 +934,12 @@ function PaymentSummary({
         <div>
           <span className="subtle">Rail</span>
           <strong>{quote.paymentRail || "keeperhub"}</strong>
+        </div>
+      )}
+      {quote?.paymentAmountAtomic && (
+        <div>
+          <span className="subtle">Pay amount</span>
+          <strong>{formatAtomicAmount(BigInt(quote.paymentAmountAtomic), selectedPaymentToken.decimals)} {quote.paymentCurrency || selectedPaymentToken.symbol}</strong>
         </div>
       )}
       {quote && (
@@ -879,7 +1023,7 @@ function SelectField({
   );
 }
 
-async function requestUniswapSwap(provider: EthereumProvider, quote: PaymentQuote, wallet: string) {
+async function requestUniswapSwap(provider: EthereumProvider, quote: PaymentQuote, wallet: string, chainName: string) {
   const route = quote.route && typeof quote.route === "object" ? quote.route as Record<string, unknown> : {};
   const swapQuote = route.quote;
   if (!swapQuote || typeof swapQuote !== "object") {
@@ -907,15 +1051,22 @@ async function requestUniswapSwap(provider: EthereumProvider, quote: PaymentQuot
   if (!tx.to || !tx.data) {
     throw new Error("Uniswap swap response did not include a transaction.");
   }
-  return String(await provider.request({
-    method: "eth_sendTransaction",
-    params: [compactTransaction({
-      from: wallet,
-      to: String(tx.to),
-      data: String(tx.data),
-      value: toRpcQuantity(tx.value)
-    })]
-  }));
+  const transaction = compactTransaction({
+    from: wallet,
+    to: String(tx.to),
+    data: String(tx.data),
+    value: toRpcQuantity(tx.value)
+  });
+  const gas = await estimateWalletGas(provider, transaction, {
+    label: "Uniswap swap",
+    chainName,
+    recovery: "Try Pay with USDC on the direct rail, or use Open Uniswap and paste the final settlement transfer hash."
+  });
+  return sendWalletTransaction(provider, { ...transaction, gas }, {
+    label: "Uniswap swap",
+    chainName,
+    recovery: "Try Pay with USDC on the direct rail, or use Open Uniswap and paste the final settlement transfer hash."
+  });
 }
 
 async function requestTokenTransfer({
@@ -923,30 +1074,101 @@ async function requestTokenTransfer({
   from,
   token,
   recipient,
-  amountAtomic
+  amountAtomic,
+  label,
+  chainName
 }: {
   provider: EthereumProvider;
   from: string;
   token: PaymentToken;
   recipient: string;
   amountAtomic: string;
+  label: string;
+  chainName: string;
 }) {
+  await assertWalletBalance(provider, from, token, amountAtomic);
   const tx = token.native
     ? {
       from,
       to: recipient,
-      value: toRpcQuantity(amountAtomic)
+      value: toRpcQuantity(amountAtomic),
+      gas: "0x5208"
     }
     : {
       from,
       to: token.address,
       data: buildErc20TransferData(recipient, amountAtomic),
-      value: "0x0"
+      value: "0x0",
+      gas: "0x1d4c0"
     };
-  return String(await provider.request({
-    method: "eth_sendTransaction",
-    params: [tx]
-  }));
+  return sendWalletTransaction(provider, tx, { label, chainName });
+}
+
+async function sendWalletTransaction(
+  provider: EthereumProvider,
+  transaction: Record<string, unknown>,
+  context: { label: string; chainName: string; recovery?: string }
+) {
+  try {
+    return String(await provider.request({
+      method: "eth_sendTransaction",
+      params: [compactTransaction(transaction)]
+    }));
+  } catch (error) {
+    console.error(`${context.label} wallet transaction failed`, {
+      chainName: context.chainName,
+      to: transaction.to,
+      value: transaction.value,
+      gas: transaction.gas,
+      error
+    });
+    throw new Error(formatWalletTransactionError(error, context));
+  }
+}
+
+async function estimateWalletGas(
+  provider: EthereumProvider,
+  transaction: Record<string, unknown>,
+  context: { label: string; chainName: string; recovery?: string }
+) {
+  try {
+    const gas = BigInt(String(await provider.request({
+      method: "eth_estimateGas",
+      params: [compactTransaction(transaction)]
+    })));
+    const paddedGas = (gas * 12n) / 10n + 1n;
+    const maxReasonableSwapGas = 4_000_000n;
+    if (paddedGas > maxReasonableSwapGas) {
+      throw new Error(`${context.label} estimated an unusually high gas limit (${paddedGas.toString()}) on ${context.chainName}. No transaction was submitted and the render was not started. ${context.recovery || ""}`.trim());
+    }
+    return toRpcQuantity(paddedGas);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("unusually high gas limit")) {
+      throw error;
+    }
+    throw new Error(formatWalletTransactionError(error, context));
+  }
+}
+
+async function assertWalletBalance(provider: EthereumProvider, owner: string, token: PaymentToken, amountAtomic: string) {
+  const requiredAmount = BigInt(amountAtomic || "0");
+  const balance = token.native
+    ? BigInt(String(await provider.request({ method: "eth_getBalance", params: [owner, "latest"] })))
+    : await readErc20Balance(provider, token.address, owner);
+  if (balance < requiredAmount) {
+    throw new Error(`Insufficient ${token.symbol} balance for payment. Required ${formatAtomicAmount(requiredAmount, token.decimals)} ${token.symbol}, available ${formatAtomicAmount(balance, token.decimals)} ${token.symbol}. Render was not started.`);
+  }
+}
+
+async function readErc20Balance(provider: EthereumProvider, tokenAddress: string, owner: string) {
+  const result = await provider.request({
+    method: "eth_call",
+    params: [{
+      to: tokenAddress,
+      data: `0x70a08231${encodeAddressWord(owner)}`
+    }, "latest"]
+  });
+  return BigInt(String(result || "0x0"));
 }
 
 async function waitForWalletReceipt(provider: EthereumProvider, txHash: string, timeoutMs = 60000) {
@@ -965,9 +1187,28 @@ async function waitForWalletReceipt(provider: EthereumProvider, txHash: string, 
 }
 
 function buildErc20TransferData(recipient: string, amountAtomic: string) {
-  const cleanRecipient = recipient.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+  const cleanRecipient = encodeAddressWord(recipient);
   const cleanAmount = BigInt(amountAtomic || "0").toString(16).padStart(64, "0");
   return `0xa9059cbb${cleanRecipient}${cleanAmount}`;
+}
+
+function encodeAddressWord(address: string) {
+  const cleanAddress = address.toLowerCase().replace(/^0x/, "");
+  if (!/^[0-9a-f]{40}$/.test(cleanAddress)) {
+    throw new Error("Invalid wallet address");
+  }
+  return cleanAddress.padStart(64, "0");
+}
+
+function formatAtomicAmount(amount: bigint, decimals: number) {
+  const divisor = 10n ** BigInt(decimals);
+  const whole = amount / divisor;
+  const fraction = amount % divisor;
+  if (fraction === 0n) {
+    return whole.toString();
+  }
+  const fractionText = fraction.toString().padStart(decimals, "0").replace(/0+$/, "");
+  return `${whole.toString()}.${fractionText}`;
 }
 
 function toRpcQuantity(value: unknown) {
@@ -1040,6 +1281,32 @@ async function ensureWalletNetwork(provider: EthereumProvider, chain: Transactio
 
 function walletErrorCode(error: unknown) {
   return typeof error === "object" && error && "code" in error ? Number((error as { code?: unknown }).code) : 0;
+}
+
+function formatWalletTransactionError(
+  error: unknown,
+  context: { label: string; chainName: string; recovery?: string }
+) {
+  const message = formatErrorMessage(error, `${context.label} failed`);
+  if (/gas limit too high/i.test(message)) {
+    return `Wallet rejected ${context.label} before broadcast: gas limit too high on ${context.chainName}. No transaction hash was created and the render was not started. ${context.recovery || "Confirm the wallet is on the expected network and retry."}`.trim();
+  }
+  if (walletErrorCode(error) === 4001) {
+    return `${context.label} was rejected in the wallet. Render was not started.`;
+  }
+  return `${context.label} failed before the render task could start: ${message}`;
+}
+
+function formatErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "object" && error) {
+    const record = error as Record<string, unknown>;
+    const nested = record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : undefined;
+    return String(record.message || nested?.message || fallback);
+  }
+  return fallback;
 }
 
 async function assertOk(response: Response) {

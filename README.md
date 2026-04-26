@@ -46,6 +46,7 @@ Open `http://localhost:3000`.
 - `UNISWAP_API_KEY`: quote and swap transaction integration for user pay-with-any-token and agent price signals.
 - `KEEPERHUB_API_KEY`: user render payment, partial refund, and rollback execution.
 - `KEEPERHUB_PAYMENT_WORKFLOW_ID`: optional KeeperHub workflow for pay-with-any-token swaps before settlement. Required for live non-stable token payments such as ETH/WETH.
+- `KEEPERHUB_ETH_USD_PRICE_HINT`: local/mock fallback for ETH payment quotes; live non-stable payments should use Uniswap quote data plus the KeeperHub workflow.
 - `OG_PRIVATE_KEY`, `OG_RPC_URL`, `OG_STORAGE_INDEXER_RPC`: 0G Storage upload signer.
 - `INFT_CONTRACT_ADDRESS`, `INFT_MINTER_PRIVATE_KEY`: deployed INFT contract and minter.
 - `AXL_BASE_URL`: local Gensyn AXL node, default `http://localhost:9002`.
