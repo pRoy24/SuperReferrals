@@ -1,25 +1,196 @@
-import type { Customer, CustomerPricing, GenerationInput } from "./types";
+import type { Customer, CustomerPricing, GenerationInput, ModelPricingConfiguration, VideoAspectRatio, VideoModel } from "./types";
+import { getTransactionChainId, settlementTokenForCurrency } from "./payment-tokens";
+
+export const CREDIT_UNIT_USD = 0.01;
+export const DEFAULT_CUSTOMER_MULTIPLIER = 1.25;
+type PricingOwner = { pricing?: Partial<CustomerPricing> };
+
+export const defaultModelPricingConfigurations: ModelPricingConfiguration[] = [
+  {
+    id: "runwayml-9-16",
+    label: "RUNWAYML vertical",
+    videoModel: "RUNWAYML",
+    aspectRatio: "9:16",
+    baseCreditsPerSecond: 25,
+    maxSecondsPerImage: 10,
+    enabled: true
+  },
+  {
+    id: "runwayml-16-9",
+    label: "RUNWAYML landscape",
+    videoModel: "RUNWAYML",
+    aspectRatio: "16:9",
+    baseCreditsPerSecond: 25,
+    maxSecondsPerImage: 10,
+    enabled: true
+  },
+  {
+    id: "veo31-9-16",
+    label: "VEO 3.1 vertical",
+    videoModel: "VEO3.1I2V",
+    aspectRatio: "9:16",
+    baseCreditsPerSecond: 75,
+    maxSecondsPerImage: 8,
+    enabled: true
+  },
+  {
+    id: "veo31-16-9",
+    label: "VEO 3.1 landscape",
+    videoModel: "VEO3.1I2V",
+    aspectRatio: "16:9",
+    baseCreditsPerSecond: 75,
+    maxSecondsPerImage: 8,
+    enabled: true
+  },
+  {
+    id: "seedance-9-16",
+    label: "Seedance vertical",
+    videoModel: "SEEDANCEI2V",
+    aspectRatio: "9:16",
+    baseCreditsPerSecond: 75,
+    maxSecondsPerImage: 10,
+    enabled: true
+  },
+  {
+    id: "seedance-16-9",
+    label: "Seedance landscape",
+    videoModel: "SEEDANCEI2V",
+    aspectRatio: "16:9",
+    baseCreditsPerSecond: 75,
+    maxSecondsPerImage: 10,
+    enabled: true
+  },
+  {
+    id: "kling-9-16",
+    label: "Kling 3.0 vertical",
+    videoModel: "KLING3.0",
+    aspectRatio: "9:16",
+    baseCreditsPerSecond: 50,
+    maxSecondsPerImage: 10,
+    enabled: true
+  },
+  {
+    id: "kling-16-9",
+    label: "Kling 3.0 landscape",
+    videoModel: "KLING3.0",
+    aspectRatio: "16:9",
+    baseCreditsPerSecond: 50,
+    maxSecondsPerImage: 10,
+    enabled: true
+  }
+];
 
 export const defaultPricing: CustomerPricing = {
   currency: "USDC",
   pricePerImageUsd: 1.25,
+  pricePerSecondUsd: 0.31,
+  creditUnitUsd: CREDIT_UNIT_USD,
+  customerMultiplier: DEFAULT_CUSTOMER_MULTIPLIER,
+  modelConfigurations: defaultModelPricingConfigurations,
   platformFeeBps: 500,
   refundOnFailureBps: 5000,
-  chainId: 1
+  chainId: getTransactionChainId(),
+  settlementTokenAddress: settlementTokenForCurrency("USDC", getTransactionChainId())?.address
 };
 
 export function countImages(input: Pick<GenerationInput, "image_urls">) {
   return Array.isArray(input.image_urls) ? input.image_urls.length : 0;
 }
 
-export function priceGeneration(customer: Customer, imageCount: number) {
-  const amountUsd = roundMoney(customer.pricing.pricePerImageUsd * imageCount);
+export function priceGeneration(customer: Customer, imageCount: number, input?: Partial<GenerationInput>) {
+  const modelPricing = resolveModelPricing(customer, input?.video_model, input?.aspect_ratio);
+  const durationSeconds = estimateDurationSeconds(imageCount, modelPricing, input);
+  const details = resolveModelPriceDetails(customer, modelPricing);
+  const amountUsd = roundMoney(details.pricePerSecondUsd * durationSeconds);
   const platformFeeUsd = roundMoney((amountUsd * customer.pricing.platformFeeBps) / 10_000);
+  const perImageEquivalent = imageCount > 0 ? roundMoney(amountUsd / imageCount) : details.pricePerSecondUsd;
   return {
     amountUsd,
     platformFeeUsd,
-    totalUsd: roundMoney(amountUsd + platformFeeUsd)
+    totalUsd: roundMoney(amountUsd + platformFeeUsd),
+    pricePerImageUsd: perImageEquivalent,
+    pricePerSecondUsd: details.pricePerSecondUsd,
+    durationSeconds,
+    baseCreditsPerSecond: details.baseCreditsPerSecond,
+    creditUnitUsd: details.creditUnitUsd,
+    customerMultiplier: details.customerMultiplier,
+    pricingConfigurationId: modelPricing?.id
   };
+}
+
+export function getModelPricingConfigurations(customer?: Customer | null) {
+  const configured = customer?.pricing?.modelConfigurations;
+  if (!Array.isArray(configured) || configured.length === 0) {
+    return defaultModelPricingConfigurations;
+  }
+  const configuredById = new Map(configured.map((item) => [item.id, item]));
+  return defaultModelPricingConfigurations.map((fallback) => {
+    const configuredItem = configuredById.get(fallback.id);
+    if (!configuredItem) {
+      return fallback;
+    }
+    return {
+      ...fallback,
+      ...configuredItem,
+      baseCreditsPerSecond: positiveNumber(configuredItem.baseCreditsPerSecond, fallback.baseCreditsPerSecond),
+      maxSecondsPerImage: positiveNumber(configuredItem.maxSecondsPerImage, fallback.maxSecondsPerImage),
+      customPricePerSecondUsd: optionalPositiveNumber(configuredItem.customPricePerSecondUsd),
+      enabled: configuredItem.enabled !== false
+    };
+  });
+}
+
+export function resolveModelPricing(
+  customer: Customer,
+  videoModel?: VideoModel,
+  aspectRatio?: VideoAspectRatio
+) {
+  if (!videoModel || !aspectRatio) {
+    return null;
+  }
+  return getModelPricingConfigurations(customer).find((item) =>
+    item.enabled !== false &&
+    item.videoModel === videoModel &&
+    item.aspectRatio === aspectRatio
+  ) || null;
+}
+
+export function resolveModelPriceDetails(customer?: PricingOwner | null, modelPricing?: ModelPricingConfiguration | null) {
+  const creditUnitUsd = getCreditUnitUsd(customer);
+  const customerMultiplier = getCustomerMultiplier(customer);
+  const baseCreditsPerSecond = positiveNumber(modelPricing?.baseCreditsPerSecond, 75);
+  const basePricePerSecondUsd = roundRate(baseCreditsPerSecond * creditUnitUsd);
+  const customPricePerSecondUsd = optionalPositiveNumber(modelPricing?.customPricePerSecondUsd);
+  const pricePerSecondUsd = roundRate(customPricePerSecondUsd ?? basePricePerSecondUsd * customerMultiplier);
+  return {
+    baseCreditsPerSecond,
+    basePricePerSecondUsd,
+    creditUnitUsd,
+    customerMultiplier,
+    customPricePerSecondUsd,
+    pricePerSecondUsd
+  };
+}
+
+export function estimateDurationSeconds(
+  imageCount: number,
+  modelPricing?: ModelPricingConfiguration | null,
+  input?: Partial<GenerationInput>
+) {
+  const explicitDuration = positiveNumber(input?.duration_seconds, 0);
+  if (explicitDuration > 0) {
+    return roundDuration(explicitDuration);
+  }
+  const secondsPerImage = positiveNumber(modelPricing?.maxSecondsPerImage, 10);
+  return roundDuration(Math.max(0, imageCount) * secondsPerImage);
+}
+
+export function getCustomerMultiplier(customer?: PricingOwner | null) {
+  return positiveNumber(customer?.pricing?.customerMultiplier, DEFAULT_CUSTOMER_MULTIPLIER);
+}
+
+export function getCreditUnitUsd(customer?: PricingOwner | null) {
+  return positiveNumber(customer?.pricing?.creditUnitUsd, CREDIT_UNIT_USD);
 }
 
 export function refundAmountForFailure(customer: Customer, paidUsd: number) {
@@ -28,4 +199,22 @@ export function refundAmountForFailure(customer: Customer, paidUsd: number) {
 
 export function roundMoney(value: number) {
   return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+export function roundRate(value: number) {
+  return Math.round((Number(value) || 0) * 1000) / 1000;
+}
+
+function roundDuration(value: number) {
+  return Math.round((Number(value) || 0) * 10) / 10;
+}
+
+function positiveNumber(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function optionalPositiveNumber(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }

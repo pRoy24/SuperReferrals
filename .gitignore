@@ -7,6 +7,7 @@ node_modules/
 .env
 .env.*
 !.env.example
+!.env*.example
 
 # Next.js
 .next/
@@ -26,7 +27,7 @@ typechain/
 typechain-types/
 
 # Local app state and development caches
-.superreferrer/
+.superreferrals/
 .npm-cache/
 .turbo/
 .swc/

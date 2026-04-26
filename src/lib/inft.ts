@@ -1,21 +1,27 @@
 import { createPublicClient, createWalletClient, http, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { env, isMockMode } from "./env";
+import { env, isProviderMock } from "./env";
 import { createId, shortHash } from "./ids";
+import { getZeroGChainConfig } from "./zero-g-chain";
 
 const inftAbi = parseAbi([
   "function nextTokenId() view returns (uint256)",
   "function mintAgent(address to, string encryptedURI, bytes32 metadataHash, address agentWallet, string referrerCode) returns (uint256)"
 ]);
 
-const zeroGTestnet = {
-  id: 16601,
-  name: "0G Testnet",
-  nativeCurrency: { name: "0G", symbol: "OG", decimals: 18 },
-  rpcUrls: {
-    default: { http: [env("OG_RPC_URL", "https://evmrpc-testnet.0g.ai")] }
-  }
-} as const;
+function getINFTChain() {
+  const configuredChainId = Number(env("INFT_CHAIN_ID") || env("OG_CHAIN_ID") || "");
+  const chain = getZeroGChainConfig(Number.isFinite(configuredChainId) && configuredChainId > 0 ? configuredChainId : undefined);
+  const rpcUrl = env("INFT_RPC_URL") || chain.rpcUrl;
+  return {
+    id: chain.id,
+    name: chain.name,
+    nativeCurrency: chain.nativeCurrency,
+    rpcUrls: {
+      default: { http: [rpcUrl] }
+    }
+  } as const;
+}
 
 export async function mintINFT({
   ownerWallet,
@@ -32,9 +38,10 @@ export async function mintINFT({
 }) {
   const contractAddress = env("INFT_CONTRACT_ADDRESS") as `0x${string}`;
   const privateKey = (env("INFT_MINTER_PRIVATE_KEY") || env("OG_PRIVATE_KEY")) as `0x${string}`;
-  const rpcUrl = env("OG_RPC_URL", "https://evmrpc-testnet.0g.ai");
+  const chain = getINFTChain();
+  const rpcUrl = chain.rpcUrls.default.http[0];
 
-  if (isMockMode() || !contractAddress || !privateKey) {
+  if (isProviderMock("INFT") || !contractAddress || !privateKey) {
     return {
       tokenId: String(BigInt(`0x${shortHash(`${ownerWallet}:${metadataUri}`)}`)),
       contractAddress: contractAddress || "0x0000000000000000000000000000000000000000",
@@ -45,12 +52,12 @@ export async function mintINFT({
 
   const account = privateKeyToAccount(privateKey);
   const publicClient = createPublicClient({
-    chain: zeroGTestnet,
+    chain,
     transport: http(rpcUrl)
   });
   const walletClient = createWalletClient({
     account,
-    chain: zeroGTestnet,
+    chain,
     transport: http(rpcUrl)
   });
   const nextTokenId = await publicClient.readContract({

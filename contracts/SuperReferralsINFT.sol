@@ -6,7 +6,7 @@ import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract SuperReferrerINFT is ERC721URIStorage, Ownable, ReentrancyGuard {
+contract SuperReferralsINFT is ERC721URIStorage, Ownable, ReentrancyGuard {
     struct AgentData {
         string encryptedURI;
         bytes32 metadataHash;
@@ -28,7 +28,7 @@ contract SuperReferrerINFT is ERC721URIStorage, Ownable, ReentrancyGuard {
     event AgentMetadataUpdated(uint256 indexed tokenId, bytes32 metadataHash, string encryptedURI);
     event UsageAuthorized(uint256 indexed tokenId, address indexed executor, bytes permissions);
 
-    constructor(address initialOwner) ERC721("SuperReferrer Video INFT", "SRINFT") Ownable(initialOwner) {}
+    constructor(address initialOwner) ERC721("SuperReferrals Video INFT", "SRINFT") Ownable(initialOwner) {}
 
     function mintAgent(
         address to,

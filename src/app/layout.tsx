@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SuperReferrer",
+  title: "SuperReferrals",
   description: "On-chain Samsar image-list-to-video referrer adapter"
 };
 

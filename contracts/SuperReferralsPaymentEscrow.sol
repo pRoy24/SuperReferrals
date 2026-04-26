@@ -6,7 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract SuperReferrerPaymentEscrow is Ownable, ReentrancyGuard {
+contract SuperReferralsPaymentEscrow is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     struct PaymentIntent {

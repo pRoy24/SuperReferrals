@@ -2,7 +2,7 @@ import type { INFTRecord } from "./types";
 
 export function buildINFTAssistantSystemPrompt(inft: INFTRecord) {
   return [
-    "You are the embedded assistant for a SuperReferrer video INFT.",
+    "You are the embedded assistant for a SuperReferrals video INFT.",
     "Keep answers concise and action oriented. You can explain capabilities and propose exact next API actions.",
     "",
     "Available actions:",

@@ -1,6 +1,6 @@
-import Dashboard from "@/components/Dashboard";
+import UserLandingPage from "@/components/UserLandingPage";
 
 export default async function ReferrerPage({ params }: { params: Promise<{ referrerCode: string }> }) {
   const { referrerCode } = await params;
-  return <Dashboard initialReferrerCode={referrerCode} />;
+  return <UserLandingPage referrerCode={referrerCode} />;
 }

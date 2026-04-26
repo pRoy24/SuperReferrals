@@ -2,60 +2,64 @@
 
 import {
   Bot,
-  Boxes,
   CircleDollarSign,
   Database,
   ExternalLink,
   KeyRound,
-  Link2,
-  Play,
+  Network,
+  Radio,
   RefreshCw,
   Save,
   ShieldCheck,
   Sparkles,
-  UserPlus,
-  Wallet
+  Undo2,
+  Users,
+  Zap
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { Customer, Generation, INFTRecord, PaymentQuote, SubAccount, SuperReferrerStore, VideoModel } from "@/lib/types";
+import { getPaymentTokens, getTransactionChainConfig, settlementTokenForCurrency } from "@/lib/payment-tokens";
+import {
+  CREDIT_UNIT_USD,
+  DEFAULT_CUSTOMER_MULTIPLIER,
+  defaultModelPricingConfigurations,
+  getCreditUnitUsd,
+  getCustomerMultiplier,
+  getModelPricingConfigurations,
+  resolveModelPriceDetails
+} from "@/lib/pricing";
+import type { ModelPricingConfiguration, PaymentCurrencySymbol, SuperReferralsStore } from "@/lib/types";
 
-const starterImages = [
-  "https://images.unsplash.com/photo-1542291026-7eec264c27ff",
-  "https://images.unsplash.com/photo-1460353581641-37baddab0fa2",
-  "https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77"
-].join("\n");
+const processorCreditAmounts = [10, 25, 50, 100];
 
-export default function Dashboard({ initialReferrerCode }: { initialReferrerCode?: string }) {
-  const [store, setStore] = useState<SuperReferrerStore | null>(null);
+export default function Dashboard() {
+  const [store, setStore] = useState<SuperReferralsStore | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
+  const [processorAmountUsd, setProcessorAmountUsd] = useState(25);
+  const [agentObjective, setAgentObjective] = useState(
+    "Let the Agent Town plan a referrer video workflow, price it, route settlement, and publish all 0G receipts."
+  );
+  const [agentPayload, setAgentPayload] = useState(JSON.stringify({
+    image_urls: [
+      "https://images.unsplash.com/photo-1542291026-7eec264c27ff",
+      "https://images.unsplash.com/photo-1460353581641-37baddab0fa2"
+    ],
+    video_model: "RUNWAYML",
+    aspect_ratio: "9:16",
+    prompt: "Create a short launch video with a crisp CTA outro."
+  }, null, 2));
   const [customerForm, setCustomerForm] = useState({
     id: "cus_demo",
     name: "Demo Customer",
     ownerWallet: "0x1111111111111111111111111111111111111111",
-    pricePerImageUsd: 1.25,
     platformFeeBps: 500,
     refundOnFailureBps: 5000,
+    customerMultiplier: DEFAULT_CUSTOMER_MULTIPLIER,
+    creditUnitUsd: CREDIT_UNIT_USD,
     referrerBaseUrl: "http://localhost:3000",
-    ensName: "demo.eth"
+    ensName: "demo.eth",
+    modelConfigurations: defaultModelPricingConfigurations
   });
-  const [subForm, setSubForm] = useState({
-    wallet: "0x2222222222222222222222222222222222222222",
-    email: "creator@example.com",
-    username: "demo-creator"
-  });
-  const [generationForm, setGenerationForm] = useState({
-    imageUrls: starterImages,
-    metadata: JSON.stringify({ title: "Runner launch", product: "Road shoe", campaign: "spring-drop" }, null, 2),
-    prompt: "Create a premium 12 second product teaser with clean motion and a clear final CTA.",
-    videoModel: "RUNWAYML" as VideoModel,
-    aspectRatio: "9:16" as "16:9" | "9:16",
-    language: "en",
-    ctaUrl: "https://example.com/buy",
-    txHash: ""
-  });
-  const [selectedSubAccountId, setSelectedSubAccountId] = useState("sub_demo");
-  const [quote, setQuote] = useState<PaymentQuote | null>(null);
 
   async function load() {
     const response = await fetch("/api/bootstrap", { cache: "no-store" });
@@ -70,40 +74,52 @@ export default function Dashboard({ initialReferrerCode }: { initialReferrerCode
   useEffect(() => {
     if (!store) return;
     const customer = store.customers[0];
-    if (customer) {
-      setCustomerForm({
-        id: customer.id,
-        name: customer.name,
-        ownerWallet: customer.ownerWallet,
-        pricePerImageUsd: customer.pricing.pricePerImageUsd,
-        platformFeeBps: customer.pricing.platformFeeBps,
-        refundOnFailureBps: customer.pricing.refundOnFailureBps,
-        referrerBaseUrl: customer.referrerBaseUrl,
-        ensName: customer.ensName || ""
-      });
-    }
-    const matchingReferrer = initialReferrerCode
-      ? store.subAccounts.find((account) => account.referrerCode === initialReferrerCode)
-      : null;
-    const selected = matchingReferrer || store.subAccounts[0];
-    if (selected) {
-      setSelectedSubAccountId(selected.id);
-    }
-  }, [store, initialReferrerCode]);
+    if (!customer) return;
+    setCustomerForm({
+      id: customer.id,
+      name: customer.name,
+      ownerWallet: customer.ownerWallet,
+      platformFeeBps: customer.pricing.platformFeeBps,
+      refundOnFailureBps: customer.pricing.refundOnFailureBps,
+      customerMultiplier: getCustomerMultiplier(customer),
+      creditUnitUsd: getCreditUnitUsd(customer),
+      referrerBaseUrl: customer.referrerBaseUrl,
+      ensName: customer.ensName || "",
+      modelConfigurations: getModelPricingConfigurations(customer)
+    });
+  }, [store]);
 
   const customer = store?.customers[0];
-  const selectedSubAccount = useMemo(
-    () => store?.subAccounts.find((account) => account.id === selectedSubAccountId) || store?.subAccounts[0],
-    [store, selectedSubAccountId]
-  );
-  const imageCount = parseImageUrls(generationForm.imageUrls).length;
-  const completedInfts = store?.infts || [];
-  const processingCount = store?.generations.filter((item) => ["QUEUED", "PROCESSING"].includes(item.status)).length || 0;
+  const activeJobs = store?.generations.filter((item) => ["QUEUED", "PROCESSING"].includes(item.status)).length || 0;
+  const completedJobs = store?.generations.filter((item) => item.status === "COMPLETED").length || 0;
+  const agentJobs = store?.agentJobs || [];
+  const latestAgentJob = agentJobs[0];
+  const transactionChain = getTransactionChainConfig();
+  const settlementToken = settlementTokenForCurrency("USDC", transactionChain.id) || getPaymentTokens(transactionChain.id)[0];
+  const customerLanding = useMemo(() => {
+    const seedAccount = customer ? store?.subAccounts.find((account) => account.customerId === customer.id) : null;
+    return seedAccount ? `${customer?.referrerBaseUrl}/r/${seedAccount.referrerCode}` : "";
+  }, [customer, store?.subAccounts]);
+
+  function updatePricingRow(id: string, patch: Partial<ModelPricingConfiguration>) {
+    setCustomerForm((current) => ({
+      ...current,
+      modelConfigurations: current.modelConfigurations.map((item) =>
+        item.id === id ? { ...item, ...patch } : item
+      )
+    }));
+  }
 
   async function saveCustomer() {
     setBusy("customer");
     setMessage("");
     try {
+      const enabledPricing = customerForm.modelConfigurations.find((item) => item.enabled) ||
+        customerForm.modelConfigurations[0];
+      const enabledDetails = resolveModelPriceDetails(
+        { pricing: { customerMultiplier: customerForm.customerMultiplier, creditUnitUsd: customerForm.creditUnitUsd } },
+        enabledPricing
+      );
       const response = await fetch("/api/customers", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -114,18 +130,30 @@ export default function Dashboard({ initialReferrerCode }: { initialReferrerCode
           referrerBaseUrl: customerForm.referrerBaseUrl,
           ensName: customerForm.ensName,
           pricing: {
-            currency: "USDC",
-            pricePerImageUsd: Number(customerForm.pricePerImageUsd),
+            currency: "USDC" as PaymentCurrencySymbol,
+            pricePerImageUsd: Number(enabledDetails.pricePerSecondUsd * (enabledPricing?.maxSecondsPerImage || 1)),
+            pricePerSecondUsd: enabledDetails.pricePerSecondUsd,
+            customerMultiplier: Number(customerForm.customerMultiplier) || DEFAULT_CUSTOMER_MULTIPLIER,
+            creditUnitUsd: Number(customerForm.creditUnitUsd) || CREDIT_UNIT_USD,
+            modelConfigurations: customerForm.modelConfigurations.map((item) => ({
+              ...item,
+              baseCreditsPerSecond: Number(item.baseCreditsPerSecond) || 0,
+              maxSecondsPerImage: Number(item.maxSecondsPerImage) || 0,
+              basePricePerSecondUsd: Number(item.baseCreditsPerSecond || 0) * Number(customerForm.creditUnitUsd || CREDIT_UNIT_USD),
+              customPricePerSecondUsd: Number(item.customPricePerSecondUsd) > 0 ? Number(item.customPricePerSecondUsd) : undefined,
+              enabled: item.enabled !== false
+            })),
             platformFeeBps: Number(customerForm.platformFeeBps),
             refundOnFailureBps: Number(customerForm.refundOnFailureBps),
-            chainId: 1
+            chainId: settlementToken.chainId,
+            settlementTokenAddress: settlementToken.address
           },
           subscription: { status: "active" }
         })
       });
       await assertOk(response);
       await load();
-      setMessage("Customer configuration saved.");
+      setMessage("Customer store configuration saved.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Save failed");
     } finally {
@@ -133,116 +161,83 @@ export default function Dashboard({ initialReferrerCode }: { initialReferrerCode
     }
   }
 
-  async function createSubAccount() {
-    if (!customer) return;
-    setBusy("sub");
-    setMessage("");
-    try {
-      const response = await fetch("/api/subaccounts", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          customerId: customer.id,
-          ...subForm
-        })
-      });
-      const data = await assertOk(response);
-      setSelectedSubAccountId(data.account.id);
-      await load();
-      setMessage("Sub-account created and mapped to Samsar external-user scope.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Sub-account failed");
-    } finally {
-      setBusy("");
+  async function addProcessorCredits(amountUsd = processorAmountUsd) {
+    const parsedAmountUsd = Number(amountUsd);
+    if (!Number.isFinite(parsedAmountUsd) || parsedAmountUsd <= 0) {
+      setMessage("Enter a valid dollar amount for processor credits.");
+      return;
     }
-  }
 
-  async function createQuote() {
-    if (!customer) return;
-    setBusy("quote");
+    setBusy("processor-credits");
     setMessage("");
     try {
-      const response = await fetch("/api/payments/quote", {
+      const response = await fetch("/api/processor/credits/checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          customerId: customer.id,
-          subAccountId: selectedSubAccount?.id,
-          imageCount,
-          swapper: selectedSubAccount?.wallet
-        })
-      });
-      const data = await assertOk(response);
-      setQuote(data.quote);
-      await load();
-      setMessage("Payment quote created.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Quote failed");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function runGeneration() {
-    if (!customer || !selectedSubAccount) return;
-    setBusy("generation");
-    setMessage("");
-    try {
-      const metadata = parseJsonObject(generationForm.metadata);
-      const response = await fetch("/api/generations", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          customerId: customer.id,
-          subAccountId: selectedSubAccount.id,
-          generation: {
-            image_urls: parseImageUrls(generationForm.imageUrls),
-            metadata,
-            prompt: generationForm.prompt,
-            video_model: generationForm.videoModel,
-            aspect_ratio: generationForm.aspectRatio,
-            language: generationForm.language,
-            enable_subtitles: true,
-            generate_outro_image: Boolean(generationForm.ctaUrl),
-            cta_url: generationForm.ctaUrl,
-            cta_text_top: "Scan to buy",
-            cta_text_bottom: selectedSubAccount.referrerCode
-          },
-          payment: {
-            quoteId: quote?.id,
-            txHash: generationForm.txHash || undefined,
-            payerWallet: selectedSubAccount.wallet,
-            amountUsd: quote?.totalUsd
+          amountCents: Math.round(parsedAmountUsd * 100),
+          metadata: {
+            superreferralsCustomerId: customer?.id || customerForm.id,
+            superreferralsCustomerName: customer?.name || customerForm.name
           }
         })
       });
       const data = await assertOk(response);
-      await load();
-      setMessage(`Generation ${data.generation?.id || ""} queued.`);
+      if (!data.checkout?.url) {
+        throw new Error("Processor checkout did not return a URL");
+      }
+      window.location.href = data.checkout.url;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Generation failed");
+      setMessage(error instanceof Error ? error.message : "Unable to start processor checkout");
     } finally {
       setBusy("");
     }
   }
 
-  async function syncGeneration(id: string) {
-    setBusy(id);
+  async function runAgentTown() {
+    setBusy("agent-town");
     setMessage("");
     try {
-      const response = await fetch(`/api/generations/${id}/sync`, { method: "POST" });
+      const response = await fetch("/api/agents", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          customerId: customer?.id || customerForm.id,
+          objective: agentObjective,
+          payload: parseJsonObject(agentPayload)
+        })
+      });
+      const data = await assertOk(response);
+      await load();
+      setMessage(`Agent Town job ${data.job?.id || ""} completed with full 0G receipts.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Agent Town run failed");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function rollbackAgentJob(id: string) {
+    setBusy(`rollback-${id}`);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/agents/${id}/rollback`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: "Operator requested rollback from customer console" })
+      });
       await assertOk(response);
       await load();
-      setMessage("Generation synced.");
+      setMessage(`Agent job ${id} rollback recorded.`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Sync failed");
+      setMessage(error instanceof Error ? error.message : "Rollback failed");
     } finally {
       setBusy("");
     }
   }
 
   if (!store) {
-    return <main className="main">Loading SuperReferrer...</main>;
+    return <main className="main loading-main">Loading SuperReferrals customer console...</main>;
   }
 
   return (
@@ -250,27 +245,27 @@ export default function Dashboard({ initialReferrerCode }: { initialReferrerCode
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark"><Sparkles size={18} /></span>
-          SuperReferrer
+          SuperReferrals
         </div>
         <p className="sidebar-copy">
-          On-chain wrapper for Samsar image-list-to-video, 0G persistence, INFT minting, and referrer-driven sub-accounts.
+          Customer console for Samsar Processor credits, store setup, per-second USDC pricing, and render operations.
         </p>
         <nav className="nav-list">
-          <span className="nav-item"><ShieldCheck size={16} /> Customer controls</span>
-          <span className="nav-item"><UserPlus size={16} /> Sub-account billing</span>
-          <span className="nav-item"><CircleDollarSign size={16} /> Uniswap payment</span>
-          <span className="nav-item"><Database size={16} /> 0G storage</span>
-          <span className="nav-item"><Bot size={16} /> INFT agents</span>
+          <a className="nav-item" href="#processor-credits"><CircleDollarSign size={16} /> Processor credits</a>
+          <a className="nav-item" href="#store-setup"><KeyRound size={16} /> Store setup</a>
+          <a className="nav-item" href="#usdc-pricing"><ShieldCheck size={16} /> USDC pricing</a>
+          <a className="nav-item" href="#render-history"><Bot size={16} /> Render history</a>
+          <a className="nav-item" href="#agent-town"><Network size={16} /> Agent Town</a>
         </nav>
       </aside>
 
       <main className="main">
-        <div className="topbar">
+        <div className="topbar hero-band">
           <div>
-            <div className="eyebrow">Operational Console</div>
-            <h1>Image-list video service with on-chain settlement</h1>
+            <div className="eyebrow">Customer Console</div>
+            <h1>Configure your customer store</h1>
             <p className="subtle">
-              Configure a customer instance, issue sub-accounts, price per image, run Samsar generation, and mint the resulting video as a 0G-backed INFT.
+              Register or top up your Samsar One processor account, set public per-second render prices in USDC, and share your customer landing page.
             </p>
           </div>
           <button className="btn" onClick={() => load()} title="Refresh data">
@@ -281,23 +276,60 @@ export default function Dashboard({ initialReferrerCode }: { initialReferrerCode
         {message && <p className="notice">{message}</p>}
 
         <section className="stat-row">
-          <div className="stat"><strong>{store.customers.length}</strong><span className="subtle">customers</span></div>
-          <div className="stat"><strong>{store.subAccounts.length}</strong><span className="subtle">sub-accounts</span></div>
-          <div className="stat"><strong>{processingCount}</strong><span className="subtle">active jobs</span></div>
-          <div className="stat"><strong>{completedInfts.length}</strong><span className="subtle">INFTs minted</span></div>
+          <div className="stat"><strong>{store.subAccounts.length}</strong><span className="subtle">wallet users</span></div>
+          <div className="stat"><strong>{store.generations.length}</strong><span className="subtle">render tasks</span></div>
+          <div className="stat"><strong>{activeJobs}</strong><span className="subtle">active jobs</span></div>
+          <div className="stat"><strong>{completedJobs}</strong><span className="subtle">completed jobs</span></div>
+          <div className="stat"><strong>{store.agents.length}</strong><span className="subtle">agent citizens</span></div>
+          <div className="stat"><strong>{agentJobs.length}</strong><span className="subtle">agent jobs</span></div>
         </section>
 
         <div className="grid">
           <section className="stack">
-            <div className="panel">
+            <div className="panel panel-strong" id="processor-credits">
               <div className="panel-header">
-                <h2>Customer Instance</h2>
+                <h2>Samsar Processor Credits</h2>
+                <CircleDollarSign size={18} />
+              </div>
+              <div className="amount-grid">
+                {processorCreditAmounts.map((amount) => (
+                  <button
+                    className={`amount-choice ${processorAmountUsd === amount ? "active" : ""}`}
+                    key={amount}
+                    onClick={() => setProcessorAmountUsd(amount)}
+                  >
+                    <span>${amount}</span>
+                    <strong>{amount * 100} credits</strong>
+                  </button>
+                ))}
+              </div>
+              <div className="form-grid processor-checkout">
+                <TextField
+                  label="Custom amount USD"
+                  type="number"
+                  value={processorAmountUsd}
+                  onChange={(amount) => setProcessorAmountUsd(Number(amount))}
+                />
+                <div className="field">
+                  <label>Credits after payment</label>
+                  <div className="readonly-value">{Math.max(0, Math.round(Number(processorAmountUsd || 0) * 100))}</div>
+                </div>
+              </div>
+              <div className="button-row">
+                <button className="btn primary" onClick={() => addProcessorCredits()} disabled={busy === "processor-credits"}>
+                  <CircleDollarSign size={16} /> Add
+                </button>
+              </div>
+            </div>
+
+            <div className="panel" id="store-setup">
+              <div className="panel-header">
+                <h2>Store Setup</h2>
                 <KeyRound size={18} />
               </div>
               <div className="form-grid">
-                <TextField label="Customer name" value={customerForm.name} onChange={(name) => setCustomerForm({ ...customerForm, name })} />
+                <TextField label="Store name" value={customerForm.name} onChange={(name) => setCustomerForm({ ...customerForm, name })} />
                 <TextField label="Owner wallet" value={customerForm.ownerWallet} onChange={(ownerWallet) => setCustomerForm({ ...customerForm, ownerWallet })} />
-                <TextField label="Price per image USD" type="number" value={customerForm.pricePerImageUsd} onChange={(pricePerImageUsd) => setCustomerForm({ ...customerForm, pricePerImageUsd: Number(pricePerImageUsd) })} />
                 <TextField label="Platform fee bps" type="number" value={customerForm.platformFeeBps} onChange={(platformFeeBps) => setCustomerForm({ ...customerForm, platformFeeBps: Number(platformFeeBps) })} />
                 <TextField label="Failure refund bps" type="number" value={customerForm.refundOnFailureBps} onChange={(refundOnFailureBps) => setCustomerForm({ ...customerForm, refundOnFailureBps: Number(refundOnFailureBps) })} />
                 <TextField label="ENS name" value={customerForm.ensName} onChange={(ensName) => setCustomerForm({ ...customerForm, ensName })} />
@@ -305,150 +337,236 @@ export default function Dashboard({ initialReferrerCode }: { initialReferrerCode
               </div>
               <div className="button-row">
                 <button className="btn primary" onClick={saveCustomer} disabled={busy === "customer"}>
-                  <Save size={16} /> Save customer
+                  <Save size={16} /> Save setup
                 </button>
-              </div>
-            </div>
-
-            <div className="panel">
-              <div className="panel-header">
-                <h2>Sub-Accounts</h2>
-                <Wallet size={18} />
-              </div>
-              <div className="form-grid">
-                <TextField label="User wallet" value={subForm.wallet} onChange={(wallet) => setSubForm({ ...subForm, wallet })} />
-                <TextField label="Email" value={subForm.email} onChange={(email) => setSubForm({ ...subForm, email })} />
-                <TextField label="Username" value={subForm.username} onChange={(username) => setSubForm({ ...subForm, username })} full />
-              </div>
-              <div className="button-row">
-                <button className="btn primary" onClick={createSubAccount} disabled={busy === "sub"}>
-                  <UserPlus size={16} /> Create sub-account
-                </button>
-              </div>
-              <div className="list" style={{ marginTop: 14 }}>
-                {store.subAccounts.map((account) => (
-                  <button
-                    className="item"
-                    key={account.id}
-                    onClick={() => setSelectedSubAccountId(account.id)}
-                    style={{ textAlign: "left", borderColor: selectedSubAccountId === account.id ? "var(--accent)" : undefined }}
-                  >
-                    <div className="item-title">
-                      <strong>{account.username || account.email || account.id}</strong>
-                      <span className="badge">{account.referrerCode}</span>
-                    </div>
-                    <div className="mono">{account.wallet}</div>
-                    <div className="subtle">{customer?.referrerBaseUrl}/r/{account.referrerCode}</div>
-                  </button>
-                ))}
+                {customerLanding && <a className="btn" href={customerLanding}><ExternalLink size={16} /> Open user landing</a>}
               </div>
             </div>
           </section>
 
           <section className="stack">
-            <div className="panel">
+            <div className="panel panel-strong" id="usdc-pricing">
               <div className="panel-header">
-                <h2>Generate Marketing Video</h2>
-                <Play size={18} />
+                <h2>Public Render Pricing</h2>
+                <Database size={18} />
               </div>
-              {initialReferrerCode && <p className="notice">Referrer route active: {initialReferrerCode}</p>}
               <div className="form-grid">
-                <div className="field full">
-                  <label>Image URL list</label>
-                  <textarea value={generationForm.imageUrls} onChange={(event) => setGenerationForm({ ...generationForm, imageUrls: event.target.value })} />
-                </div>
-                <div className="field full">
-                  <label>JSON payload metadata</label>
-                  <textarea value={generationForm.metadata} onChange={(event) => setGenerationForm({ ...generationForm, metadata: event.target.value })} />
-                </div>
-                <div className="field full">
-                  <label>Prompt</label>
-                  <textarea value={generationForm.prompt} onChange={(event) => setGenerationForm({ ...generationForm, prompt: event.target.value })} />
-                </div>
-                <SelectField
-                  label="Video model"
-                  value={generationForm.videoModel}
-                  options={["RUNWAYML", "VEO3.1I2V", "SEEDANCEI2V", "KLING3.0"]}
-                  onChange={(videoModel) => setGenerationForm({ ...generationForm, videoModel: videoModel as VideoModel })}
+                <TextField
+                  label="Global user multiplier"
+                  type="number"
+                  value={customerForm.customerMultiplier}
+                  onChange={(customerMultiplier) => setCustomerForm({ ...customerForm, customerMultiplier: Number(customerMultiplier) })}
                 />
-                <SelectField
-                  label="Aspect ratio"
-                  value={generationForm.aspectRatio}
-                  options={["9:16", "16:9"]}
-                  onChange={(aspectRatio) => setGenerationForm({ ...generationForm, aspectRatio: aspectRatio as "16:9" | "9:16" })}
-                />
-                <TextField label="Language" value={generationForm.language} onChange={(language) => setGenerationForm({ ...generationForm, language })} />
-                <TextField label="CTA URL" value={generationForm.ctaUrl} onChange={(ctaUrl) => setGenerationForm({ ...generationForm, ctaUrl })} />
-                <TextField label="Payment tx hash" value={generationForm.txHash} onChange={(txHash) => setGenerationForm({ ...generationForm, txHash })} full />
+                <div className="field">
+                  <label>Processor credit value</label>
+                  <div className="readonly-value">{customerForm.creditUnitUsd.toFixed(3)} USDC / credit</div>
+                </div>
+              </div>
+              <div className="pricing-table">
+                {customerForm.modelConfigurations.map((config) => {
+                  const details = resolveModelPriceDetails(
+                    { pricing: { customerMultiplier: customerForm.customerMultiplier, creditUnitUsd: customerForm.creditUnitUsd } },
+                    config
+                  );
+                  return (
+                    <div className="pricing-row" key={config.id}>
+                      <div>
+                        <strong>{config.label}</strong>
+                        <p className="subtle">{config.videoModel} · {config.aspectRatio} · up to {config.maxSecondsPerImage}s/image</p>
+                      </div>
+                      <div className="readonly-value pricing-readonly">
+                        <span>{details.baseCreditsPerSecond}</span>
+                        <small>credits/sec</small>
+                      </div>
+                      <div className="readonly-value pricing-readonly">
+                        <span>{details.basePricePerSecondUsd.toFixed(2)}</span>
+                        <small>base USDC/sec</small>
+                      </div>
+                      <TextField
+                        label="Custom USDC/sec"
+                        type="number"
+                        value={config.customPricePerSecondUsd ?? ""}
+                        onChange={(customPricePerSecondUsd) => {
+                          const parsed = Number(customPricePerSecondUsd);
+                          updatePricingRow(config.id, {
+                            customPricePerSecondUsd: Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+                          });
+                        }}
+                      />
+                      <div className="readonly-value pricing-readonly">
+                        <span>{details.pricePerSecondUsd.toFixed(2)}</span>
+                        <small>user USDC/sec</small>
+                      </div>
+                      <label className="toggle-row">
+                        <input
+                          type="checkbox"
+                          checked={config.enabled}
+                          onChange={(event) => updatePricingRow(config.id, { enabled: event.target.checked })}
+                        />
+                        Enabled
+                      </label>
+                    </div>
+                  );
+                })}
               </div>
               <div className="button-row">
-                <button className="btn" onClick={createQuote} disabled={busy === "quote" || imageCount === 0}>
-                  <CircleDollarSign size={16} /> Quote {imageCount} images
+                <button className="btn primary" onClick={saveCustomer} disabled={busy === "customer"}>
+                  <Save size={16} /> Save pricing
                 </button>
-                <button className="btn primary" onClick={runGeneration} disabled={busy === "generation" || imageCount === 0}>
-                  <Play size={16} /> Run generation
+                <button
+                  className="btn"
+                  onClick={() => setCustomerForm({
+                    ...customerForm,
+                    modelConfigurations: customerForm.modelConfigurations.map((item) => ({
+                      ...item,
+                      customPricePerSecondUsd: undefined
+                    }))
+                  })}
+                >
+                  Clear model overrides
                 </button>
-                {quote && <span className="badge ok">${quote.totalUsd.toFixed(2)} total</span>}
               </div>
             </div>
 
-            <div className="panel">
+            <div className="panel" id="render-history">
               <div className="panel-header">
-                <h2>Generation Queue</h2>
-                <Boxes size={18} />
-              </div>
-              <div className="list">
-                {store.generations.length === 0 && <p className="subtle">No generations yet.</p>}
-                {store.generations.map((generation) => (
-                  <GenerationItem key={generation.id} generation={generation} busy={busy === generation.id} onSync={() => syncGeneration(generation.id)} />
-                ))}
-              </div>
-            </div>
-
-            <div className="panel">
-              <div className="panel-header">
-                <h2>Minted INFTs</h2>
+                <h2>Recent Render Tasks</h2>
                 <Bot size={18} />
               </div>
               <div className="list">
-                {completedInfts.length === 0 && <p className="subtle">Completed generations will appear here after 0G persistence and minting.</p>}
-                {completedInfts.map((inft) => (
-                  <div className="item" key={inft.id}>
+                {store.generations.length === 0 && <p className="subtle">No render tasks yet.</p>}
+                {store.generations.slice(0, 8).map((generation) => (
+                  <div className="item" key={generation.id}>
                     <div className="item-title">
-                      <strong>{inft.title}</strong>
-                      <a href={`/inft/${inft.id}`}><ExternalLink size={16} /></a>
+                      <strong>{generation.id}</strong>
+                      <span className={generation.status === "COMPLETED" ? "badge ok" : generation.status === "FAILED" ? "badge fail" : "badge"}>{generation.status}</span>
                     </div>
-                    <div className="mono">token #{inft.tokenId} · {inft.agentWalletAddress}</div>
-                    <div className="subtle"><Link2 size={12} /> {inft.referrer.url}</div>
+                    <p className="subtle">
+                      {generation.input.image_urls.length} images · {generation.input.video_model} · {generation.input.aspect_ratio} · {generation.payment.amountUsd.toFixed(2)} USDC
+                    </p>
+                    {generation.inftId && <a className="btn" href={`/inft/${generation.inftId}`}><ExternalLink size={16} /> Open INFT</a>}
                   </div>
                 ))}
               </div>
             </div>
           </section>
         </div>
-      </main>
-    </div>
-  );
-}
 
-function GenerationItem({ generation, busy, onSync }: { generation: Generation; busy: boolean; onSync: () => void }) {
-  const badgeClass = generation.status === "COMPLETED" ? "badge ok" : generation.status === "FAILED" ? "badge fail" : "badge";
-  return (
-    <div className="item">
-      <div className="item-title">
-        <strong>{generation.id}</strong>
-        <span className={badgeClass}>{generation.status}</span>
-      </div>
-      <div className="subtle">{generation.input.image_urls.length} images · {generation.input.video_model} · ${generation.payment.amountUsd.toFixed(2)}</div>
-      <div className="mono">{generation.samsarSessionId || "pending Samsar session"}</div>
-      {generation.errorMessage && <p className="subtle">{generation.errorMessage}</p>}
-      {generation.refund && <p className="subtle">Refund: ${generation.refund.amountUsd.toFixed(2)} · {generation.refund.status}</p>}
-      <div className="button-row">
-        <button className="btn" onClick={onSync} disabled={busy || generation.status === "COMPLETED"}>
-          <RefreshCw size={16} /> Sync
-        </button>
-        {generation.inftId && <a className="btn" href={`/inft/${generation.inftId}`}><Bot size={16} /> Open INFT</a>}
-      </div>
+        <section className="panel agent-town-panel" id="agent-town">
+          <div className="panel-header">
+            <div>
+              <h2>Agent Town</h2>
+              <p className="subtle">
+                Multi-agent sandbox for 0G Chain, Storage, DA, Compute, service discovery, Samsar actions, Uniswap price signals, KeeperHub settlement, and Gensyn AXL chatter.
+              </p>
+            </div>
+            <Network size={20} />
+          </div>
+
+          <div className="form-grid">
+            <div className="field full">
+              <label>Agent objective</label>
+              <textarea value={agentObjective} onChange={(event) => setAgentObjective(event.target.value)} />
+            </div>
+            <div className="field full">
+              <label>Agent payload JSON</label>
+              <textarea value={agentPayload} onChange={(event) => setAgentPayload(event.target.value)} />
+            </div>
+          </div>
+          <div className="button-row">
+            <button className="btn primary" onClick={runAgentTown} disabled={busy === "agent-town"}>
+              <Zap size={16} /> Run Agent Town
+            </button>
+            <button className="btn" onClick={() => load()} title="Refresh agents">
+              <RefreshCw size={16} /> Refresh agents
+            </button>
+            {latestAgentJob && (
+              <button className="btn warn" onClick={() => rollbackAgentJob(latestAgentJob.id)} disabled={busy === `rollback-${latestAgentJob.id}`}>
+                <Undo2 size={16} /> Roll back latest
+              </button>
+            )}
+          </div>
+
+          <div className="agent-town-grid">
+            <div>
+              <div className="section-title">
+                <Users size={16} />
+                <h3>Agents</h3>
+              </div>
+              <div className="list">
+                {store.agents.map((agent) => (
+                  <div className="item" key={agent.id}>
+                    <div className="item-title">
+                      <strong>{agent.name}</strong>
+                      <span className="badge ok">{agent.role}</span>
+                    </div>
+                    <p className="subtle">{agent.personality}</p>
+                    <p className="mono">{agent.axlPeerId}</p>
+                    <p className="mono">{agent.walletAddress}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="section-title">
+                <Database size={16} />
+                <h3>0G Receipts</h3>
+              </div>
+              <div className="list">
+                {!latestAgentJob && <p className="subtle">Run Agent Town to generate pillar receipts.</p>}
+                {latestAgentJob?.receipts.map((receipt) => (
+                  <div className="item" key={`${latestAgentJob.id}-${receipt.pillar}`}>
+                    <div className="item-title">
+                      <strong>{receipt.label}</strong>
+                      <span className="badge">{receipt.pillar}</span>
+                    </div>
+                    <p className="subtle">{receipt.detail}</p>
+                    <p className="mono">{receipt.rootHash || receipt.txHash || receipt.uri}</p>
+                  </div>
+                ))}
+                {latestAgentJob?.priceSignal && (
+                  <div className="item">
+                    <div className="item-title">
+                      <strong>Uniswap price signal</strong>
+                      <span className="badge ok">{latestAgentJob.priceSignal.confidence.toFixed(2)}</span>
+                    </div>
+                    <p className="subtle">
+                      {latestAgentJob.priceSignal.chargeUsd.toFixed(2)} {latestAgentJob.priceSignal.settlementToken} charged from {latestAgentJob.priceSignal.paymentToken}.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <div className="section-title">
+                <Radio size={16} />
+                <h3>AXL Timeline</h3>
+              </div>
+              <div className="list">
+                {store.agentTownEvents.length === 0 && <p className="subtle">No agent events yet.</p>}
+                {store.agentTownEvents.slice(0, 8).map((event) => {
+                  const fromAgent = store.agents.find((agent) => agent.id === event.fromAgentId);
+                  const toAgent = store.agents.find((agent) => agent.id === event.toAgentId);
+                  return (
+                    <div className="item" key={event.id}>
+                      <div className="item-title">
+                        <strong>{fromAgent?.name || event.fromAgentId}</strong>
+                        <span className="badge">{event.channel}</span>
+                      </div>
+                      <p className="subtle">
+                        {toAgent ? `to ${toAgent.name}: ` : ""}{event.content}
+                      </p>
+                      {event.axlMessageId && <p className="mono">{event.axlMessageId}</p>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
     </div>
   );
 }
@@ -474,27 +592,6 @@ function TextField({
   );
 }
 
-function SelectField({
-  label,
-  value,
-  options,
-  onChange
-}: {
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className="field">
-      <label>{label}</label>
-      <select value={value} onChange={(event) => onChange(event.target.value)}>
-        {options.map((option) => <option value={option} key={option}>{option}</option>)}
-      </select>
-    </div>
-  );
-}
-
 async function assertOk(response: Response) {
   const data = await response.json();
   if (!response.ok) {
@@ -503,20 +600,14 @@ async function assertOk(response: Response) {
   return data;
 }
 
-function parseImageUrls(raw: string) {
-  return raw
-    .split(/\n|,/)
-    .map((value) => value.trim())
-    .filter(Boolean);
-}
-
-function parseJsonObject(raw: string) {
-  if (!raw.trim()) {
-    return {};
+function parseJsonObject(value: string) {
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("JSON must be an object");
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "Invalid JSON payload");
   }
-  const parsed = JSON.parse(raw);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("metadata must be a JSON object");
-  }
-  return parsed as Record<string, unknown>;
 }

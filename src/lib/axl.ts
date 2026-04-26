@@ -1,8 +1,8 @@
-import { env, isMockMode } from "./env";
+import { env, isProviderMock } from "./env";
 import { createId, nowIso } from "./ids";
 
 export async function getAxlTopology() {
-  if (isMockMode()) {
+  if (isProviderMock("AXL")) {
     return {
       self: "mock-peer",
       peers: ["mock-peer-video-a", "mock-peer-video-b"],
@@ -19,7 +19,7 @@ export async function getAxlTopology() {
 }
 
 export async function sendAxlMessage(peerId: string, payload: unknown) {
-  if (isMockMode()) {
+  if (isProviderMock("AXL")) {
     return {
       messageId: createId("mock_axl"),
       peerId,
@@ -37,4 +37,32 @@ export async function sendAxlMessage(peerId: string, payload: unknown) {
     throw new Error(data?.message || "AXL send failed");
   }
   return data;
+}
+
+export async function receiveAxlMessages(limit = 25) {
+  if (isProviderMock("AXL")) {
+    return {
+      messages: [],
+      limit,
+      updatedAt: nowIso()
+    };
+  }
+  const url = new URL(`${env("AXL_BASE_URL", "http://localhost:9002")}/recv`);
+  url.searchParams.set("limit", String(limit));
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`AXL recv failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function broadcastAxlMessage(peerIds: string[], payload: unknown) {
+  const results = [];
+  for (const peerId of peerIds) {
+    results.push(await sendAxlMessage(peerId, payload));
+  }
+  return {
+    count: results.length,
+    results
+  };
 }

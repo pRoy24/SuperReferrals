@@ -1,4 +1,4 @@
-import { env, isMockMode } from "./env";
+import { env, isProviderMock } from "./env";
 import { bytes32From, sha256Hex } from "./ids";
 import type { ZeroGArtifact } from "./types";
 
@@ -16,6 +16,43 @@ export async function persistJsonToZeroG(value: unknown): Promise<ZeroGArtifact>
   return uploadBufferToZeroG(body, "application/json", "metadata.json");
 }
 
+export async function publishDataAvailabilityCommitment(value: unknown): Promise<ZeroGArtifact> {
+  const body = Buffer.from(JSON.stringify(value, null, 2));
+  const rootHash = bytes32From(body);
+  const daEndpoint = env("OG_DA_URL");
+
+  if (isProviderMock("ZERO_G") || !daEndpoint) {
+    return {
+      rootHash,
+      uri: `0g-da://mock/${sha256Hex(body).slice(0, 32)}`,
+      sizeBytes: body.byteLength,
+      contentType: "application/json",
+      mock: true
+    };
+  }
+
+  const response = await fetch(daEndpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(env("OG_DA_API_KEY") ? { authorization: `Bearer ${env("OG_DA_API_KEY")}` } : {})
+    },
+    body
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.message || `0G DA publish failed: ${response.status}`);
+  }
+  return {
+    rootHash: String(data.rootHash || data.root_hash || rootHash),
+    txHash: data.txHash || data.tx_hash,
+    uri: String(data.uri || data.url || `0g-da://${data.rootHash || rootHash}`),
+    sizeBytes: body.byteLength,
+    contentType: "application/json",
+    mock: false
+  };
+}
+
 export async function uploadBufferToZeroG(
   buffer: Buffer,
   contentType: string,
@@ -26,7 +63,7 @@ export async function uploadBufferToZeroG(
   const indexerRpc = env("OG_STORAGE_INDEXER_RPC");
   const privateKey = env("OG_PRIVATE_KEY");
 
-  if (isMockMode() || !rpcUrl || !indexerRpc || !privateKey) {
+  if (isProviderMock("ZERO_G") || !rpcUrl || !indexerRpc || !privateKey) {
     return {
       rootHash,
       uri: `0g://mock/${sha256Hex(buffer).slice(0, 32)}/${encodeURIComponent(fileName)}`,

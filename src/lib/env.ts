@@ -4,10 +4,15 @@ export function env(name: string, fallback = "") {
 }
 
 export function isMockMode() {
-  if (process.env.SUPERREFERRER_MOCKS === "false") {
-    return false;
+  return parseMockFlag(process.env.SUPERREFERRALS_MOCKS, true);
+}
+
+export function isProviderMock(provider: string) {
+  const specific = process.env[`${provider.toUpperCase()}_MOCKS`];
+  if (specific !== undefined) {
+    return parseMockFlag(specific, true);
   }
-  return true;
+  return isMockMode();
 }
 
 export function appBaseUrl() {
@@ -17,7 +22,21 @@ export function appBaseUrl() {
 export function requireLiveEnv(name: string) {
   const value = env(name);
   if (!value) {
-    throw new Error(`${name} is required when SUPERREFERRER_MOCKS=false`);
+    throw new Error(`${name} is required when SUPERREFERRALS_MOCKS=false`);
   }
   return value;
+}
+
+function parseMockFlag(value: string | undefined, fallback: boolean) {
+  if (value === undefined) {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (["false", "0", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  if (["true", "1", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  return fallback;
 }

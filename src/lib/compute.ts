@@ -1,8 +1,8 @@
-import { env, isMockMode } from "./env";
+import { env, isProviderMock } from "./env";
 
 export async function askZeroGCompute(systemPrompt: string, question: string) {
   const endpoint = env("OG_COMPUTE_URL");
-  if (isMockMode() || !endpoint) {
+  if (isProviderMock("OG_COMPUTE") || !endpoint) {
     return {
       output_text:
         `${systemPrompt.split("\n").slice(0, 4).join(" ")} Requested task: ${question}. Use the action buttons for executable operations, or ask for storage/referrer details.`,

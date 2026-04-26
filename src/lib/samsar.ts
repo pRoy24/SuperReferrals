@@ -1,6 +1,6 @@
-import { appBaseUrl, env, isMockMode } from "./env";
+import { appBaseUrl, env, isProviderMock } from "./env";
 import { createId, nowIso } from "./ids";
-import type { ExternalUserIdentity, GenerationInput } from "./types";
+import type { ExternalCreditGrant, ExternalUserIdentity, GenerationInput } from "./types";
 
 const MOCK_VIDEO_URL = "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4";
 
@@ -9,7 +9,7 @@ async function samsarRequest<T = Record<string, unknown>>(
   init: RequestInit & { query?: Record<string, string | undefined> } = {}
 ): Promise<{ data: T; headers: Headers }> {
   const apiKey = env("SAMSAR_API_KEY");
-  if (isMockMode() || !apiKey) {
+  if (isProviderMock("SAMSAR") || !apiKey) {
     throw new Error("Samsar live request called in mock mode");
   }
   const base = env("SAMSAR_BASE_URL", "https://api.samsar.one/v1").replace(/\/$/, "");
@@ -33,7 +33,7 @@ async function samsarRequest<T = Record<string, unknown>>(
 }
 
 export async function ensureExternalUserSession(externalUser: ExternalUserIdentity) {
-  if (isMockMode() || !env("SAMSAR_API_KEY")) {
+  if (isProviderMock("SAMSAR") || !env("SAMSAR_API_KEY")) {
     return {
       externalApiKey: `mock_external_${externalUser.external_user_id}`,
       creditsRemaining: 5000,
@@ -51,6 +51,62 @@ export async function ensureExternalUserSession(externalUser: ExternalUserIdenti
   };
 }
 
+export async function grantExternalUserCredits({
+  externalUser,
+  credits,
+  externalApiKey,
+  metadata
+}: {
+  externalUser: ExternalUserIdentity;
+  credits: number;
+  externalApiKey?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<ExternalCreditGrant> {
+  const normalizedCredits = Math.max(1, Math.ceil(Number(credits) || 0));
+  if (isProviderMock("SAMSAR") || !env("SAMSAR_API_KEY")) {
+    return {
+      credits: normalizedCredits,
+      creditsGranted: normalizedCredits,
+      remainingCredits: 5000,
+      status: "mock_confirmed",
+      source: "samsar_external_grant",
+      raw: {
+        mock: true,
+        external_user: externalUser,
+        metadata
+      }
+    };
+  }
+
+  const safeExternalApiKey =
+    externalApiKey && !externalApiKey.startsWith("mock_") ? externalApiKey : undefined;
+  const response = await samsarRequest("external_users/credits/grant", {
+    method: "POST",
+    headers: safeExternalApiKey ? { "x-external-user-api-key": safeExternalApiKey } : undefined,
+    body: JSON.stringify({
+      external_user: externalUser,
+      credits: normalizedCredits,
+      metadata
+    })
+  });
+  const data = response.data as Record<string, unknown>;
+  const creditsGranted = Number(data.creditsGranted || data.credits_granted || normalizedCredits);
+  const remainingCredits = Number(
+    data.remainingCredits ||
+    data.remaining_credits ||
+    response.headers.get("x-credits-remaining") ||
+    0
+  );
+  return {
+    credits: normalizedCredits,
+    creditsGranted,
+    remainingCredits,
+    status: "confirmed",
+    source: "samsar_external_grant",
+    raw: data
+  };
+}
+
 export async function createExternalImageListVideo({
   externalUser,
   input,
@@ -62,7 +118,7 @@ export async function createExternalImageListVideo({
   externalApiKey?: string;
   generationId: string;
 }) {
-  if (isMockMode() || !env("SAMSAR_API_KEY")) {
+  if (isProviderMock("SAMSAR") || !env("SAMSAR_API_KEY")) {
     const requestId = `mock_samsar_${generationId}`;
     return {
       requestId,
@@ -77,9 +133,11 @@ export async function createExternalImageListVideo({
       }
     };
   }
+  const safeExternalApiKey =
+    externalApiKey && !externalApiKey.startsWith("mock_") ? externalApiKey : undefined;
   const response = await samsarRequest("external_users/image_list_to_video", {
     method: "POST",
-    headers: externalApiKey ? { "x-external-user-api-key": externalApiKey } : undefined,
+    headers: safeExternalApiKey ? { "x-external-user-api-key": safeExternalApiKey } : undefined,
     body: JSON.stringify({
       external_user: externalUser,
       input,
@@ -102,7 +160,7 @@ export async function getSamsarStatus(requestId: string, externalUser?: External
   if (!requestId) {
     throw new Error("requestId is required");
   }
-  if (isMockMode() || !env("SAMSAR_API_KEY") || requestId.startsWith("mock_samsar_")) {
+  if (isProviderMock("SAMSAR") || !env("SAMSAR_API_KEY") || requestId.startsWith("mock_samsar_")) {
     return {
       request_id: requestId,
       session_id: requestId,
@@ -113,10 +171,12 @@ export async function getSamsarStatus(requestId: string, externalUser?: External
       updated_at: nowIso()
     };
   }
+  const safeExternalApiKey =
+    externalApiKey && !externalApiKey.startsWith("mock_") ? externalApiKey : undefined;
   const response = externalUser
     ? await samsarRequest("external_users/status", {
       method: "GET",
-      headers: externalApiKey ? { "x-external-user-api-key": externalApiKey } : undefined,
+      headers: safeExternalApiKey ? { "x-external-user-api-key": safeExternalApiKey } : undefined,
       query: {
         request_id: requestId,
         provider: externalUser.provider,
@@ -132,7 +192,7 @@ export async function getSamsarStatus(requestId: string, externalUser?: External
 }
 
 export async function fetchLatestVideoUrl(sessionId: string) {
-  if (isMockMode() || !env("SAMSAR_API_KEY") || sessionId.startsWith("mock_samsar_")) {
+  if (isProviderMock("SAMSAR") || !env("SAMSAR_API_KEY") || sessionId.startsWith("mock_samsar_")) {
     return MOCK_VIDEO_URL;
   }
   const response = await samsarRequest("video/fetch_latest_version", {
@@ -143,7 +203,7 @@ export async function fetchLatestVideoUrl(sessionId: string) {
 }
 
 export async function runSamsarSessionAction(action: string, payload: Record<string, unknown>) {
-  if (isMockMode() || !env("SAMSAR_API_KEY")) {
+  if (isProviderMock("SAMSAR") || !env("SAMSAR_API_KEY")) {
     return {
       request_id: createId(`mock_${action}`),
       status: "QUEUED",
@@ -168,11 +228,71 @@ export async function runSamsarSessionAction(action: string, payload: Record<str
       body: JSON.stringify({ input: payload })
     })).data;
   }
+  if (action === "update_outro") {
+    return (await samsarRequest("video/update_outro_image", {
+      method: "POST",
+      body: JSON.stringify({ input: payload })
+    })).data;
+  }
+  if (action === "add_outro") {
+    return (await samsarRequest("video/add_outro_image", {
+      method: "POST",
+      body: JSON.stringify({ input: payload })
+    })).data;
+  }
+  if (action === "cancel_render") {
+    return (await samsarRequest("video/cancel_render", {
+      method: "POST",
+      body: JSON.stringify({ input: payload })
+    })).data;
+  }
+  if (action === "enhance_message") {
+    return (await samsarRequest("chat/enhance", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    })).data;
+  }
+  if (action === "enhance_image") {
+    return (await samsarRequest("image/enhance", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    })).data;
+  }
+  if (action === "remove_branding") {
+    return (await samsarRequest("image/remove_branding", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    })).data;
+  }
+  if (action === "replace_branding") {
+    return (await samsarRequest("image/replace_branding", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    })).data;
+  }
+  if (action === "create_rollup_banner") {
+    return (await samsarRequest("image/create_rollup_banner", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    })).data;
+  }
+  if (action === "assistant_completion") {
+    return (await samsarRequest("assistant/completion", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    })).data;
+  }
+  if (action === "generate_embeddings_from_plain_text") {
+    return (await samsarRequest("chat/generate_embeddings_from_plain_text", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    })).data;
+  }
   throw new Error(`Unsupported Samsar action: ${action}`);
 }
 
 export async function createSamsarAssistantCompletion(payload: Record<string, unknown>) {
-  if (isMockMode() || !env("SAMSAR_API_KEY")) {
+  if (isProviderMock("SAMSAR") || !env("SAMSAR_API_KEY")) {
     return {
       output_text:
         "This INFT can create derivative sessions, retranslate the video, join with another session, update or add an outro image, send AXL peer messages, and inspect its 0G storage and referrer metadata.",

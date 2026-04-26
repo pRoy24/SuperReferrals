@@ -2,70 +2,99 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { appBaseUrl, env } from "./env";
 import { createId, makeReferrerCode, nowIso, normalizeWallet } from "./ids";
-import { defaultPricing } from "./pricing";
+import { defaultModelPricingConfigurations, defaultPricing } from "./pricing";
 import type {
+  AgentJob,
+  AgentProfile,
+  AgentTownEvent,
   Customer,
   Generation,
   INFTRecord,
   PaymentQuote,
   SubAccount,
-  SuperReferrerStore
+  SuperReferralsStore
 } from "./types";
 
 const STORE_FILE = "data.json";
+let storeMutationQueue: Promise<unknown> = Promise.resolve();
 
 function dataDir() {
-  const configured = env("SUPERREFERRER_DATA_DIR");
+  const configured = env("SUPERREFERRALS_DATA_DIR");
   if (configured && path.isAbsolute(configured)) {
     return configured;
   }
-  return path.join(process.cwd(), ".superreferrer");
+  return path.join(process.cwd(), ".superreferrals");
 }
 
 function dataPath() {
   return path.join(dataDir(), STORE_FILE);
 }
 
-export function emptyStore(): SuperReferrerStore {
+export function emptyStore(): SuperReferralsStore {
   return {
-    version: 1,
+    version: 2,
     customers: [],
     subAccounts: [],
     quotes: [],
     generations: [],
-    infts: []
+    infts: [],
+    agents: [],
+    agentJobs: [],
+    agentTownEvents: []
   };
 }
 
-export async function readStore(): Promise<SuperReferrerStore> {
-  try {
-    const raw = await fs.readFile(dataPath(), "utf8");
-    const parsed = JSON.parse(raw) as SuperReferrerStore;
-    return { ...emptyStore(), ...parsed };
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== "ENOENT") {
+export async function readStore(): Promise<SuperReferralsStore> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const raw = await fs.readFile(dataPath(), "utf8");
+      const parsed = JSON.parse(raw) as SuperReferralsStore;
+      return { ...emptyStore(), ...parsed, version: parsed.version || 2 };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        const seeded = seedStore();
+        await writeStore(seeded);
+        return seeded;
+      }
+      if (error instanceof SyntaxError && attempt < 4) {
+        await delay(25 * (attempt + 1));
+        continue;
+      }
+      if (error instanceof SyntaxError) {
+        throw new Error(`Store file ${dataPath()} contains invalid JSON. Stop the dev server and inspect or restore the file before continuing.`);
+      }
       throw error;
     }
-    const seeded = seedStore();
-    await writeStore(seeded);
-    return seeded;
   }
+  throw new Error("Unable to read store");
 }
 
-export async function writeStore(store: SuperReferrerStore) {
-  await fs.mkdir(dataDir(), { recursive: true });
-  await fs.writeFile(dataPath(), `${JSON.stringify(store, null, 2)}\n`, "utf8");
+export async function writeStore(store: SuperReferralsStore) {
+  const dir = dataDir();
+  await fs.mkdir(dir, { recursive: true });
+  const targetPath = dataPath();
+  const tempPath = path.join(dir, `.${STORE_FILE}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`);
+  await fs.writeFile(tempPath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+  await fs.rename(tempPath, targetPath);
 }
 
-export async function mutateStore<T>(mutator: (store: SuperReferrerStore) => T | Promise<T>) {
-  const store = await readStore();
-  const result = await mutator(store);
-  await writeStore(store);
-  return result;
+export async function mutateStore<T>(mutator: (store: SuperReferralsStore) => T | Promise<T>) {
+  const run = storeMutationQueue.then(async () => {
+    const store = await readStore();
+    const result = await mutator(store);
+    await writeStore(store);
+    return result;
+  });
+  storeMutationQueue = run.catch(() => undefined);
+  return run;
 }
 
-export function seedStore(): SuperReferrerStore {
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function seedStore(): SuperReferralsStore {
   const timestamp = nowIso();
   const customerId = "cus_demo";
   const ownerWallet = normalizeWallet("0x1111111111111111111111111111111111111111");
@@ -93,7 +122,7 @@ export function seedStore(): SuperReferrerStore {
     username: "demo-creator",
     referrerCode,
     externalUser: {
-      provider: "superreferrer",
+      provider: "superreferrals",
       external_user_id: subAccountId,
       external_app_id: customerId,
       username: "demo-creator"
@@ -129,7 +158,7 @@ export async function getINFT(id: string) {
   return store.infts.find((inft) => inft.id === id);
 }
 
-export function upsertCustomer(store: SuperReferrerStore, input: Partial<Customer>) {
+export function upsertCustomer(store: SuperReferralsStore, input: Partial<Customer>) {
   const timestamp = nowIso();
   const id = input.id || createId("cus");
   const existing = store.customers.find((customer) => customer.id === id);
@@ -138,7 +167,13 @@ export function upsertCustomer(store: SuperReferrerStore, input: Partial<Custome
     name: input.name?.trim() || existing?.name || "Customer",
     ownerWallet: normalizeWallet(input.ownerWallet || existing?.ownerWallet),
     samsarApiKeyAlias: input.samsarApiKeyAlias || existing?.samsarApiKeyAlias,
-    pricing: { ...(existing?.pricing || defaultPricing), ...(input.pricing || {}) },
+    pricing: {
+      ...(existing?.pricing || defaultPricing),
+      ...(input.pricing || {}),
+      modelConfigurations: input.pricing?.modelConfigurations ||
+        existing?.pricing.modelConfigurations ||
+        defaultModelPricingConfigurations
+    },
     referrerBaseUrl: (input.referrerBaseUrl || existing?.referrerBaseUrl || appBaseUrl()).replace(/\/$/, ""),
     ensName: input.ensName ?? existing?.ensName,
     subscription: {
@@ -157,7 +192,7 @@ export function upsertCustomer(store: SuperReferrerStore, input: Partial<Custome
   return next;
 }
 
-export function addSubAccount(store: SuperReferrerStore, input: {
+export function addSubAccount(store: SuperReferralsStore, input: {
   customerId: string;
   wallet: string;
   email?: string;
@@ -176,7 +211,7 @@ export function addSubAccount(store: SuperReferrerStore, input: {
     username,
     referrerCode,
     externalUser: {
-      provider: "superreferrer",
+      provider: "superreferrals",
       external_user_id: id,
       external_app_id: input.customerId,
       username
@@ -189,17 +224,17 @@ export function addSubAccount(store: SuperReferrerStore, input: {
   return account;
 }
 
-export function addQuote(store: SuperReferrerStore, quote: PaymentQuote) {
+export function addQuote(store: SuperReferralsStore, quote: PaymentQuote) {
   store.quotes.unshift(quote);
   return quote;
 }
 
-export function addGeneration(store: SuperReferrerStore, generation: Generation) {
+export function addGeneration(store: SuperReferralsStore, generation: Generation) {
   store.generations.unshift(generation);
   return generation;
 }
 
-export function updateGeneration(store: SuperReferrerStore, id: string, patch: Partial<Generation>) {
+export function updateGeneration(store: SuperReferralsStore, id: string, patch: Partial<Generation>) {
   const generation = store.generations.find((item) => item.id === id);
   if (!generation) {
     return null;
@@ -208,7 +243,36 @@ export function updateGeneration(store: SuperReferrerStore, id: string, patch: P
   return generation;
 }
 
-export function addINFT(store: SuperReferrerStore, inft: INFTRecord) {
+export function addINFT(store: SuperReferralsStore, inft: INFTRecord) {
   store.infts.unshift(inft);
   return inft;
+}
+
+export function upsertAgent(store: SuperReferralsStore, agent: AgentProfile) {
+  const existing = store.agents.find((item) => item.id === agent.id);
+  if (existing) {
+    Object.assign(existing, agent);
+    return existing;
+  }
+  store.agents.push(agent);
+  return agent;
+}
+
+export function addAgentJob(store: SuperReferralsStore, job: AgentJob) {
+  store.agentJobs.unshift(job);
+  return job;
+}
+
+export function updateAgentJob(store: SuperReferralsStore, id: string, patch: Partial<AgentJob>) {
+  const job = store.agentJobs.find((item) => item.id === id);
+  if (!job) {
+    return null;
+  }
+  Object.assign(job, patch, { updatedAt: nowIso() });
+  return job;
+}
+
+export function addAgentTownEvent(store: SuperReferralsStore, event: AgentTownEvent) {
+  store.agentTownEvents.unshift(event);
+  return event;
 }
