@@ -665,13 +665,14 @@ export async function runINFTAction(id: string, action: string, payload: Record<
 
 function normalizeGenerationInput(input: GenerationInput): GenerationInput {
   const hasProvidedOutro = Boolean(input.outro_image_url);
+  const addOutroAnimation = input.add_outro_animation ?? Boolean(input.cta_url);
   return {
     ...input,
     video_model: input.video_model || "VEO3.1I2V",
     aspect_ratio: input.aspect_ratio || "16:9",
     enable_subtitles: input.enable_subtitles ?? true,
     outro_image_url: input.outro_image_url,
-    add_outro_animation: input.add_outro_animation === true,
+    add_outro_animation: addOutroAnimation === true,
     add_outro_focus_area: input.add_outro_focus_area === true,
     outro_focust_area: input.outro_focust_area,
     generate_outro_image: hasProvidedOutro ? false : input.generate_outro_image ?? Boolean(input.cta_url),

@@ -113,7 +113,7 @@ export function getTransactionChainId() {
     numberFromEnv("NEXT_PUBLIC_PAYMENT_CHAIN_ID") ||
     numberFromEnv("PAYMENT_CHAIN_ID");
   if (configuredChainId) {
-    return configuredChainId;
+    return allowMainnetTransactions() ? configuredChainId : forceNonProductionChain(configuredChainId);
   }
 
   const configuredNetwork = stringFromEnv("NEXT_PUBLIC_TRANSACTION_NETWORK") ||
@@ -122,10 +122,10 @@ export function getTransactionChainId() {
     stringFromEnv("PAYMENT_NETWORK");
   const networkMatch = TRANSACTION_CHAINS.find((chain) => chain.key === configuredNetwork?.toLowerCase());
   if (networkMatch) {
-    return networkMatch.id;
+    return allowMainnetTransactions() ? networkMatch.id : forceNonProductionChain(networkMatch.id);
   }
 
-  return stringFromEnv("NODE_ENV") === "production" ? 1 : 11155111;
+  return allowMainnetTransactions() ? 1 : 11155111;
 }
 
 export function getTransactionChainConfig(chainId = getTransactionChainId()): TransactionChainConfig {
@@ -174,4 +174,19 @@ function numberFromEnv(name: string) {
 
 function stringFromEnv(name: string) {
   return typeof process !== "undefined" ? process.env[name]?.trim() : "";
+}
+
+function allowMainnetTransactions() {
+  const deploymentEnv = String(
+    stringFromEnv("NEXT_PUBLIC_DEPLOYMENT_ENV") ||
+    stringFromEnv("DEPLOYMENT_ENV") ||
+    stringFromEnv("NEXT_PUBLIC_APP_ENV") ||
+    stringFromEnv("APP_ENV") ||
+    stringFromEnv("VERCEL_ENV")
+  ).toLowerCase();
+  return stringFromEnv("NODE_ENV") === "production" && deploymentEnv === "production";
+}
+
+function forceNonProductionChain(chainId: number) {
+  return chainId === 1 ? 11155111 : chainId;
 }

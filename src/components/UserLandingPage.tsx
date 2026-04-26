@@ -29,8 +29,6 @@ type EthereumProvider = {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
 };
 
-type OutroMode = "generate_cta_outro" | "provided_outro";
-
 type GenerationFormState = {
   imageUrls: string;
   metadata: string;
@@ -38,8 +36,6 @@ type GenerationFormState = {
   videoModel: VideoModel;
   aspectRatio: VideoAspectRatio;
   language: string;
-  outroMode: OutroMode;
-  outroImageUrl: string;
   addOutroAnimation: boolean;
   addOutroFocusArea: boolean;
   outroFocusArea: string;
@@ -79,9 +75,9 @@ const starterImages = [
 const starterImageMetadata = JSON.stringify(starterImages, null, 2);
 
 const starterFooterMetadata = JSON.stringify([
-  { url: "https://example.com/product/launch-shoe", title: "Launch Shoe" },
-  { url: "https://example.com/product/lifestyle-bundle", title: "Lifestyle Bundle" },
-  { url: "https://example.com/product/limited-offer", title: "Limited Offer" }
+  { url: "https://unsplash.com/s/photos/running-shoes", title: "Launch Shoe" },
+  { url: "https://unsplash.com/s/photos/sneakers", title: "Lifestyle Bundle" },
+  { url: "https://unsplash.com/s/photos/product-shoes", title: "Limited Offer" }
 ], null, 2);
 
 const defaultOutroFocusArea = JSON.stringify({ x: 680, y: 296, width: 432, height: 432 }, null, 2);
@@ -104,15 +100,13 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
     videoModel: "RUNWAYML" as VideoModel,
     aspectRatio: "9:16" as VideoAspectRatio,
     language: "en",
-    outroMode: "generate_cta_outro",
-    outroImageUrl: "https://cdn.example.com/outro.png",
     addOutroAnimation: true,
     addOutroFocusArea: true,
     outroFocusArea: defaultOutroFocusArea,
-    ctaUrl: "https://example.com/shop/new-launch",
+    ctaUrl: "https://unsplash.com/s/photos/running-shoes",
     ctaTextTop: "Scan to buy",
     ctaTextBottom: "Limited availability",
-    ctaLogo: "https://cdn.example.com/logo-white.png",
+    ctaLogo: "",
     addFooterAnimation: true,
     footerMetadata: starterFooterMetadata,
     txHash: ""
@@ -182,6 +176,7 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
     findPaymentToken(customer?.pricing.settlementTokenAddress || "", transactionChain.id) ||
     settlementTokenForCurrency(customer?.pricing.currency || "USDC", transactionChain.id) ||
     selectedPaymentToken;
+  const hasWalletAddress = Boolean(walletAddress.trim());
   const generationPayloadPreview = useMemo(
     () => previewGenerationPayload(generationForm, connectedSubAccount?.referrerCode || referrerCode),
     [generationForm, connectedSubAccount?.referrerCode, referrerCode]
@@ -570,11 +565,12 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
             </div>
             <div className="button-row">
               <button className="btn primary" onClick={connectWallet} disabled={busy === "wallet"}>
-                <Wallet size={16} /> Connect wallet
+                <Wallet size={16} /> {busy === "wallet" ? "Connecting..." : hasWalletAddress ? "Switch wallet" : "Connect wallet"}
               </button>
               <button className="btn" onClick={() => ensureWalletSubAccount().then((account) => setMessage(account.blockchainRegistration ? "Wallet profile and 0G user record ready." : "Wallet profile ready.")).catch((error) => setMessage(error.message))}>
-                <ShieldCheck size={16} /> Save profile
+                <ShieldCheck size={16} /> {connectedSubAccount ? "Update profile" : "Save profile"}
               </button>
+              {hasWalletAddress && <span className="badge ok">connected {shortWallet(walletAddress)}</span>}
               {connectedSubAccount && <span className="badge ok">{connectedSubAccount.referrerCode}</span>}
               {connectedSubAccount?.blockchainRegistration && (
                 <span className="badge ok">{connectedSubAccount.blockchainRegistration.mock ? "0G mock" : "0G anchored"}</span>
@@ -632,14 +628,7 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
                 options={paymentRails}
                 onChange={(rail) => setPaymentRail(rail as PaymentRail)}
               />
-              <SelectField
-                label="Outro mode"
-                value={generationForm.outroMode}
-                options={["generate_cta_outro", "provided_outro"]}
-                onChange={(outroMode) => setGenerationForm({ ...generationForm, outroMode: outroMode as OutroMode })}
-              />
-              <TextField label="Outro image URL" value={generationForm.outroImageUrl} onChange={(outroImageUrl) => setGenerationForm({ ...generationForm, outroImageUrl })} />
-              <TextField label="CTA URL" value={generationForm.ctaUrl} onChange={(ctaUrl) => setGenerationForm({ ...generationForm, ctaUrl })} />
+              <TextField label="CTA outro URL" value={generationForm.ctaUrl} onChange={(ctaUrl) => setGenerationForm({ ...generationForm, ctaUrl })} />
               <TextField label="CTA top text" value={generationForm.ctaTextTop} onChange={(ctaTextTop) => setGenerationForm({ ...generationForm, ctaTextTop })} />
               <TextField label="CTA bottom text" value={generationForm.ctaTextBottom} onChange={(ctaTextBottom) => setGenerationForm({ ...generationForm, ctaTextBottom })} />
               <TextField label="CTA logo URL" value={generationForm.ctaLogo} onChange={(ctaLogo) => setGenerationForm({ ...generationForm, ctaLogo })} />
@@ -650,7 +639,7 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
                   checked={generationForm.addOutroAnimation}
                   onChange={(event) => setGenerationForm({ ...generationForm, addOutroAnimation: event.target.checked })}
                 />
-                Outro animation
+                Server-generated outro animation
               </label>
               <label className="toggle-row">
                 <input
@@ -658,7 +647,7 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
                   checked={generationForm.addOutroFocusArea}
                   onChange={(event) => setGenerationForm({ ...generationForm, addOutroFocusArea: event.target.checked })}
                 />
-                Outro focus area
+                Server-generated outro focus area
               </label>
               <div className="field full">
                 <label>Outro focus area JSON</label>
@@ -676,7 +665,7 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
                 Bottom CTA footer cards
               </label>
               <div className="field full">
-                <label>Footer metadata JSON array</label>
+                <label>Footer metadata JSON array ({imageCount} items)</label>
                 <textarea
                   value={generationForm.footerMetadata}
                   onChange={(event) => setGenerationForm({ ...generationForm, footerMetadata: event.target.value })}
@@ -924,10 +913,7 @@ async function requestUniswapSwap(provider: EthereumProvider, quote: PaymentQuot
       from: wallet,
       to: String(tx.to),
       data: String(tx.data),
-      value: toRpcQuantity(tx.value),
-      gas: toRpcQuantity(tx.gas || tx.gasLimit),
-      maxFeePerGas: toRpcQuantity(tx.maxFeePerGas),
-      maxPriorityFeePerGas: toRpcQuantity(tx.maxPriorityFeePerGas)
+      value: toRpcQuantity(tx.value)
     })]
   }));
 }
@@ -1076,44 +1062,39 @@ function parseJsonObject(raw: string) {
 }
 
 function buildGenerationPayload(form: GenerationFormState, fallbackReferrerCode: string): GenerationInput {
+  const imageInputs = parseImageInputs(form.imageUrls);
+  const ctaUrl = form.ctaUrl.trim();
+  if (!ctaUrl) {
+    throw new Error("cta_url is required for the server-generated CTA outro image");
+  }
+
   const payload: GenerationInput = {
-    image_urls: parseImageInputs(form.imageUrls),
+    image_urls: imageInputs,
     metadata: parseJsonObject(form.metadata),
     prompt: form.prompt,
     video_model: form.videoModel,
     aspect_ratio: form.aspectRatio,
     language: form.language,
-    enable_subtitles: true
+    enable_subtitles: true,
+    generate_outro_image: true,
+    cta_url: ctaUrl,
+    cta_text_top: form.ctaTextTop.trim() || "Scan to buy",
+    cta_text_bottom: form.ctaTextBottom.trim() || fallbackReferrerCode,
+    add_outro_animation: form.addOutroAnimation,
+    add_outro_focus_area: form.addOutroFocusArea
   };
 
-  if (form.outroMode === "provided_outro") {
-    const outroImageUrl = form.outroImageUrl.trim();
-    if (!outroImageUrl) {
-      throw new Error("outro_image_url is required when using a provided outro image");
-    }
-    payload.outro_image_url = outroImageUrl;
-    payload.add_outro_animation = form.addOutroAnimation;
-    payload.add_outro_focus_area = form.addOutroFocusArea;
-    if (form.addOutroFocusArea) {
-      payload.outro_focust_area = parseOutroFocusArea(form.outroFocusArea);
-    }
-  } else {
-    const ctaUrl = form.ctaUrl.trim();
-    if (!ctaUrl) {
-      throw new Error("cta_url is required when generating a CTA outro image");
-    }
-    payload.generate_outro_image = true;
-    payload.cta_url = ctaUrl;
-    payload.cta_text_top = form.ctaTextTop.trim() || "Scan to buy";
-    payload.cta_text_bottom = form.ctaTextBottom.trim() || fallbackReferrerCode;
-    if (form.ctaLogo.trim()) {
-      payload.cta_logo = form.ctaLogo.trim();
-    }
+  if (form.addOutroFocusArea) {
+    payload.outro_focust_area = parseOutroFocusArea(form.outroFocusArea);
+  }
+  if (form.ctaLogo.trim()) {
+    assertUsableImageUrl(form.ctaLogo.trim(), "cta_logo");
+    payload.cta_logo = form.ctaLogo.trim();
   }
 
   if (form.addFooterAnimation) {
     payload.add_footer_animation = true;
-    payload.footer_metadata = parseFooterMetadata(form.footerMetadata);
+    payload.footer_metadata = parseFooterMetadata(form.footerMetadata, imageInputs.length);
   }
 
   return payload;
@@ -1152,7 +1133,11 @@ function parseImageInputs(raw: string): Array<string | Record<string, unknown>> 
   return trimmed
     .split(/\n|,/)
     .map((value) => value.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((value, index) => {
+      assertUsableImageUrl(value, `image_urls item ${index + 1}`);
+      return value;
+    });
 }
 
 function normalizeImageInputItem(item: unknown, index: number): string | Record<string, unknown> {
@@ -1161,6 +1146,7 @@ function normalizeImageInputItem(item: unknown, index: number): string | Record<
     if (!value) {
       throw new Error(`image_urls item ${index + 1} must not be empty`);
     }
+    assertUsableImageUrl(value, `image_urls item ${index + 1}`);
     return value;
   }
   if (!item || typeof item !== "object" || Array.isArray(item)) {
@@ -1171,10 +1157,26 @@ function normalizeImageInputItem(item: unknown, index: number): string | Record<
   if (!imageUrl) {
     throw new Error(`image_urls item ${index + 1} must include image_url`);
   }
+  assertUsableImageUrl(imageUrl, `image_urls item ${index + 1}`);
   return {
     ...record,
     image_url: imageUrl
   };
+}
+
+function assertUsableImageUrl(rawUrl: string, label: string) {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error(`${label} must be a valid URL`);
+  }
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw new Error(`${label} must be an http(s) URL`);
+  }
+  if (url.hostname === "example.com" || url.hostname.endsWith(".example.com")) {
+    throw new Error(`${label} must use a real reachable image URL, not an example.com placeholder`);
+  }
 }
 
 function parseOutroFocusArea(raw: string) {
@@ -1191,13 +1193,19 @@ function parseOutroFocusArea(raw: string) {
   return focusArea;
 }
 
-function parseFooterMetadata(raw: string) {
+function parseFooterMetadata(raw: string, expectedCount: number) {
   if (!raw.trim()) {
+    if (expectedCount > 0) {
+      throw new Error(`footer metadata must contain exactly ${expectedCount} item${expectedCount === 1 ? "" : "s"} to match image_urls`);
+    }
     return [];
   }
   const parsed = JSON.parse(raw);
   if (!Array.isArray(parsed)) {
     throw new Error("footer metadata must be a JSON array");
+  }
+  if (parsed.length !== expectedCount) {
+    throw new Error(`footer metadata must contain exactly ${expectedCount} item${expectedCount === 1 ? "" : "s"} to match image_urls`);
   }
   return parsed.map((item, index) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) {

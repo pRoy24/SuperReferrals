@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { appBaseUrl, env } from "./env";
 import { createId, makeReferrerCode, nowIso, normalizeWallet } from "./ids";
+import { findPaymentToken, getTransactionChainId, settlementTokenForCurrency } from "./payment-tokens";
 import { defaultModelPricingConfigurations, defaultPricing } from "./pricing";
 import type {
   AgentJob,
@@ -49,7 +50,12 @@ export async function readStore(): Promise<SuperReferralsStore> {
     try {
       const raw = await fs.readFile(dataPath(), "utf8");
       const parsed = JSON.parse(raw) as SuperReferralsStore;
-      return { ...emptyStore(), ...parsed, version: parsed.version || 2 };
+      const store = { ...emptyStore(), ...parsed, version: parsed.version || 2 };
+      const normalized = normalizeStoreForRuntime(store);
+      if (normalized.changed) {
+        await writeStore(normalized.store);
+      }
+      return normalized.store;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === "ENOENT") {
@@ -68,6 +74,30 @@ export async function readStore(): Promise<SuperReferralsStore> {
     }
   }
   throw new Error("Unable to read store");
+}
+
+function normalizeStoreForRuntime(store: SuperReferralsStore) {
+  const runtimeChainId = getTransactionChainId();
+  let changed = false;
+  for (const customer of store.customers) {
+    const pricing = customer.pricing || defaultPricing;
+    const previousChainId = pricing.chainId;
+    const existingToken = findPaymentToken(pricing.settlementTokenAddress || "", runtimeChainId);
+    const settlementToken = existingToken || settlementTokenForCurrency(pricing.currency || "USDC", runtimeChainId);
+    if (previousChainId !== runtimeChainId) {
+      pricing.chainId = runtimeChainId;
+      changed = true;
+    }
+    if (settlementToken && pricing.settlementTokenAddress !== settlementToken.address) {
+      pricing.settlementTokenAddress = settlementToken.address;
+      changed = true;
+    }
+    if (!customer.pricing) {
+      customer.pricing = pricing;
+      changed = true;
+    }
+  }
+  return { store, changed };
 }
 
 export async function writeStore(store: SuperReferralsStore) {

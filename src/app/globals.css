@@ -1,22 +1,25 @@
 @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap");
 
 :root {
-  --bg-start: #070b12;
-  --bg-mid: #0a121d;
-  --bg-end: #050a11;
-  --surface: rgba(8, 18, 29, 0.72);
-  --surface-strong: rgba(9, 16, 25, 0.9);
-  --card: rgba(7, 14, 24, 0.86);
-  --ink: #ecf3fb;
-  --muted: #9ba9ba;
-  --line: rgba(96, 194, 245, 0.2);
-  --accent: #39d881;
-  --accent-cool: #46bfff;
-  --accent-warm: #f87171;
-  --accent-text: #061018;
-  --danger: #f87171;
-  --ok: #39d881;
-  --shadow: 0 24px 90px rgba(70, 191, 255, 0.12);
+  --bg-start: #fff8fb;
+  --bg-mid: #fff1f6;
+  --bg-end: #f8fbff;
+  --surface: rgba(255, 255, 255, 0.86);
+  --surface-strong: #ffffff;
+  --card: #ffffff;
+  --ink: #1d2534;
+  --muted: #687386;
+  --line: rgba(31, 91, 160, 0.14);
+  --accent: #f97316;
+  --accent-cool: #2563eb;
+  --accent-warm: #fb7185;
+  --accent-text: #ffffff;
+  --danger: #dc2626;
+  --ok: #15803d;
+  --shadow: 0 18px 52px rgba(49, 79, 126, 0.1);
+  --soft-pink: #fff1f5;
+  --soft-orange: #fff7ed;
+  --soft-blue: #eff6ff;
   --radius: 18px;
 }
 
@@ -31,9 +34,10 @@ body {
   color: var(--ink);
   font-family: "Space Grotesk", "Segoe UI", sans-serif;
   background:
-    radial-gradient(circle at 10% 12%, rgba(57, 216, 129, 0.12), transparent 34%),
-    radial-gradient(circle at 86% 9%, rgba(70, 191, 255, 0.11), transparent 32%),
-    repeating-linear-gradient(90deg, rgba(236, 243, 251, 0.018) 0 1px, transparent 1px 52px),
+    radial-gradient(circle at 12% 10%, rgba(255, 213, 229, 0.7), transparent 34%),
+    radial-gradient(circle at 88% 12%, rgba(219, 234, 254, 0.72), transparent 32%),
+    radial-gradient(circle at 50% 92%, rgba(255, 247, 237, 0.9), transparent 34%),
+    repeating-linear-gradient(90deg, rgba(37, 99, 235, 0.025) 0 1px, transparent 1px 56px),
     linear-gradient(165deg, var(--bg-start) 0%, var(--bg-mid) 45%, var(--bg-end) 100%);
 }
 
@@ -47,11 +51,11 @@ body::before {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  opacity: 0.12;
+  opacity: 0.42;
   background-image:
-    linear-gradient(to right, rgba(148, 163, 184, 0.14) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(148, 163, 184, 0.1) 1px, transparent 1px),
-    linear-gradient(124deg, rgba(96, 194, 245, 0.1) 0%, transparent 34%);
+    linear-gradient(to right, rgba(31, 91, 160, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(31, 91, 160, 0.06) 1px, transparent 1px),
+    linear-gradient(124deg, rgba(249, 115, 22, 0.08) 0%, transparent 34%);
   background-size:
     72px 72px,
     72px 72px,
@@ -88,8 +92,7 @@ a:hover {
 .sidebar {
   border-right: 1px solid var(--line);
   background:
-    radial-gradient(circle at top left, rgba(57, 216, 129, 0.1), transparent 34%),
-    rgba(5, 10, 17, 0.9);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 241, 245, 0.9));
   color: var(--ink);
   padding: 24px;
   position: sticky;
@@ -112,9 +115,9 @@ a:hover {
   display: grid;
   place-items: center;
   border-radius: 10px;
-  background: linear-gradient(90deg, var(--accent-cool), var(--accent));
+  background: linear-gradient(135deg, var(--accent), var(--accent-cool));
   color: var(--accent-text);
-  box-shadow: 0 10px 36px rgba(70, 191, 255, 0.22);
+  box-shadow: 0 10px 30px rgba(249, 115, 22, 0.2);
 }
 
 .sidebar-copy {
@@ -135,10 +138,10 @@ a:hover {
   align-items: center;
   min-height: 42px;
   padding: 9px 12px;
-  border: 1px solid rgba(96, 194, 245, 0.18);
+  border: 1px solid rgba(31, 91, 160, 0.12);
   border-radius: 999px;
   color: var(--muted);
-  background: rgba(8, 18, 29, 0.55);
+  background: rgba(255, 255, 255, 0.72);
   font-size: 13px;
   transition: border-color 180ms ease, background-color 180ms ease, color 180ms ease;
 }
@@ -146,8 +149,8 @@ a:hover {
 .nav-item:hover,
 .nav-item:focus-visible {
   color: var(--ink);
-  border-color: rgba(96, 194, 245, 0.48);
-  background: rgba(8, 18, 29, 0.82);
+  border-color: rgba(37, 99, 235, 0.32);
+  background: var(--soft-blue);
   outline: none;
 }
 
@@ -172,8 +175,9 @@ a:hover {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background:
-    radial-gradient(circle at top left, rgba(70, 191, 255, 0.12), transparent 32%),
-    linear-gradient(180deg, rgba(8, 18, 29, 0.78), rgba(7, 14, 24, 0.9));
+    radial-gradient(circle at top left, rgba(255, 237, 213, 0.9), transparent 36%),
+    radial-gradient(circle at top right, rgba(219, 234, 254, 0.9), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 247, 250, 0.9));
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
 }
@@ -252,7 +256,7 @@ h3 {
 .panel,
 .stat,
 .item {
-  background: linear-gradient(180deg, rgba(8, 18, 29, 0.74), rgba(7, 14, 24, 0.88));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 250, 252, 0.92));
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -269,8 +273,8 @@ h3 {
 
 .panel-strong {
   background:
-    radial-gradient(circle at top right, rgba(57, 216, 129, 0.1), transparent 30%),
-    linear-gradient(180deg, rgba(8, 18, 29, 0.82), rgba(7, 14, 24, 0.94));
+    radial-gradient(circle at top right, rgba(219, 234, 254, 0.82), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 247, 250, 0.94));
 }
 
 .panel-header {
@@ -298,7 +302,7 @@ h3 {
 
 label {
   font-size: 12px;
-  color: rgba(236, 243, 251, 0.78);
+  color: #475569;
   font-weight: 700;
 }
 
@@ -306,8 +310,8 @@ input,
 textarea,
 select {
   width: 100%;
-  border: 1px solid rgba(96, 194, 245, 0.2);
-  background: rgba(3, 8, 20, 0.54);
+  border: 1px solid rgba(31, 91, 160, 0.16);
+  background: rgba(255, 255, 255, 0.9);
   color: var(--ink);
   border-radius: 12px;
   padding: 10px 11px;
@@ -318,13 +322,15 @@ select {
 input:focus,
 textarea:focus,
 select:focus {
-  border-color: rgba(70, 191, 255, 0.62);
-  box-shadow: 0 0 0 3px rgba(70, 191, 255, 0.12);
+  border-color: rgba(37, 99, 235, 0.52);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 textarea {
   min-height: 104px;
-  resize: vertical;
+  overflow: hidden;
+  resize: none;
+  field-sizing: content;
 }
 
 .payload-preview {
@@ -334,7 +340,7 @@ textarea {
 }
 
 select option {
-  background: #07101a;
+  background: #ffffff;
   color: var(--ink);
 }
 
@@ -347,9 +353,9 @@ select option {
 }
 
 .btn {
-  border: 1px solid rgba(96, 194, 245, 0.18);
-  background: rgba(8, 18, 29, 0.55);
-  color: var(--ink);
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  background: #ffffff;
+  color: #1d4ed8;
   border-radius: 999px;
   min-height: 42px;
   padding: 8px 14px;
@@ -366,20 +372,24 @@ select option {
 
 .btn:hover {
   transform: translateY(-1px);
-  border-color: rgba(96, 194, 245, 0.5);
-  background: rgba(8, 18, 29, 0.82);
+  border-color: rgba(37, 99, 235, 0.38);
+  background: var(--soft-blue);
 }
 
 .btn.primary {
-  background: linear-gradient(90deg, var(--accent-cool), var(--accent));
+  background: linear-gradient(135deg, var(--accent), #fb923c);
   color: var(--accent-text);
   border-color: transparent;
-  box-shadow: 0 10px 40px rgba(70, 191, 255, 0.22);
+  box-shadow: 0 12px 30px rgba(249, 115, 22, 0.22);
+}
+
+.btn.primary:hover {
+  background: linear-gradient(135deg, #ea580c, var(--accent));
 }
 
 .btn.warn {
-  background: var(--accent-warm);
-  color: #160809;
+  background: #fee2e2;
+  color: #991b1b;
   border-color: transparent;
 }
 
@@ -433,9 +443,9 @@ button.item {
   align-items: center;
   border-radius: 999px;
   padding: 4px 8px;
-  border: 1px solid rgba(96, 194, 245, 0.16);
-  background: rgba(8, 18, 29, 0.72);
-  color: rgba(236, 243, 251, 0.82);
+  border: 1px solid rgba(31, 91, 160, 0.14);
+  background: #ffffff;
+  color: #475569;
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
@@ -443,14 +453,14 @@ button.item {
 
 .badge.ok {
   color: var(--accent);
-  border-color: rgba(57, 216, 129, 0.32);
-  background: rgba(57, 216, 129, 0.08);
+  border-color: rgba(249, 115, 22, 0.24);
+  background: var(--soft-orange);
 }
 
 .badge.fail {
   color: var(--danger);
-  border-color: rgba(248, 113, 113, 0.32);
-  background: rgba(248, 113, 113, 0.08);
+  border-color: rgba(220, 38, 38, 0.24);
+  background: #fef2f2;
 }
 
 .mono {
@@ -460,9 +470,9 @@ button.item {
 }
 
 .notice {
-  border: 1px solid rgba(96, 194, 245, 0.22);
-  background: rgba(8, 18, 29, 0.72);
-  color: rgba(236, 243, 251, 0.88);
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  background: rgba(239, 246, 255, 0.86);
+  color: #1e3a8a;
   padding: 10px 12px;
   border-radius: var(--radius);
   font-size: 13px;
@@ -487,9 +497,9 @@ button.item {
   display: grid;
   gap: 4px;
   align-content: center;
-  border: 1px solid rgba(96, 194, 245, 0.16);
+  border: 1px solid rgba(31, 91, 160, 0.14);
   border-radius: 14px;
-  background: rgba(3, 8, 20, 0.34);
+  background: rgba(255, 255, 255, 0.86);
   color: var(--ink);
   cursor: pointer;
   text-align: left;
@@ -498,8 +508,8 @@ button.item {
 
 .amount-choice:hover,
 .amount-choice.active {
-  border-color: rgba(57, 216, 129, 0.42);
-  background: rgba(57, 216, 129, 0.08);
+  border-color: rgba(249, 115, 22, 0.36);
+  background: var(--soft-orange);
 }
 
 .amount-choice span,
@@ -524,9 +534,9 @@ button.item {
     minmax(90px, auto);
   gap: 12px;
   align-items: end;
-  border: 1px solid rgba(96, 194, 245, 0.16);
+  border: 1px solid rgba(31, 91, 160, 0.14);
   border-radius: 14px;
-  background: rgba(3, 8, 20, 0.34);
+  background: rgba(255, 255, 255, 0.82);
   padding: 12px;
 }
 
@@ -551,9 +561,9 @@ button.item {
   min-height: 42px;
   display: flex;
   align-items: center;
-  border: 1px solid rgba(96, 194, 245, 0.2);
+  border: 1px solid rgba(31, 91, 160, 0.16);
   border-radius: 12px;
-  background: rgba(3, 8, 20, 0.34);
+  background: rgba(255, 255, 255, 0.84);
   padding: 10px 11px;
   color: var(--ink);
   font-weight: 700;
@@ -577,9 +587,9 @@ button.item {
 }
 
 .payment-summary > div {
-  border: 1px solid rgba(96, 194, 245, 0.16);
+  border: 1px solid rgba(31, 91, 160, 0.14);
   border-radius: 14px;
-  background: rgba(3, 8, 20, 0.34);
+  background: rgba(255, 255, 255, 0.86);
   padding: 10px;
   min-width: 0;
 }
@@ -590,7 +600,8 @@ button.item {
 }
 
 .payment-total {
-  border-color: rgba(57, 216, 129, 0.28) !important;
+  border-color: rgba(249, 115, 22, 0.28) !important;
+  background: var(--soft-orange) !important;
 }
 
 .video {

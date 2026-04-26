@@ -38,7 +38,7 @@ with:
   "customerId": "cus_demo",
   "objective": "Plan a referrer video workflow with full 0G receipts.",
   "payload": {
-    "image_urls": ["https://example.com/a.jpg"],
+    "image_urls": ["https://images.unsplash.com/photo-1542291026-7eec264c27ff"],
     "video_model": "RUNWAYML",
     "aspect_ratio": "9:16",
     "prompt": "Create a launch video."
