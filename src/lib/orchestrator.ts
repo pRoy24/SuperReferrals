@@ -158,19 +158,18 @@ export async function createSubAccountForCustomer(input: {
   if (!customer) {
     throw new Error("customerId was not found");
   }
-  assertCustomerProcessorReady(customer);
-  const normalizedWallet = normalizeWallet(input.wallet);
+  const normalizedWallet = assertUsableEvmAddress(input.wallet, "Wallet");
   assertStorefrontWalletAllowed(customer, normalizedWallet);
   const existingAccount = existingStore.subAccounts.find((item) =>
     item.customerId === input.customerId && normalizeWallet(item.wallet) === normalizedWallet
   );
   if (existingAccount) {
     const blockchainRegistration = existingAccount.blockchainRegistration ||
-      await createZeroGUserRegistration(customer, existingAccount);
+      await tryCreateZeroGUserRegistration(customer, existingAccount);
     return mutateStore((store) => {
       const current = store.subAccounts.find((item) => item.id === existingAccount.id);
       if (!current) {
-        throw new Error("sub-account disappeared while provisioning wallet profile");
+        throw new Error("wallet user record disappeared while provisioning");
       }
       current.blockchainRegistration = blockchainRegistration;
       current.updatedAt = nowIso();
@@ -178,16 +177,29 @@ export async function createSubAccountForCustomer(input: {
     });
   }
   const account = await mutateStore((store) => addSubAccount(store, input));
-  const blockchainRegistration = await createZeroGUserRegistration(customer, account);
+  const blockchainRegistration = await tryCreateZeroGUserRegistration(customer, account);
   return mutateStore((store) => {
     const current = store.subAccounts.find((item) => item.id === account.id);
     if (!current) {
-      throw new Error("sub-account disappeared while provisioning wallet profile");
+      throw new Error("wallet user record disappeared while provisioning");
     }
     current.blockchainRegistration = blockchainRegistration;
     current.updatedAt = nowIso();
     return current;
   });
+}
+
+async function tryCreateZeroGUserRegistration(customer: Customer, account: SubAccount) {
+  try {
+    return await createZeroGUserRegistration(customer, account);
+  } catch (error) {
+    console.warn("Skipping optional 0G wallet user registration", {
+      customerId: customer.id,
+      subAccountId: account.id,
+      error: error instanceof Error ? error.message : error
+    });
+    return undefined;
+  }
 }
 
 async function createZeroGUserRegistration(customer: Customer, account: SubAccount) {
@@ -241,14 +253,19 @@ export async function quotePayment(input: {
   if (!customer) {
     throw new Error("customerId was not found");
   }
+  assertCustomerRenderServiceReady(customer);
   if (!input.imageCount || input.imageCount < 1) {
     throw new Error("imageCount must be greater than zero");
   }
   const quoteSubAccount = input.subAccountId
     ? store.subAccounts.find((item) => item.id === input.subAccountId && item.customerId === customer.id)
     : undefined;
+  const quoteWallet = quoteSubAccount?.wallet || input.swapper;
+  if (!isUsableEvmAddress(quoteWallet)) {
+    throw new Error("Connect a valid wallet before requesting a render quote.");
+  }
   assertStorefrontRenderAccess(customer, store, {
-    wallet: quoteSubAccount?.wallet || input.swapper
+    wallet: quoteWallet
   });
   assertRenderConditions(customer, {
     imageCount: input.imageCount,
@@ -477,16 +494,24 @@ export async function createGeneration(input: {
   if (!customer) {
     throw new Error("customerId was not found");
   }
-  assertCustomerProcessorReady(customer);
+  assertCustomerRenderServiceReady(customer);
   const samsarApiKey = customerSamsarApiKey(customer);
 
   let subAccount = input.subAccountId
-    ? store.subAccounts.find((item) => item.id === input.subAccountId)
+    ? store.subAccounts.find((item) => item.id === input.subAccountId && item.customerId === customer.id)
     : undefined;
+  if (input.subAccountId && !subAccount) {
+    throw new Error("Wallet user record was not found for this storefront.");
+  }
   if (!subAccount) {
+    const payerWallet = input.subAccount?.wallet || input.payment?.payerWallet;
+    if (!payerWallet) {
+      throw new Error("Connect a wallet before starting a render.");
+    }
+    const normalizedPayerWallet = assertUsableEvmAddress(payerWallet, "Render wallet");
     subAccount = await createSubAccountForCustomer({
       customerId: customer.id,
-      wallet: input.subAccount?.wallet || customer.ownerWallet,
+      wallet: normalizedPayerWallet,
       email: input.subAccount?.email,
       username: input.subAccount?.username
     });
@@ -1301,6 +1326,13 @@ function assertCustomerProcessorReady(customer: Customer) {
   if (!hasProcessorAccountSession || Number(customer.subscription.creditsRemaining || 0) <= 0) {
     throw new Error("Sign in to a credited SuperReferrals account before using storefront setup.");
   }
+}
+
+function assertCustomerRenderServiceReady(customer: Customer) {
+  if (isProviderMock("SAMSAR") || customerSamsarApiKey(customer)) {
+    return;
+  }
+  throw new Error("Video render service is not configured. Set SAMSAR_API_KEY or connect a Samsar API key before accepting wallet-paid renders.");
 }
 
 function resolveRenderPaymentRecipientWallet(customer: Customer) {

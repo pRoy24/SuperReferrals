@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, CircleDollarSign, Code2, ExternalLink, ListChecks, Play, Plus, RefreshCw, ShieldCheck, Store, Trash2, Wallet } from "lucide-react";
+import { Bot, CircleDollarSign, Code2, ExternalLink, ListChecks, Play, Plus, RefreshCw, Store, Trash2, Wallet } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { UserStoreCreatorSkeleton } from "@/components/FormLoadingSkeletons";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
@@ -259,7 +259,11 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     [customer?.pricing.chainId]
   );
   const paymentTokens = useMemo(() => getPaymentTokens(transactionChain.id), [transactionChain.id]);
-  const selectedPaymentToken = paymentTokens.find((token) => token.symbol === paymentCurrency) || paymentTokens[0]!;
+  const selectablePaymentTokens = useMemo(() => {
+    const ethOrUsdc = paymentTokens.filter((token) => token.symbol === "USDC" || token.symbol === "ETH");
+    return ethOrUsdc.length ? ethOrUsdc : paymentTokens;
+  }, [paymentTokens]);
+  const selectedPaymentToken = selectablePaymentTokens.find((token) => token.symbol === paymentCurrency) || selectablePaymentTokens[0]!;
   const settlementToken =
     findPaymentToken(customer?.pricing.settlementTokenAddress || "", transactionChain.id) ||
     settlementTokenForCurrency(customer?.pricing.currency || "USDC", transactionChain.id) ||
@@ -399,11 +403,11 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   }, [generationForm.imageUrls, generationForm.videoModel, generationForm.aspectRatio, paymentCurrency, transactionChain.id, walletAddress]);
 
   useEffect(() => {
-    const firstToken = paymentTokens[0];
-    if (firstToken && !paymentTokens.some((token) => token.symbol === paymentCurrency)) {
+    const firstToken = selectablePaymentTokens[0];
+    if (firstToken && !selectablePaymentTokens.some((token) => token.symbol === paymentCurrency)) {
       setPaymentCurrency(firstToken.symbol);
     }
-  }, [paymentCurrency, paymentTokens]);
+  }, [paymentCurrency, selectablePaymentTokens]);
 
   useEffect(() => {
     const provider = activeWalletProvider?.provider || walletProviders[0]?.provider;
@@ -558,12 +562,8 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       setActiveWalletProvider(selected.walletProvider);
       setWalletAddress(firstAccount);
       setProfileForm(nextProfile);
-      const account = await ensureWalletSubAccount(firstAccount, nextProfile);
-      const registration = account.blockchainRegistration;
       setMessage(
-        registration
-          ? `Wallet connected${selected.walletProvider ? ` with ${selected.walletProvider.name}` : ""} on ${transactionChain.name}. 0G profile ${shortHash(registration.profileId)} is ready on ${registration.chainName}.`
-          : `Wallet connected${selected.walletProvider ? ` with ${selected.walletProvider.name}` : ""} on ${transactionChain.name}.`
+        `Wallet connected${selected.walletProvider ? ` with ${selected.walletProvider.name}` : ""} on ${transactionChain.name}.`
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Wallet connection failed");
@@ -927,8 +927,6 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
             </div>
             <div className="form-grid">
               <TextField label="Wallet address" value={walletAddress} onChange={setWalletAddress} full />
-              <TextField label="Email" value={profileForm.email} onChange={(email) => setProfileForm({ ...profileForm, email })} />
-              <TextField label="Username" value={profileForm.username} onChange={(username) => setProfileForm({ ...profileForm, username })} />
             </div>
             <div className="wallet-provider-grid">
               {walletProviders.map((walletProvider) => (
@@ -953,14 +951,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
               <button className="btn primary" onClick={() => connectWallet()} disabled={busy === "wallet"}>
                 <Wallet size={16} /> {busy === "wallet" ? "Connecting..." : hasWalletAddress ? "Switch wallet" : "Connect wallet"}
               </button>
-              <button className="btn" onClick={() => ensureWalletSubAccount().then((account) => setMessage(account.blockchainRegistration ? "Wallet profile and 0G user record ready." : "Wallet profile ready.")).catch((error) => setMessage(error.message))}>
-                <ShieldCheck size={16} /> {connectedSubAccount ? "Update profile" : "Save profile"}
-              </button>
               {hasWalletAddress && <span className="badge ok">connected {shortWallet(walletAddress)}</span>}
-              {connectedSubAccount && <span className="badge ok">{connectedSubAccount.referrerCode}</span>}
-              {connectedSubAccount?.blockchainRegistration && (
-                <span className="badge ok">{connectedSubAccount.blockchainRegistration.mock ? "0G mock" : "0G anchored"}</span>
-              )}
             </div>
           </div>
 
@@ -1020,7 +1011,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
                 footerWizardItems={footerWizardItems}
                 outroFocusAreaWizard={outroFocusAreaWizard}
                 imageCount={imageCount}
-                paymentTokens={paymentTokens}
+                paymentTokens={selectablePaymentTokens}
                 paymentCurrency={paymentCurrency}
                 settlementToken={settlementToken}
                 onPatch={updateGenerationForm}
@@ -1041,7 +1032,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
                 form={generationForm}
                 imageCount={imageCount}
                 generationPayloadPreview={generationPayloadPreview}
-                paymentTokens={paymentTokens}
+                paymentTokens={selectablePaymentTokens}
                 paymentCurrency={paymentCurrency}
                 settlementToken={settlementToken}
                 onPatch={updateGenerationForm}
@@ -1513,7 +1504,7 @@ function PricingOption({
         <span className="badge ok">{details.pricePerSecondUsd.toFixed(2)} USDC/sec</span>
       </div>
       <p className="subtle">
-        {item.videoModel} · {item.aspectRatio} · {details.baseCreditsPerSecond} credits/sec · up to {item.maxSecondsPerImage}s/image
+        {item.videoModel} · {item.aspectRatio} · up to {item.maxSecondsPerImage}s/image
       </p>
     </button>
   );

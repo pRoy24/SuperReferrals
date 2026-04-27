@@ -20,19 +20,19 @@ Built for the ETHGlobal Open Agents hackathon, SuperReferrals focuses on practic
 
 - `/`: product landing page with entry points into the demo surfaces.
 - `/dashboard`: customer console for store setup, pricing, campaign automation, render history, and Samsar Processor credits.
-- `/r/:referrerCode`: public user referral page for wallet signup, payment, image-to-video generation, and prior renders.
+- `/r/:referrerCode`: public user referral page for wallet connection, ETH/USDC payment, image-to-video generation, and prior renders.
 - `/feed`: public feed for generated referral videos.
 - `/inft/:id`: public output page with video playback, attribution, assistant actions, and share/download actions.
 - `Agent Town`: campaign automation console for planning, pricing, settlement, rollback, and media operations.
 
 ## Core Flow
 
-1. A customer creates or tops up a Samsar Processor account.
-2. The customer configures a public referral page, product context, pricing, wallet, currency, and refund policy from `/dashboard`.
+1. A customer configures a public referral page, product context, pricing, wallet, currency, refund policy, and render API access from `/dashboard`.
+2. The customer publishes the storefront route.
 3. A creator or buyer opens the referral page and connects a wallet.
-4. The app creates or reuses the buyer profile for that customer/referrer route.
+4. The app creates or reuses an internal wallet user record for that customer/referrer route; the public user does not need a Samsar JS account or subaccount.
 5. The user submits or reuses product image URLs, product metadata, CTA URL, prompt, model, style, and aspect ratio.
-6. The app quotes payment, verifies a mined transaction, and grants Samsar render credits.
+6. The app quotes ETH or USDC payment on the configured network, verifies the mined transaction, and starts the render with the configured Samsar API key.
 7. Samsar generates the video.
 8. Completion saves the video metadata, creates the public output record, and exposes the generated campaign asset.
 9. The public output page exposes the video, attribution, campaign metadata, and post-render actions.
