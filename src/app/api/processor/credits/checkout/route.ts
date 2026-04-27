@@ -1,52 +1,61 @@
 import { NextResponse } from "next/server";
 import { nowIso } from "@/lib/ids";
+import { appBaseUrl, env } from "@/lib/env";
 import {
   buildCustomerSamsarExternalUser,
-  createSamsarProcessorCreditCheckout,
-  ensureSamsarProcessorSubAccount
+  createSamsarProcessorCreditCheckout
 } from "@/lib/samsar-processor";
 import { mutateStore, readStore, upsertCustomer } from "@/lib/store";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+    const checkoutEmail = String(body.customerEmail || "").trim().toLowerCase();
     const store = await readStore();
     const customer = body.customerId
       ? store.customers.find((item) => item.id === body.customerId)
       : store.customers[0];
-    const externalUser = customer
-      ? buildCustomerSamsarExternalUser(customer, body.customerEmail || customer.samsarAccount?.email)
-      : undefined;
-    const externalSession = externalUser
-      ? await ensureSamsarProcessorSubAccount(externalUser)
+    const internalApiKey = env("SAMSAR_API_KEY") || undefined;
+    const parentApiKey = internalApiKey || customer?.samsarAccount?.apiKey;
+    const externalUser = customer && checkoutEmail && parentApiKey
+      ? buildCustomerSamsarExternalUser(customer, checkoutEmail)
       : undefined;
     const checkout = await createSamsarProcessorCreditCheckout({
       amountCents: body.amountCents ?? body.amount_cents,
-      customerEmail: body.customerEmail || customer?.samsarAccount?.email,
+      apiKey: parentApiKey,
+      authToken: parentApiKey ? undefined : customer?.samsarAccount?.authToken,
+      customerEmail: checkoutEmail || undefined,
       externalUser,
-      metadata: body.metadata
+      metadata: {
+        ...(body.metadata || {}),
+        ...(customer ? { superreferralsCustomerId: customer.id } : {}),
+        ...(customer?.name ? { superreferralsCustomerName: customer.name } : {}),
+        ...(checkoutEmail ? { superreferralsAccountEmail: checkoutEmail } : {})
+      },
+      webhookUrl: `${appBaseUrl()}/api/webhooks/processor/credits`
     });
     if (customer) {
       await mutateStore((mutableStore) => upsertCustomer(mutableStore, {
         id: customer.id,
         samsarAccount: {
           ...(customer.samsarAccount || {}),
-          email: String(body.customerEmail || customer.samsarAccount?.email || "") || undefined,
+          email: checkoutEmail || customer.samsarAccount?.email,
           username: customer.samsarAccount?.username || customer.name,
           userId: customer.samsarAccount?.userId || customer.id,
-          externalProvider: externalUser?.provider,
-          externalUserId: String(externalUser?.external_user_id || externalUser?.externalUserId || customer.id),
-          apiKey: externalSession?.externalApiKey || customer.samsarAccount?.apiKey,
+          externalProvider: customer.samsarAccount?.externalProvider,
+          externalUserId: customer.samsarAccount?.externalUserId,
+          apiKey: customer.samsarAccount?.apiKey,
           checkoutSessionId: checkout.checkoutSessionId,
           checkoutUrl: checkout.url,
           paymentStatusEndpoint: checkout.paymentStatusEndpoint,
+          externalPaymentId: checkout.externalPaymentId || customer.samsarAccount?.externalPaymentId,
           updatedAt: nowIso()
         },
         subscription: {
-          status: Number(externalSession?.creditsRemaining || customer.subscription.creditsRemaining || 0) > 0
+          status: Number(customer.subscription.creditsRemaining || 0) > 0
             ? "active"
             : "not_started",
-          creditsRemaining: externalSession?.creditsRemaining ?? customer.subscription.creditsRemaining ?? 0
+          creditsRemaining: customer.subscription.creditsRemaining ?? 0
         }
       }));
     }

@@ -39,10 +39,12 @@ type SamsarSdkClient = {
 
 export interface SamsarProcessorCreditCheckoutInput {
   amountCents: number;
+  apiKey?: string;
   authToken?: string;
   customerEmail?: string;
   externalUser?: SamsarJsExternalUserIdentity;
   metadata?: Record<string, string | number | boolean>;
+  webhookUrl?: string;
 }
 
 export interface SamsarProcessorCreditCheckout {
@@ -53,6 +55,7 @@ export interface SamsarProcessorCreditCheckout {
   currency: string;
   paymentStatusEndpoint?: string;
   paymentIntentId?: string | null;
+  externalPaymentId?: string | null;
 }
 
 export async function createSamsarProcessorCreditCheckout(input: SamsarProcessorCreditCheckoutInput) {
@@ -66,7 +69,7 @@ export async function createSamsarProcessorCreditCheckout(input: SamsarProcessor
   }
 
   if (input.externalUser) {
-    return createExternalCreditRecharge(input.externalUser, amountCents);
+    return createExternalCreditRecharge(input.externalUser, amountCents, input.apiKey);
   }
 
   return createAnonymousCreditCheckout(input, amountCents);
@@ -91,17 +94,17 @@ export async function loginSamsarProcessorAccount({
 }): Promise<SamsarProcessorAccountSession> {
   const trimmedEmail = email.trim().toLowerCase();
   if (!trimmedEmail || !password.trim()) {
-    throw new Error("Email and password are required to login to an existing Samsar account.");
+    throw new Error("Email and password are required to sign in to an existing SuperReferrals account.");
   }
 
   const data = await requestSamsarJson(`${samsarApiRootUrl()}/users/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email: trimmedEmail, password })
-  }, "Unable to login to Samsar account");
+  }, "Unable to sign in to SuperReferrals account");
   const authToken = String(data.authToken || data.token || "");
   if (!authToken) {
-    throw new Error("Samsar login did not return an auth token.");
+    throw new Error("SuperReferrals sign-in did not return an auth token.");
   }
   const credits = await fetchSamsarProcessorCredits(authToken);
   return {
@@ -119,7 +122,7 @@ export async function fetchSamsarProcessorCredits(authToken: string) {
   const data = await requestSamsarJson(`${samsarApiV1Url()}/credits`, {
     method: "GET",
     headers: { authorization: `Bearer ${authToken}` }
-  }, "Unable to fetch Samsar credits");
+  }, "Unable to fetch SuperReferrals credits");
   return {
     remainingCredits: Number(data.remainingCredits || data.remaining_credits || data.generationCredits || 0),
     lastTopUp: data.lastTopUp
@@ -140,12 +143,14 @@ export function buildCustomerSamsarExternalUser(customer: Customer, email?: stri
     user_type: "storefront_customer",
     metadata: {
       superreferralsCustomerId: customer.id,
+      superreferralsParentCustomerId: customer.id,
+      superreferralsAccountEmail: email || account?.email || "",
       storefrontName: customer.name
     }
   };
 }
 
-export async function ensureSamsarProcessorSubAccount(externalUser: SamsarJsExternalUserIdentity) {
+export async function ensureSamsarProcessorSubAccount(externalUser: SamsarJsExternalUserIdentity, apiKey?: string) {
   if (isProviderMock("SAMSAR")) {
     return {
       externalApiKey: `mock_external_${externalUser.external_user_id || externalUser.externalUserId || "customer"}`,
@@ -153,7 +158,7 @@ export async function ensureSamsarProcessorSubAccount(externalUser: SamsarJsExte
       raw: { mock: true }
     };
   }
-  const response = await (await samsarSdkClient()).createExternalUserSession(externalUser);
+  const response = await (await samsarSdkClient(apiKey)).createExternalUserSession(externalUser);
   const data = response.data as Record<string, unknown>;
   return {
     externalApiKey: String(data.external_api_key || data.externalApiKey || ""),
@@ -162,14 +167,14 @@ export async function ensureSamsarProcessorSubAccount(externalUser: SamsarJsExte
   };
 }
 
-export async function refreshSamsarProcessorSubAccountCredits(externalUser: SamsarJsExternalUserIdentity) {
+export async function refreshSamsarProcessorSubAccountCredits(externalUser: SamsarJsExternalUserIdentity, apiKey?: string) {
   if (isProviderMock("SAMSAR")) {
     return {
       creditsRemaining: 0,
       raw: { mock: true }
     };
   }
-  const response = await (await samsarSdkClient()).getExternalCreditsBalance(externalUser);
+  const response = await (await samsarSdkClient(apiKey)).getExternalCreditsBalance(externalUser);
   const data = response.data as Record<string, unknown>;
   return {
     creditsRemaining: extractSamsarCredits(data),
@@ -179,7 +184,7 @@ export async function refreshSamsarProcessorSubAccountCredits(externalUser: Sams
 
 export async function createSamsarProcessorSubAccountLoginLink(
   externalUser: SamsarJsExternalUserIdentity,
-  options: { redirect?: string } = {}
+  options: { redirect?: string; apiKey?: string } = {}
 ) {
   if (isProviderMock("SAMSAR")) {
     const loginToken = `mock_login_${externalUser.external_user_id || externalUser.externalUserId || "customer"}`;
@@ -190,7 +195,7 @@ export async function createSamsarProcessorSubAccountLoginLink(
       raw: { mock: true }
     };
   }
-  const response = await (await samsarSdkClient()).createExternalUserLoginToken(externalUser, {
+  const response = await (await samsarSdkClient(options.apiKey)).createExternalUserLoginToken(externalUser, {
     redirect: options.redirect || "/external/studio"
   });
   const data = response.data as Record<string, unknown>;
@@ -210,11 +215,11 @@ async function createAuthenticatedCreditRecharge(authToken: string, amountCents:
       authorization: `Bearer ${authToken}`
     },
     body: JSON.stringify({ credits: amountCents })
-  }, "Unable to create Samsar credit recharge checkout");
+  }, "Unable to create SuperReferrals credit recharge checkout");
   return normalizeCheckoutResponse(data, amountCents);
 }
 
-async function createExternalCreditRecharge(externalUser: SamsarJsExternalUserIdentity, amountCents: number) {
+async function createExternalCreditRecharge(externalUser: SamsarJsExternalUserIdentity, amountCents: number, apiKey?: string) {
   if (isProviderMock("SAMSAR")) {
     return {
       url: `${appBaseUrl()}/payment_success?mock=1`,
@@ -226,7 +231,7 @@ async function createExternalCreditRecharge(externalUser: SamsarJsExternalUserId
       paymentIntentId: null
     };
   }
-  const response = await (await samsarSdkClient()).createExternalCreditsRecharge(externalUser, amountCents);
+  const response = await (await samsarSdkClient(apiKey)).createExternalCreditsRecharge(externalUser, amountCents);
   return normalizeCheckoutResponse(response.data as Record<string, unknown>, amountCents);
 }
 
@@ -240,10 +245,11 @@ async function createAnonymousCreditCheckout(input: SamsarProcessorCreditCheckou
       cache: "no-store",
       body: JSON.stringify({
         amountCents,
-        customerEmail: input.customerEmail,
+        ...(input.customerEmail?.trim() ? { customerEmail: input.customerEmail.trim().toLowerCase() } : {}),
         appBaseUrl: appBaseUrl(),
         successPath: "/payment_success",
         cancelPath: "/payment_cancel",
+        webhookUrl: input.webhookUrl || `${appBaseUrl()}/api/webhooks/processor/credits`,
         metadata: {
           sourceProject: "superreferrals",
           ...(input.metadata || {})
@@ -252,12 +258,12 @@ async function createAnonymousCreditCheckout(input: SamsarProcessorCreditCheckou
     });
   } catch (error) {
     const detail = error instanceof Error ? ` ${error.message}` : "";
-    throw new Error(`Unable to reach Samsar API at ${apiRootUrl}. Set SAMSAR_API_URL to the production Samsar API origin.${detail}`);
+    throw new Error(`Unable to reach the production SuperReferrals API at ${apiRootUrl}. Set SAMSAR_API_URL to the production API origin.${detail}`);
   }
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.error || data.message || "Unable to create Samsar Processor checkout session");
+    throw new Error(data.error || data.message || "Unable to create SuperReferrals checkout session");
   }
 
   return normalizeCheckoutResponse(data, amountCents);
@@ -269,7 +275,7 @@ async function requestSamsarJson(url: string, init: RequestInit, fallback: strin
     response = await fetch(url, { ...init, cache: "no-store" });
   } catch (error) {
     const detail = error instanceof Error ? ` ${error.message}` : "";
-    throw new Error(`${fallback}: unable to reach Samsar API at ${samsarApiRootUrl()}.${detail}`);
+    throw new Error(`${fallback}: unable to reach the production SuperReferrals API at ${samsarApiRootUrl()}.${detail}`);
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -286,14 +292,19 @@ function normalizeCheckoutResponse(data: Record<string, unknown>, amountCents: n
     credits: Number(data.credits || amountCents),
     currency: String(data.currency || "USD"),
     paymentStatusEndpoint: typeof data.paymentStatusEndpoint === "string" ? data.paymentStatusEndpoint : undefined,
-    paymentIntentId: typeof data.paymentIntentId === "string" ? data.paymentIntentId : null
+    paymentIntentId: typeof data.paymentIntentId === "string" ? data.paymentIntentId : null,
+    externalPaymentId: typeof data.external_payment_id === "string"
+      ? data.external_payment_id
+      : typeof data.externalPaymentId === "string"
+        ? data.externalPaymentId
+        : null
   };
 }
 
-async function samsarSdkClient() {
-  const apiKey = env("SAMSAR_API_KEY");
+async function samsarSdkClient(apiKeyOverride?: string) {
+  const apiKey = apiKeyOverride?.trim() || env("SAMSAR_API_KEY");
   if (!apiKey) {
-    throw new Error("SAMSAR_API_KEY is required for samsar-js sub-account actions.");
+    throw new Error("SAMSAR_API_KEY is required for SuperReferrals account actions.");
   }
   const dynamicImport = new Function("specifier", "return import(specifier)") as (
     specifier: string

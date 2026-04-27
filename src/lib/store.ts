@@ -26,7 +26,7 @@ let storeMutationQueue: Promise<unknown> = Promise.resolve();
 
 function dataDir() {
   const configured = env("SUPERREFERRALS_DATA_DIR", DEFAULT_DATA_DIR);
-  if (isVercelRuntime() && !isTmpPath(configured)) {
+  if (isServerlessRuntime() && !isTmpPath(configured)) {
     const tempRelativeDir = path.isAbsolute(configured) ? path.basename(configured) : configured;
     return path.join(os.tmpdir(), tempRelativeDir);
   }
@@ -39,8 +39,18 @@ function dataPath() {
   return path.join(dataDir(), STORE_FILE);
 }
 
-function isVercelRuntime() {
-  return Boolean(process.env.VERCEL || process.env.VERCEL_ENV || process.env.NOW_REGION);
+function isServerlessRuntime() {
+  const cwd = process.cwd();
+  return Boolean(
+    process.env.VERCEL
+    || process.env.VERCEL_ENV
+    || process.env.NOW_REGION
+    || process.env.AWS_LAMBDA_FUNCTION_NAME
+    || process.env.LAMBDA_TASK_ROOT
+    || process.env.AWS_EXECUTION_ENV?.includes("AWS_Lambda")
+    || cwd === "/var/task"
+    || cwd.startsWith("/var/task/")
+  );
 }
 
 function isTmpPath(filePath: string) {
@@ -118,7 +128,11 @@ function normalizeStoreForRuntime(store: SuperReferralsStore) {
       customer.pricing = pricing;
       changed = true;
     }
-    const hasSamsarSession = Boolean(customer.samsarAccount?.authToken || customer.samsarAccount?.apiKey);
+    const hasSamsarSession = Boolean(
+      customer.samsarAccount?.authToken ||
+      customer.samsarAccount?.apiKey ||
+      (customer.samsarAccount?.externalUserId && env("SAMSAR_API_KEY"))
+    );
     if (!hasSamsarSession && Number(customer.subscription?.creditsRemaining || 0) > 0) {
       customer.subscription = {
         ...(customer.subscription || { status: "not_started" }),
@@ -188,7 +202,6 @@ export function seedStore(): SuperReferralsStore {
       external_app_id: customerId,
       username: "demo-creator"
     },
-    externalApiKey: "mock_external_api_key",
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -228,19 +241,21 @@ export function publicStore(store: SuperReferralsStore): SuperReferralsStore {
 }
 
 export function publicCustomer(customer: Customer): Customer {
+  const hasInternalApiKeySession = Boolean(customer.samsarAccount?.externalUserId && env("SAMSAR_API_KEY"));
   const samsarAccount = customer.samsarAccount
     ? {
       email: customer.samsarAccount.email,
       username: customer.samsarAccount.username,
       userId: customer.samsarAccount.userId,
-      hasSession: Boolean(customer.samsarAccount.authToken || customer.samsarAccount.apiKey),
-      hasApiKey: Boolean(customer.samsarAccount.apiKey),
+      hasSession: Boolean(customer.samsarAccount.authToken || customer.samsarAccount.apiKey || hasInternalApiKeySession),
+      hasApiKey: Boolean(customer.samsarAccount.apiKey || hasInternalApiKeySession),
       externalProvider: customer.samsarAccount.externalProvider,
       externalUserId: customer.samsarAccount.externalUserId,
       walletAddress: customer.samsarAccount.walletAddress,
       checkoutSessionId: customer.samsarAccount.checkoutSessionId,
       checkoutUrl: customer.samsarAccount.checkoutUrl,
       paymentStatusEndpoint: customer.samsarAccount.paymentStatusEndpoint,
+      externalPaymentId: customer.samsarAccount.externalPaymentId,
       loginUrl: customer.samsarAccount.loginUrl,
       passwordSetupUrl: customer.samsarAccount.passwordSetupUrl,
       updatedAt: customer.samsarAccount.updatedAt
@@ -255,7 +270,7 @@ export function publicCustomer(customer: Customer): Customer {
 export function publicSubAccount(account: SubAccount): SubAccount {
   return {
     ...account,
-    externalApiKey: account.externalApiKey ? "connected" : undefined
+    externalApiKey: undefined
   };
 }
 
@@ -323,7 +338,12 @@ export function addSubAccount(store: SuperReferralsStore, input: {
       provider: "superreferrals",
       external_user_id: id,
       external_app_id: input.customerId,
-      username
+      external_company_id: input.customerId,
+      external_account_id: input.customerId,
+      email: input.email?.trim() || undefined,
+      username,
+      display_name: username,
+      user_type: "storefront_user"
     },
     externalApiKey: input.externalApiKey,
     createdAt: timestamp,

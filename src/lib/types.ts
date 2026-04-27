@@ -78,6 +78,8 @@ export interface Customer {
     checkoutSessionId?: string;
     checkoutUrl?: string;
     paymentStatusEndpoint?: string;
+    externalPaymentId?: string;
+    processedCheckoutSessionIds?: string[];
     loginUrl?: string;
     passwordSetupUrl?: string;
     updatedAt?: string;
@@ -99,7 +101,13 @@ export interface ExternalUserIdentity {
   provider: string;
   external_user_id: string;
   external_app_id: string;
+  external_company_id?: string;
+  external_account_id?: string;
+  email?: string;
   username?: string;
+  display_name?: string;
+  user_type?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface SubAccount {

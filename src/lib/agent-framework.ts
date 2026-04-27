@@ -57,14 +57,14 @@ export const SAMSAR_AGENT_CAPABILITIES: AgentCapability[] = [
   {
     id: "translate_video",
     label: "Translate video",
-    description: "Clone a completed Samsar session into a translated session.",
+    description: "Clone a completed SuperReferrals video session into a translated session.",
     samsarEndpoint: "video/translate_video",
     requiredPillars: ["compute", "storage", "chain"]
   },
   {
     id: "join_videos",
     label: "Join videos",
-    description: "Append multiple completed Samsar sessions into one composed session.",
+    description: "Append multiple completed SuperReferrals sessions into one composed video.",
     samsarEndpoint: "video/join_videos",
     requiredPillars: ["compute", "storage", "chain"]
   },
@@ -85,7 +85,7 @@ export const SAMSAR_AGENT_CAPABILITIES: AgentCapability[] = [
   {
     id: "assistant_memory",
     label: "Assistant memory",
-    description: "Use Samsar assistant and embedding APIs for customer memory, campaign search, and copy generation.",
+    description: "Use SuperReferrals assistant and embedding APIs for customer memory, campaign search, and copy generation.",
     samsarEndpoint: "assistant/completion | chat/*embedding*",
     requiredPillars: ["compute", "storage", "service_marketplace"]
   },
@@ -114,7 +114,7 @@ const AGENT_BLUEPRINTS: AgentBlueprint[] = [
   },
   {
     slug: "director",
-    name: "Samsar Director",
+    name: "SuperReferrals Director",
     role: "video generation director",
     personality: "Commercial, visual, and fast to pick the simplest effective video route.",
     capabilities: ["image_list_to_video", "translate_video", "join_videos", "outro_mutation", "remove_subtitles"],
@@ -240,7 +240,7 @@ export async function runAgentTownSimulation(input: {
   const assignedAgents = [deployer, director, guardian, pricingOracle, settlementKeeper, mayor];
   const jobId = createId("agent_job");
   const objective = input.objective?.trim() ||
-    "Plan and execute a cross-agent Samsar video workflow with full 0G receipts.";
+    "Plan and execute a cross-agent SuperReferrals video workflow with full 0G receipts.";
   const jobType = input.type || inferJobType(input.payload);
   const estimatedChargeUsd = estimateAgentCharge(customer, input.payload, jobType);
   const manifest = {
@@ -262,7 +262,7 @@ export async function runAgentTownSimulation(input: {
   const computeQuestion = [
     `Objective: ${objective}`,
     `Job type: ${jobType}`,
-    `Available Samsar endpoints: ${SAMSAR_AGENT_CAPABILITIES.map((capability) => capability.samsarEndpoint).filter(Boolean).join(", ")}`,
+    `Available SuperReferrals endpoints: ${SAMSAR_AGENT_CAPABILITIES.map((capability) => capability.samsarEndpoint).filter(Boolean).join(", ")}`,
     `Input root: ${storageArtifact.rootHash}`,
     "Return a compact execution plan, QA gates, rollback policy, and which agents should talk over AXL."
   ].join("\n");
@@ -459,7 +459,7 @@ function buildAgentTownSystemPrompt(agents: AgentProfile[]) {
   return [
     "You are the 0G Deployer Agent coordinating a SuperReferrals Agent Town.",
     "Use 0G Chain, Storage, DA, Compute, and Service Marketplace for every serious job.",
-    "Align actions to Samsar video and assistant endpoints, Uniswap charge signals, KeeperHub settlement, and Gensyn AXL messages.",
+    "Align actions to SuperReferrals video and assistant endpoints, Uniswap charge signals, KeeperHub settlement, and Gensyn AXL messages.",
     "Agents:",
     ...agents.map((agent) => `- ${agent.name}: ${agent.role}. Personality: ${agent.personality}`)
   ].join("\n");
@@ -505,7 +505,7 @@ function buildHeuristicPlan({
       "0g_da_commitment",
       "0g_chain_anchor"
     ],
-    rollbackPolicy: "Cancel incomplete Samsar work, publish rollback event, and use KeeperHub for refunds or compensating transfers.",
+    rollbackPolicy: "Cancel incomplete SuperReferrals work, publish rollback event, and use KeeperHub for refunds or compensating transfers.",
     computeSummary: String(computeAnswer.output_text || "0G Compute planned the job.")
   };
 }
@@ -676,7 +676,7 @@ async function buildAgentTownEvents(
       to: guardian,
       channel: "axl",
       eventType: "handoff",
-      content: "Please review brand risk before the director touches Samsar.",
+      content: "Please review brand risk before the director starts SuperReferrals generation.",
       payload: { gate: "brand_guardian_approval" }
     },
     {

@@ -22,7 +22,7 @@ async function samsarRequest<T = Record<string, unknown>>(
   const { apiKey: apiKeyOverride, query, ...requestInit } = init;
   const apiKey = apiKeyOverride || env("SAMSAR_API_KEY");
   if (isProviderMock("SAMSAR") || !apiKey) {
-    throw new Error("Samsar live request called in mock mode");
+    throw new Error("Live SuperReferrals request called in mock mode");
   }
   const base = samsarApiV1Url();
   const url = new URL(`${base}/${path.replace(/^\//, "")}`);
@@ -39,7 +39,7 @@ async function samsarRequest<T = Record<string, unknown>>(
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data?.message || data?.error?.message || `Samsar request failed: ${response.status}`);
+    throw new Error(data?.message || data?.error?.message || `SuperReferrals request failed: ${response.status}`);
   }
   return { data: data as T, headers: response.headers };
 }
@@ -154,7 +154,7 @@ export async function createExternalImageListVideo({
   apiKey,
   generationId
 }: {
-  externalUser: ExternalUserIdentity;
+  externalUser?: ExternalUserIdentity;
   input: GenerationInput;
   externalApiKey?: string;
   apiKey?: string;
@@ -177,16 +177,25 @@ export async function createExternalImageListVideo({
   }
   const safeExternalApiKey =
     externalApiKey && !externalApiKey.startsWith("mock_") ? externalApiKey : undefined;
-  const response = await samsarRequest("external_users/image_list_to_video", {
-    apiKey,
-    method: "POST",
-    headers: safeExternalApiKey ? { "x-external-user-api-key": safeExternalApiKey } : undefined,
-    body: JSON.stringify({
-      external_user: externalUser,
-      input,
-      webhookUrl: `${appBaseUrl()}/api/webhooks/samsar`
+  const response = externalUser
+    ? await samsarRequest("external_users/image_list_to_video", {
+      apiKey,
+      method: "POST",
+      headers: safeExternalApiKey ? { "x-external-user-api-key": safeExternalApiKey } : undefined,
+      body: JSON.stringify({
+        external_user: externalUser,
+        input,
+        webhookUrl: `${appBaseUrl()}/api/webhooks/samsar`
+      })
     })
-  });
+    : await samsarRequest("video/image_list_to_video", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        input,
+        webhookUrl: `${appBaseUrl()}/api/webhooks/samsar`
+      })
+    });
   const data = response.data;
   const requestId = String(data.request_id || data.external_request_id || data.requestId || "");
   const sessionId = String(
@@ -355,7 +364,7 @@ export async function runSamsarSessionAction(action: string, payload: Record<str
       body: JSON.stringify(payload)
     })).data;
   }
-  throw new Error(`Unsupported Samsar action: ${action}`);
+  throw new Error(`Unsupported SuperReferrals action: ${action}`);
 }
 
 export async function createSamsarAssistantCompletion(payload: Record<string, unknown>) {

@@ -537,7 +537,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       account.customerId === customer.id &&
       sameWallet(account.wallet, effectiveWallet)
     );
-    if (existingAccount?.externalApiKey && existingAccount.blockchainRegistration) {
+    if (existingAccount?.blockchainRegistration) {
       return existingAccount;
     }
 
@@ -785,15 +785,14 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       if (created?.status === "PAYMENT_PENDING") {
         updateRenderFlow({
           status: "confirming",
-          message: `Payment is pending for render task ${created.id}. Confirm the payment before credits are granted.`,
+          message: `Payment is pending for render task ${created.id}. Confirm the payment before the render starts.`,
           txHash: paymentTxHash,
           generationId: created.id
         });
       } else {
-        const grantedCredits = created?.payment.samsarCreditGrant?.creditsGranted;
         updateRenderFlow({
           status: "started",
-          message: `Payment transaction ${shortHash(paymentTxHash)} accepted${grantedCredits ? `, ${grantedCredits} Samsar credits granted` : ""}, and render task ${created?.id || ""} started. Auto-polling is active until completion.`,
+          message: `Payment transaction ${shortHash(paymentTxHash)} accepted and render task ${created?.id || ""} started. Auto-polling is active until completion.`,
           txHash: paymentTxHash,
           generationId: created?.id
         });
@@ -1352,7 +1351,7 @@ function AdvancedRenderForm({
         />
       </div>
       <div className="field full">
-        <label>Generated Samsar payload preview</label>
+        <label>Generated SuperReferrals payload preview</label>
         <textarea className="payload-preview" value={generationPayloadPreview} readOnly />
       </div>
     </div>
@@ -1587,13 +1586,8 @@ function GenerationItem({
       <p className="subtle">
         {generation.input.image_urls.length} images · {generation.input.video_model} · {generation.input.aspect_ratio} · {paymentSummary}
       </p>
-      <div className="mono">{generation.samsarSessionId || "pending Samsar session"}</div>
+      <div className="mono">{generation.samsarSessionId || "pending SuperReferrals session"}</div>
       {generation.payment.keeperExecutionId && <div className="mono">keeper {generation.payment.keeperExecutionId}</div>}
-      {generation.payment.samsarCreditGrant && (
-        <div className="mono">
-          samsar +{generation.payment.samsarCreditGrant.creditsGranted} credits, {generation.payment.samsarCreditGrant.remainingCredits} remaining
-        </div>
-      )}
       {generation.errorMessage && <p className="subtle">{generation.errorMessage}</p>}
       <div className="button-row">
         <button className="btn" onClick={onSync} disabled={busy || generation.status === "COMPLETED"}>

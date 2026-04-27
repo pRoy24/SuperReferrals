@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { env } from "@/lib/env";
 import { normalizeWallet, nowIso } from "@/lib/ids";
 import {
   buildCustomerSamsarExternalUser,
@@ -21,11 +22,12 @@ export async function POST(request: Request) {
     }
 
     const action = String(body.action || "");
+    const parentApiKey = env("SAMSAR_API_KEY") || customer.samsarAccount?.apiKey;
     if (action === "refresh_credits") {
       const externalUser = buildCustomerSamsarExternalUser(customer, customer.samsarAccount?.email);
       const session = customer.samsarAccount?.authToken
         ? await fetchSamsarProcessorCredits(customer.samsarAccount.authToken)
-        : await refreshSamsarProcessorSubAccountCredits(externalUser);
+        : await refreshSamsarProcessorSubAccountCredits(externalUser, parentApiKey);
       const creditsRemaining = Number(
         "remainingCredits" in session ? session.remainingCredits : session.creditsRemaining
       ) || 0;
@@ -47,11 +49,12 @@ export async function POST(request: Request) {
 
     if (action === "create_login_link" || action === "create_password_link") {
       const externalUser = buildCustomerSamsarExternalUser(customer, customer.samsarAccount?.email);
-      const externalSession = await ensureSamsarProcessorSubAccount(externalUser);
+      await ensureSamsarProcessorSubAccount(externalUser, parentApiKey);
       const login = await createSamsarProcessorSubAccountLoginLink(externalUser, {
         redirect: action === "create_password_link"
           ? "/external/studio/account/security"
-          : "/external/studio"
+          : "/external/studio",
+        apiKey: parentApiKey
       });
       const updated = await mutateStore((mutableStore) => upsertCustomer(mutableStore, {
         id: customer.id,
@@ -61,7 +64,7 @@ export async function POST(request: Request) {
           userId: customer.samsarAccount?.userId || customer.id,
           externalProvider: externalUser.provider,
           externalUserId: String(externalUser.external_user_id || externalUser.externalUserId || customer.id),
-          apiKey: externalSession.externalApiKey || customer.samsarAccount?.apiKey,
+          apiKey: customer.samsarAccount?.apiKey,
           loginUrl: action === "create_login_link" ? login.loginUrl : customer.samsarAccount?.loginUrl,
           passwordSetupUrl: action === "create_password_link" ? login.loginUrl : customer.samsarAccount?.passwordSetupUrl,
           updatedAt: nowIso()
@@ -85,7 +88,7 @@ export async function POST(request: Request) {
       }
       const walletAddress = normalizeWallet(rawWallet);
       if (!customer.samsarAccount?.authToken && !customer.samsarAccount?.apiKey) {
-        throw new Error("Login with samsar-js before linking a wallet.");
+        throw new Error("Sign in before linking a wallet to your SuperReferrals account.");
       }
       const updated = await mutateStore((mutableStore) => upsertCustomer(mutableStore, {
         id: customer.id,

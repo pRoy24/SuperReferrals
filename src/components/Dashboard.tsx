@@ -184,7 +184,7 @@ export default function Dashboard() {
 
   async function saveCustomer() {
     if (!hasCreditedProcessorAccount) {
-      setMessage("Login to a Samsar account with credits before saving storefront setup.");
+      setMessage("Purchase credits or sign in before saving your SuperReferrals storefront.");
       return;
     }
     setBusy("customer");
@@ -258,7 +258,7 @@ export default function Dashboard() {
 
   async function connectCustomerWallet(walletProvider?: BrowserWalletProvider) {
     if (!hasProcessorAccountSession) {
-      setMessage("Login with samsar-js before connecting a wallet.");
+      setMessage("Sign in before linking a wallet to your SuperReferrals account.");
       return;
     }
     setBusy(`customer-wallet${walletProvider ? `-${walletProvider.id}` : ""}`);
@@ -285,7 +285,7 @@ export default function Dashboard() {
       });
       await assertOk(response);
       await load();
-      setMessage(`${walletProvider?.name || "Wallet"} connected. E-wallet address ${shortWallet(firstAccount)} is linked to the samsar-js account.`);
+      setMessage(`${walletProvider?.name || "Wallet"} connected. E-wallet address ${shortWallet(firstAccount)} is linked to your SuperReferrals account.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Wallet connection failed");
     } finally {
@@ -312,10 +312,10 @@ export default function Dashboard() {
       const credits = Number(data.account?.creditsRemaining || 0);
       setProcessorAccountForm((current) => ({ ...current, password: "" }));
       setMessage(credits > 0
-        ? `Logged in to ${data.account?.email || "Samsar account"} with ${credits} credits. Store setup is unlocked.`
-        : `Logged in to ${data.account?.email || "Samsar account"}, but this account has no credits. Purchase credits before store setup.`);
+        ? `Signed in to ${data.account?.email || "your SuperReferrals account"} with ${credits} credits. Store setup is ready.`
+        : `Signed in to ${data.account?.email || "your SuperReferrals account"}, but this account has no credits. Purchase credits to continue.`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Samsar login failed");
+      setMessage(error instanceof Error ? error.message : "SuperReferrals sign-in failed");
     } finally {
       setBusy("");
     }
@@ -327,8 +327,9 @@ export default function Dashboard() {
       setMessage("Enter a valid dollar amount for processor credits.");
       return;
     }
-    if (!processorAccountEmail.trim()) {
-      setMessage("Enter the checkout email for the Samsar sub-account.");
+    const checkoutEmail = processorAccountEmail.trim().toLowerCase();
+    if (checkoutEmail && !isEmailLike(checkoutEmail)) {
+      setMessage("Enter a valid email address or leave it blank to enter it during checkout.");
       return;
     }
 
@@ -341,22 +342,22 @@ export default function Dashboard() {
         body: JSON.stringify({
           amountCents: Math.round(parsedAmountUsd * 100),
           customerId: customer?.id || customerForm.id,
-          customerEmail: processorAccountEmail,
+          customerEmail: checkoutEmail || undefined,
           metadata: {
             superreferralsCustomerId: customer?.id || customerForm.id,
             superreferralsCustomerName: customer?.name || customerForm.name,
             superreferralsOwnerWallet: customerForm.ownerWallet,
-            superreferralsAccountEmail: processorAccountEmail
+            ...(checkoutEmail ? { superreferralsAccountEmail: checkoutEmail } : {})
           }
         })
       });
       const data = await assertOk(response);
       if (!data.checkout?.url) {
-        throw new Error("Processor checkout did not return a URL");
+        throw new Error("SuperReferrals checkout did not return a URL");
       }
       window.location.href = data.checkout.url;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to start processor checkout");
+      setMessage(error instanceof Error ? error.message : "Unable to start SuperReferrals checkout");
     } finally {
       setBusy("");
     }
@@ -380,14 +381,14 @@ export default function Dashboard() {
         window.open(data.loginUrl, "_blank", "noopener,noreferrer");
       }
       if (action === "refresh_credits") {
-        setMessage(`Samsar sub-account credits refreshed: ${Number(data.creditsRemaining || 0)} credits.`);
+        setMessage(`SuperReferrals credits refreshed: ${Number(data.creditsRemaining || 0)} credits.`);
       } else if (action === "create_password_link") {
-        setMessage("Created a samsar-js sub-account password link.");
+        setMessage("Created a SuperReferrals password setup link.");
       } else {
-        setMessage("Created a samsar-js sub-account login link.");
+        setMessage("Created a SuperReferrals account login link.");
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Samsar account action failed");
+      setMessage(error instanceof Error ? error.message : "SuperReferrals account action failed");
     } finally {
       setBusy("");
     }
@@ -447,10 +448,10 @@ export default function Dashboard() {
           SuperReferrals
         </div>
         <p className="sidebar-copy">
-          Customer console for Samsar Processor credits, store setup, per-second USDC pricing, and render operations.
+          Customer console for SuperReferrals credits, store setup, per-second USDC pricing, and render operations.
         </p>
         <nav className="nav-list">
-          <a className="nav-item" href="#processor-credits"><CircleDollarSign size={16} /> Processor credits</a>
+          <a className="nav-item" href="#processor-credits"><CircleDollarSign size={16} /> Credits</a>
           <a className="nav-item" href="#store-setup"><KeyRound size={16} /> Store setup</a>
           <a className="nav-item" href="#usdc-pricing"><ShieldCheck size={16} /> USDC pricing</a>
           <a className="nav-item" href="#render-history"><Bot size={16} /> Render history</a>
@@ -465,7 +466,7 @@ export default function Dashboard() {
             <div className="eyebrow">Customer Console</div>
             <h1>Configure your customer store</h1>
             <p className="subtle">
-              Register or top up your Samsar One processor account, set public per-second render prices in USDC, and share your customer landing page.
+              Purchase credits or sign in, define public per-second render pricing in USDC, and publish your SuperReferrals storefront.
             </p>
           </div>
           <button className="btn" onClick={() => load()} title="Refresh data">
@@ -489,16 +490,16 @@ export default function Dashboard() {
             <div className="panel panel-strong" id="processor-credits">
               <div className="panel-header">
                 <div>
-                  <h2>Samsar Account & Credits</h2>
+                  <h2>SuperReferrals Account & Credits</h2>
                   <p className="subtle">
-                    Purchase credits or login with samsar-js account to set up your store. Create business rules and offer your own prices with admin price multipliers and conditional logic.
+                    Purchase credits or sign in to set up your store. Configure business rules, price multipliers, and conditional logic from the admin panel.
                   </p>
                 </div>
                 <CircleDollarSign size={18} />
               </div>
               <div className="account-status-strip">
                 <div className="readonly-value">
-                  {hasProcessorAccountSession ? processorAccountEmail || "Samsar sub-account ready" : "No login detected."}
+                  {hasProcessorAccountSession ? processorAccountEmail || "SuperReferrals account ready" : "No login detected."}
                 </div>
                 <span className={hasCreditedProcessorAccount ? "badge ok" : "badge"}>
                   {processorCreditsRemaining} credits
@@ -524,12 +525,12 @@ export default function Dashboard() {
                   onChange={(amount) => setProcessorAmountUsd(Number(amount))}
                 />
                 <TextField
-                  label="Checkout email"
+                  label="Email (optional)"
                   value={processorAccountForm.email}
                   onChange={(email) => setProcessorAccountForm({ ...processorAccountForm, email })}
                 />
                 <div className="field">
-                  <label>Credits after payment</label>
+                  <label>Estimated credits</label>
                   <div className="readonly-value">{Math.max(0, Math.round(Number(processorAmountUsd || 0) * 100))}</div>
                 </div>
               </div>
@@ -543,10 +544,10 @@ export default function Dashboard() {
                   <RefreshCw size={16} /> Refresh credits
                 </button>
                 <button className="btn" onClick={() => runProcessorAccountAction("create_password_link")} disabled={busy === "processor-create_password_link" || !hasProcessorAccountSession}>
-                  <KeyRound size={16} /> Create password link
+                  <KeyRound size={16} /> Create password setup link
                 </button>
                 <button className="btn" onClick={() => runProcessorAccountAction("create_login_link")} disabled={busy === "processor-create_login_link" || !hasProcessorAccountSession}>
-                  <ExternalLink size={16} /> Create login link
+                  <ExternalLink size={16} /> Create account login link
                 </button>
               </div>
               <div className="account-wallet-link">
@@ -559,10 +560,10 @@ export default function Dashboard() {
                 </button>
               </div>
               <details className="advanced-section processor-login-dropdown">
-                <summary>Login with samsar-js</summary>
+                <summary>Login with samsar-js credentials</summary>
                 <div className="form-grid processor-login">
                   <TextField
-                    label="Samsar account email"
+                    label="Account email"
                     value={processorAccountForm.email}
                     onChange={(email) => setProcessorAccountForm({ ...processorAccountForm, email })}
                   />
@@ -839,7 +840,7 @@ export default function Dashboard() {
             <div>
               <h2>Agent Town</h2>
               <p className="subtle">
-                Multi-agent sandbox for 0G Chain, Storage, DA, Compute, service discovery, Samsar actions, Uniswap price signals, KeeperHub settlement, and Gensyn AXL chatter.
+                Multi-agent sandbox for 0G Chain, Storage, DA, Compute, service discovery, SuperReferrals actions, Uniswap price signals, KeeperHub settlement, and Gensyn AXL chatter.
               </p>
             </div>
             <Network size={20} />
@@ -1000,4 +1001,8 @@ function shortWallet(value = "") {
     return trimmed || "wallet";
   }
   return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`;
+}
+
+function isEmailLike(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }

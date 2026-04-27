@@ -39,9 +39,7 @@ import {
 } from "./store";
 import {
   createExternalImageListVideo,
-  ensureExternalUserSession,
   fetchLatestVideoUrl,
-  grantExternalUserCredits,
   getSamsarStatus,
   runSamsarSessionAction
 } from "./samsar";
@@ -80,7 +78,7 @@ export async function createOrUpdateCustomer(input: Partial<Customer>) {
     ? existingStore.customers.find((item) => item.id === input.id)
     : existingStore.customers[0];
   if (!existingCustomer) {
-    throw new Error("Create the Samsar account through Stripe checkout or login to an existing credited account before setting up a storefront.");
+    throw new Error("Create a SuperReferrals account through Stripe checkout or sign in to an existing credited account before setting up a storefront.");
   }
   assertCustomerProcessorReady(existingCustomer);
   return mutateStore((store) => upsertCustomer(store, {
@@ -104,41 +102,31 @@ export async function createSubAccountForCustomer(input: {
     throw new Error("customerId was not found");
   }
   assertCustomerProcessorReady(customer);
-  const samsarApiKey = customerSamsarApiKey(customer);
   const normalizedWallet = normalizeWallet(input.wallet);
   assertStorefrontWalletAllowed(customer, normalizedWallet);
   const existingAccount = existingStore.subAccounts.find((item) =>
     item.customerId === input.customerId && normalizeWallet(item.wallet) === normalizedWallet
   );
   if (existingAccount) {
-    let externalApiKey = existingAccount.externalApiKey;
-    if (!externalApiKey) {
-      const samsarSession = await ensureExternalUserSession(existingAccount.externalUser, samsarApiKey);
-      externalApiKey = samsarSession.externalApiKey;
-    }
     const blockchainRegistration = existingAccount.blockchainRegistration ||
-      await createZeroGUserRegistration(customer, { ...existingAccount, externalApiKey });
+      await createZeroGUserRegistration(customer, existingAccount);
     return mutateStore((store) => {
       const current = store.subAccounts.find((item) => item.id === existingAccount.id);
       if (!current) {
         throw new Error("sub-account disappeared while provisioning wallet profile");
       }
-      current.externalApiKey = externalApiKey;
       current.blockchainRegistration = blockchainRegistration;
       current.updatedAt = nowIso();
       return current;
     });
   }
   const account = await mutateStore((store) => addSubAccount(store, input));
-  const samsarSession = await ensureExternalUserSession(account.externalUser, samsarApiKey);
-  const accountWithSession = { ...account, externalApiKey: samsarSession.externalApiKey };
-  const blockchainRegistration = await createZeroGUserRegistration(customer, accountWithSession);
+  const blockchainRegistration = await createZeroGUserRegistration(customer, account);
   return mutateStore((store) => {
     const current = store.subAccounts.find((item) => item.id === account.id);
     if (!current) {
       throw new Error("sub-account disappeared while provisioning wallet profile");
     }
-    current.externalApiKey = samsarSession.externalApiKey;
     current.blockchainRegistration = blockchainRegistration;
     current.updatedAt = nowIso();
     return current;
@@ -159,8 +147,7 @@ async function createZeroGUserRegistration(customer: Customer, account: SubAccou
       wallet: account.wallet,
       username: account.username,
       email: account.email,
-      referrerCode: account.referrerCode,
-      externalUser: account.externalUser
+      referrerCode: account.referrerCode
     },
     referrerUrl: `${customer.referrerBaseUrl}/r/${account.referrerCode}`,
     createdAt: account.createdAt
@@ -574,37 +561,8 @@ export async function createGeneration(input: {
   }
 
   try {
-    subAccount = await ensureSubAccountExternalSession(subAccount, samsarApiKey);
-    const creditsToGrant = estimateExternalCredits(priced);
-    const creditGrant = await grantExternalUserCredits({
-      externalUser: subAccount.externalUser,
-      externalApiKey: subAccount.externalApiKey,
-      apiKey: samsarApiKey,
-      credits: creditsToGrant,
-      metadata: {
-        generationId,
-        customerId: customer.id,
-        subAccountId: subAccount.id,
-        quoteId: payment.quoteId,
-        paymentRail,
-        paymentAmountUsd: payment.amountUsd,
-        paymentToken: payment.tokenSymbol,
-        paymentChainId: payment.chainId,
-        paymentTxHash: payment.txHash,
-        keeperExecutionId: payment.keeperExecutionId
-      }
-    });
-    const fundedPayment: GenerationPayment = {
-      ...payment,
-      samsarCreditGrant: creditGrant
-    };
-    await mutateStore((mutableStore) => updateGeneration(mutableStore, generationId, {
-      payment: fundedPayment
-    }));
     const response = await createExternalImageListVideo({
-      externalUser: subAccount.externalUser,
       input: generation.input,
-      externalApiKey: subAccount.externalApiKey,
       apiKey: samsarApiKey,
       generationId
     });
@@ -613,14 +571,14 @@ export async function createGeneration(input: {
       samsarRequestId: response.requestId,
       samsarSessionId: response.sessionId,
       payment: {
-        ...fundedPayment,
-        status: fundedPayment.status
+        ...payment,
+        status: payment.status
       }
     }));
   } catch (error) {
     await mutateStore((mutableStore) => updateGeneration(mutableStore, generationId, {
       status: "FAILED",
-      errorMessage: error instanceof Error ? error.message : "Samsar request failed"
+      errorMessage: error instanceof Error ? error.message : "SuperReferrals request failed"
     }));
     throw error;
   }
@@ -653,7 +611,7 @@ export async function syncGeneration(id: string) {
   }
   let status: Record<string, unknown>;
   try {
-    status = await getSamsarStatus(requestId, subAccount.externalUser, subAccount.externalApiKey, samsarApiKey);
+    status = await getSamsarStatus(requestId, undefined, undefined, samsarApiKey);
   } catch (error) {
     if (generation.resultUrl) {
       try {
@@ -664,7 +622,7 @@ export async function syncGeneration(id: string) {
     }
     return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
       status: "PROCESSING",
-      errorMessage: `Unable to refresh Samsar render status: ${formatErrorText(error)}`
+      errorMessage: `Unable to refresh SuperReferrals render status: ${formatErrorText(error)}`
     }));
   }
   const normalizedStatus = String(status.status || "").toUpperCase();
@@ -677,7 +635,7 @@ export async function syncGeneration(id: string) {
       if (!fallbackSessionId) {
         return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
           status: "PROCESSING",
-          errorMessage: "Samsar reported completion, but no video URL is available yet. Waiting for the final video URL."
+          errorMessage: "SuperReferrals reported completion, but no video URL is available yet. Waiting for the final video URL."
         }));
       }
       try {
@@ -685,14 +643,14 @@ export async function syncGeneration(id: string) {
       } catch (error) {
         return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
           status: "PROCESSING",
-          errorMessage: `Samsar reported completion, but the final video URL could not be fetched yet: ${formatErrorText(error)}`
+          errorMessage: `SuperReferrals reported completion, but the final video URL could not be fetched yet: ${formatErrorText(error)}`
         }));
       }
     }
     if (!resultUrl) {
       return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
         status: "PROCESSING",
-        errorMessage: "Samsar reported completion, but returned an empty video URL."
+        errorMessage: "SuperReferrals reported completion, but returned an empty video URL."
       }));
     }
 
@@ -711,7 +669,7 @@ export async function syncGeneration(id: string) {
     }
   }
   if (normalizedStatus === "FAILED" || normalizedStatus === "CANCELLED") {
-    return failGeneration(generation, customer, normalizedStatus, String(status.message || status.error || "Samsar generation failed"));
+    return failGeneration(generation, customer, normalizedStatus, String(status.message || status.error || "SuperReferrals generation failed"));
   }
   return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
     status: "PROCESSING",
@@ -1265,35 +1223,19 @@ function assertReachableUrlShape(rawUrl: string, label: string) {
   }
 }
 
-async function ensureSubAccountExternalSession(account: SubAccount, apiKey?: string) {
-  if (account.externalApiKey) {
-    return account;
-  }
-  const samsarSession = await ensureExternalUserSession(account.externalUser, apiKey);
-  return mutateStore((store) => {
-    const current = store.subAccounts.find((item) => item.id === account.id);
-    if (!current) {
-      throw new Error("sub-account disappeared while preparing Samsar credits");
-    }
-    current.externalApiKey = samsarSession.externalApiKey;
-    current.updatedAt = nowIso();
-    return current;
-  });
-}
-
 function customerSamsarApiKey(customer: Customer) {
-  return customer.samsarAccount?.apiKey || undefined;
+  return env("SAMSAR_API_KEY") || customer.samsarAccount?.apiKey || undefined;
 }
 
 function assertCustomerProcessorReady(customer: Customer) {
-  const hasProcessorAccountSession = Boolean(customer.samsarAccount?.authToken || customer.samsarAccount?.apiKey);
+  const hasProcessorAccountSession = Boolean(
+    customer.samsarAccount?.authToken ||
+    customer.samsarAccount?.apiKey ||
+    (customer.samsarAccount?.externalUserId && env("SAMSAR_API_KEY"))
+  );
   if (!hasProcessorAccountSession || Number(customer.subscription.creditsRemaining || 0) <= 0) {
-    throw new Error("Login to a Samsar account with credits before using storefront setup.");
+    throw new Error("Sign in to a credited SuperReferrals account before using storefront setup.");
   }
-}
-
-function estimateExternalCredits(priced: ReturnType<typeof priceGeneration>) {
-  return Math.max(1, Math.ceil(priced.baseCreditsPerSecond * priced.durationSeconds));
 }
 
 function shouldRunKeeperSettlement({
@@ -1368,7 +1310,7 @@ async function resolvePaymentConfirmation({
       return { status: "mock_confirmed", keeperExecutionId };
     }
     if (["failed", "failure", "reverted", "cancelled", "canceled", "error"].includes(routeStatus)) {
-      throw new Error("KeeperHub payment failed; render credits were not granted.");
+      throw new Error("KeeperHub payment failed; render was not started.");
     }
     return { status: "pending", keeperExecutionId };
   }

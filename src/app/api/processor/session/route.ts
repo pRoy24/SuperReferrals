@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     return NextResponse.json(
-      { message: error instanceof Error ? error.message : "Unable to login to Samsar account" },
+      { message: error instanceof Error ? error.message : "Unable to sign in to SuperReferrals account" },
       { status: 400 }
     );
   }
