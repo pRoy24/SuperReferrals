@@ -107,6 +107,7 @@ To test one live service at a time, leave global mocks on and set only that prov
 ```bash
 SUPERREFERRALS_MOCKS=true
 SAMSAR_MOCKS=false
+SAMSAR_API_URL=https://api.samsar.one
 SAMSAR_API_KEY=replace_with_samsar_api_key
 ```
 
@@ -124,11 +125,54 @@ cp .env.production.example .env.local
 
 Use private RPC providers for production reliability.
 
+## Vercel Environment Sync
+
+The Vercel project is `proy24s-projects/super-referrals`. Keep deploy credentials out of app env files:
+
+- `.env.staging` is the local source for Vercel Preview env vars scoped to the `develop` branch.
+- `.env.production` is the local source for Vercel Production env vars.
+- `.vercel-token` may hold a personal Vercel token for this project and is ignored by Git. You can also set `VERCEL_TOKEN` in your shell.
+
+Create local env files from the examples, then replace placeholders before syncing:
+
+```bash
+cp .env.staging.example .env.staging
+cp .env.production.example .env.production
+chmod 600 .env.staging .env.production
+```
+
+For a project-specific Vercel token, either export `VERCEL_TOKEN` for the current shell or put the token in `.vercel-token` and run `chmod 600 .vercel-token`.
+
+Preview what would change without touching Vercel:
+
+```bash
+npm run vercel:env:sync -- staging --dry-run
+npm run vercel:env:sync -- production --dry-run
+```
+
+Dry runs warn about placeholder values. Actual sync runs fail until placeholders are replaced with real values.
+
+Apply changes only when you intentionally run the script:
+
+```bash
+npm run vercel:env:staging
+npm run vercel:env:production
+```
+
+The sync stores local hashes under `.vercel-env-sync/` so later runs update only changed keys. It does not print env values, refuses obvious placeholder values, blocks `VERCEL_*` control credentials from upload, and only removes remote keys when run with `--delete-removed`.
+
+By default staging maps to Vercel `preview` for branch `develop`, and production maps to Vercel `production`. Override with `VERCEL_STAGING_ENVIRONMENT`, `VERCEL_STAGING_BRANCH`, `VERCEL_PRODUCTION_ENVIRONMENT`, or command flags such as `--environment` and `--branch`.
+
+Vercel env changes apply to new deployments only; redeploy or push after syncing if the running deployment needs the new values. See the [Vercel env CLI docs](https://vercel.com/docs/cli/env) and [environment variable docs](https://vercel.com/docs/environment-variables).
+
+For staging previews, Vercel needs a Git event it can deploy. Push a new commit to `develop` or open a PR from `develop`; a local branch or a branch pointer that matches an already deployed `main` commit may not create a new Preview Deployment by itself.
+
 ## Key Environment Variables
 
 - `SUPERREFERRALS_MOCKS`: global mock switch. Defaults to mocked behavior when unset.
 - `<PROVIDER>_MOCKS`: per-provider overrides such as `SAMSAR_MOCKS`, `KEEPERHUB_MOCKS`, `ZERO_G_MOCKS`, `INFT_MOCKS`, `OG_COMPUTE_MOCKS`, and `AXL_MOCKS`.
-- `SAMSAR_API_KEY`: required for live Samsar generation.
+- `SAMSAR_API_URL`: production Samsar API origin. Defaults to `https://api.samsar.one`.
+- `SAMSAR_API_KEY`: required for live Samsar generation when a logged-in customer account does not provide its own API key.
 - `TRANSACTION_NETWORK`, `TRANSACTION_CHAIN_ID`, `TRANSACTION_RPC_URL`: payment and wallet network.
 - `NEXT_PUBLIC_TRANSACTION_NETWORK`, `NEXT_PUBLIC_TRANSACTION_CHAIN_ID`, `NEXT_PUBLIC_TRANSACTION_RPC_URL`: browser wallet prompts.
 - `KEEPERHUB_API_KEY`, `KEEPERHUB_PAYMENT_WORKFLOW_ID`, `KEEPERHUB_PLATFORM_WALLET_ADDRESS`: live KeeperHub settlement.

@@ -15,9 +15,11 @@ import {
   Store,
   Undo2,
   Users,
+  Wallet,
   Zap
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { subscribeToBrowserWalletProviders, type BrowserWalletProvider } from "@/lib/browser-wallets";
 import { getPaymentTokens, getTransactionChainConfig, settlementTokenForCurrency } from "@/lib/payment-tokens";
 import {
   CREDIT_UNIT_USD,
@@ -39,6 +41,11 @@ export default function Dashboard() {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [processorAmountUsd, setProcessorAmountUsd] = useState(25);
+  const [processorAccountForm, setProcessorAccountForm] = useState({
+    email: "",
+    password: ""
+  });
+  const [walletProviders, setWalletProviders] = useState<BrowserWalletProvider[]>([]);
   const [agentObjective, setAgentObjective] = useState(
     "Let the Agent Town plan a referrer video workflow, price it, route settlement, and publish all 0G receipts."
   );
@@ -70,6 +77,9 @@ export default function Dashboard() {
     allowedModels: conditionModelOptions,
     allowedAspectRatios: conditionAspectOptions,
     maxImages: 6,
+    dailyWalletRenderLimit: "",
+    walletAccessMode: "open" as "open" | "whitelist",
+    walletWhitelist: "",
     modelConfigurations: defaultModelPricingConfigurations
   });
 
@@ -82,6 +92,8 @@ export default function Dashboard() {
   useEffect(() => {
     load().catch((error) => setMessage(error.message));
   }, []);
+
+  useEffect(() => subscribeToBrowserWalletProviders(setWalletProviders), []);
 
   useEffect(() => {
     if (!store) return;
@@ -110,8 +122,17 @@ export default function Dashboard() {
         ? customer.storefront.conditions.allowedAspectRatios
         : conditionAspectOptions,
       maxImages: customer.storefront?.conditions?.maxImages || 6,
+      dailyWalletRenderLimit: customer.storefront?.conditions?.dailyWalletRenderLimit
+        ? String(customer.storefront.conditions.dailyWalletRenderLimit)
+        : "",
+      walletAccessMode: customer.storefront?.conditions?.walletAccessMode === "whitelist" ? "whitelist" : "open",
+      walletWhitelist: customer.storefront?.conditions?.walletWhitelist?.join("\n") || "",
       modelConfigurations: getModelPricingConfigurations(customer)
     });
+    setProcessorAccountForm((current) => ({
+      ...current,
+      email: customer.samsarAccount?.email || current.email
+    }));
   }, [store]);
 
   const customer = store?.customers[0];
@@ -121,6 +142,12 @@ export default function Dashboard() {
   const latestAgentJob = agentJobs[0];
   const transactionChain = getTransactionChainConfig();
   const settlementToken = settlementTokenForCurrency("USDC", transactionChain.id) || getPaymentTokens(transactionChain.id)[0];
+  const hasProcessorAccountSession = Boolean(customer?.samsarAccount?.hasSession || customer?.samsarAccount?.authToken || customer?.samsarAccount?.apiKey);
+  const processorCreditsRemaining = hasProcessorAccountSession ? Number(customer?.subscription.creditsRemaining || 0) : 0;
+  const hasCreditedProcessorAccount = hasProcessorAccountSession && processorCreditsRemaining > 0;
+  const processorAccountEmail = customer?.samsarAccount?.email || processorAccountForm.email;
+  const linkedSamsarWallet = customer?.samsarAccount?.walletAddress || customerForm.ownerWallet;
+  const connectingCustomerWallet = busy.startsWith("customer-wallet");
   const customerLanding = useMemo(() => {
     const seedAccount = customer
       ? store?.subAccounts.find((account) => account.customerId === customer.id)
@@ -156,6 +183,10 @@ export default function Dashboard() {
   }
 
   async function saveCustomer() {
+    if (!hasCreditedProcessorAccount) {
+      setMessage("Login to a Samsar account with credits before saving storefront setup.");
+      return;
+    }
     setBusy("customer");
     setMessage("");
     try {
@@ -184,7 +215,10 @@ export default function Dashboard() {
               enabled: customerForm.conditionalsEnabled,
               allowedModels: customerForm.allowedModels,
               allowedAspectRatios: customerForm.allowedAspectRatios,
-              maxImages: Number(customerForm.maxImages) || undefined
+              maxImages: Number(customerForm.maxImages) || undefined,
+              dailyWalletRenderLimit: Number(customerForm.dailyWalletRenderLimit) || undefined,
+              walletAccessMode: customerForm.walletAccessMode,
+              walletWhitelist: customerForm.walletWhitelist
             }
           },
           pricing: {
@@ -206,7 +240,10 @@ export default function Dashboard() {
             chainId: settlementToken.chainId,
             settlementTokenAddress: settlementToken.address
           },
-          subscription: { status: "active" }
+          subscription: {
+            status: "active",
+            creditsRemaining: processorCreditsRemaining
+          }
         })
       });
       await assertOk(response);
@@ -219,10 +256,79 @@ export default function Dashboard() {
     }
   }
 
+  async function connectCustomerWallet(walletProvider?: BrowserWalletProvider) {
+    if (!hasProcessorAccountSession) {
+      setMessage("Login with samsar-js before connecting a wallet.");
+      return;
+    }
+    setBusy(`customer-wallet${walletProvider ? `-${walletProvider.id}` : ""}`);
+    setMessage("");
+    try {
+      const provider = walletProvider?.provider || walletProviders[0]?.provider || window.ethereum;
+      if (!provider) {
+        throw new Error("No browser wallet detected. Install MetaMask, Coinbase Wallet, Rabby, Brave Wallet, or another EIP-1193 wallet.");
+      }
+      const accounts = await provider.request({ method: "eth_requestAccounts" });
+      const firstAccount = Array.isArray(accounts) ? String(accounts[0] || "") : "";
+      if (!firstAccount) {
+        throw new Error("Wallet did not return an account");
+      }
+      setCustomerForm((current) => ({ ...current, ownerWallet: firstAccount }));
+      const response = await fetch("/api/processor/account/action", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          customerId: customer?.id || customerForm.id,
+          action: "link_wallet",
+          wallet: firstAccount
+        })
+      });
+      await assertOk(response);
+      await load();
+      setMessage(`${walletProvider?.name || "Wallet"} connected. E-wallet address ${shortWallet(firstAccount)} is linked to the samsar-js account.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Wallet connection failed");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function loginProcessorAccount() {
+    setBusy("processor-login");
+    setMessage("");
+    try {
+      const response = await fetch("/api/processor/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          customerId: customer?.id || customerForm.id,
+          customerName: customer?.name || customerForm.name,
+          email: processorAccountForm.email,
+          password: processorAccountForm.password
+        })
+      });
+      const data = await assertOk(response);
+      await load();
+      const credits = Number(data.account?.creditsRemaining || 0);
+      setProcessorAccountForm((current) => ({ ...current, password: "" }));
+      setMessage(credits > 0
+        ? `Logged in to ${data.account?.email || "Samsar account"} with ${credits} credits. Store setup is unlocked.`
+        : `Logged in to ${data.account?.email || "Samsar account"}, but this account has no credits. Purchase credits before store setup.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Samsar login failed");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function addProcessorCredits(amountUsd = processorAmountUsd) {
     const parsedAmountUsd = Number(amountUsd);
     if (!Number.isFinite(parsedAmountUsd) || parsedAmountUsd <= 0) {
       setMessage("Enter a valid dollar amount for processor credits.");
+      return;
+    }
+    if (!processorAccountEmail.trim()) {
+      setMessage("Enter the checkout email for the Samsar sub-account.");
       return;
     }
 
@@ -234,9 +340,13 @@ export default function Dashboard() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           amountCents: Math.round(parsedAmountUsd * 100),
+          customerId: customer?.id || customerForm.id,
+          customerEmail: processorAccountEmail,
           metadata: {
             superreferralsCustomerId: customer?.id || customerForm.id,
-            superreferralsCustomerName: customer?.name || customerForm.name
+            superreferralsCustomerName: customer?.name || customerForm.name,
+            superreferralsOwnerWallet: customerForm.ownerWallet,
+            superreferralsAccountEmail: processorAccountEmail
           }
         })
       });
@@ -247,6 +357,37 @@ export default function Dashboard() {
       window.location.href = data.checkout.url;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to start processor checkout");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function runProcessorAccountAction(action: "refresh_credits" | "create_login_link" | "create_password_link") {
+    setBusy(`processor-${action}`);
+    setMessage("");
+    try {
+      const response = await fetch("/api/processor/account/action", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          customerId: customer?.id || customerForm.id,
+          action
+        })
+      });
+      const data = await assertOk(response);
+      await load();
+      if (data.loginUrl) {
+        window.open(data.loginUrl, "_blank", "noopener,noreferrer");
+      }
+      if (action === "refresh_credits") {
+        setMessage(`Samsar sub-account credits refreshed: ${Number(data.creditsRemaining || 0)} credits.`);
+      } else if (action === "create_password_link") {
+        setMessage("Created a samsar-js sub-account password link.");
+      } else {
+        setMessage("Created a samsar-js sub-account login link.");
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Samsar account action failed");
     } finally {
       setBusy("");
     }
@@ -347,8 +488,21 @@ export default function Dashboard() {
           <section className="stack">
             <div className="panel panel-strong" id="processor-credits">
               <div className="panel-header">
-                <h2>Samsar Processor Credits</h2>
+                <div>
+                  <h2>Samsar Account & Credits</h2>
+                  <p className="subtle">
+                    Purchase credits or login with samsar-js account to set up your store. Create business rules and offer your own prices with admin price multipliers and conditional logic.
+                  </p>
+                </div>
                 <CircleDollarSign size={18} />
+              </div>
+              <div className="account-status-strip">
+                <div className="readonly-value">
+                  {hasProcessorAccountSession ? processorAccountEmail || "Samsar sub-account ready" : "No login detected."}
+                </div>
+                <span className={hasCreditedProcessorAccount ? "badge ok" : "badge"}>
+                  {processorCreditsRemaining} credits
+                </span>
               </div>
               <div className="amount-grid">
                 {processorCreditAmounts.map((amount) => (
@@ -364,10 +518,15 @@ export default function Dashboard() {
               </div>
               <div className="form-grid processor-checkout">
                 <TextField
-                  label="Custom amount USD"
+                  label="Checkout amount USD"
                   type="number"
                   value={processorAmountUsd}
                   onChange={(amount) => setProcessorAmountUsd(Number(amount))}
+                />
+                <TextField
+                  label="Checkout email"
+                  value={processorAccountForm.email}
+                  onChange={(email) => setProcessorAccountForm({ ...processorAccountForm, email })}
                 />
                 <div className="field">
                   <label>Credits after payment</label>
@@ -376,34 +535,105 @@ export default function Dashboard() {
               </div>
               <div className="button-row">
                 <button className="btn primary" onClick={() => addProcessorCredits()} disabled={busy === "processor-credits"}>
-                  <CircleDollarSign size={16} /> Add
+                  <CircleDollarSign size={16} /> Purchase credits
                 </button>
               </div>
+              <div className="button-row">
+                <button className="btn" onClick={() => runProcessorAccountAction("refresh_credits")} disabled={busy === "processor-refresh_credits" || !hasProcessorAccountSession}>
+                  <RefreshCw size={16} /> Refresh credits
+                </button>
+                <button className="btn" onClick={() => runProcessorAccountAction("create_password_link")} disabled={busy === "processor-create_password_link" || !hasProcessorAccountSession}>
+                  <KeyRound size={16} /> Create password link
+                </button>
+                <button className="btn" onClick={() => runProcessorAccountAction("create_login_link")} disabled={busy === "processor-create_login_link" || !hasProcessorAccountSession}>
+                  <ExternalLink size={16} /> Create login link
+                </button>
+              </div>
+              <div className="account-wallet-link">
+                <div className="field">
+                  <label>Linked account wallet</label>
+                  <div className="readonly-value mono">{hasProcessorAccountSession && linkedSamsarWallet ? linkedSamsarWallet : "No wallet linked"}</div>
+                </div>
+                <button className="btn" onClick={() => connectCustomerWallet()} disabled={connectingCustomerWallet || !hasProcessorAccountSession}>
+                  <Wallet size={16} /> Connect wallet
+                </button>
+              </div>
+              <details className="advanced-section processor-login-dropdown">
+                <summary>Login with samsar-js</summary>
+                <div className="form-grid processor-login">
+                  <TextField
+                    label="Samsar account email"
+                    value={processorAccountForm.email}
+                    onChange={(email) => setProcessorAccountForm({ ...processorAccountForm, email })}
+                  />
+                  <TextField
+                    label="Password"
+                    type="password"
+                    value={processorAccountForm.password}
+                    onChange={(password) => setProcessorAccountForm({ ...processorAccountForm, password })}
+                  />
+                </div>
+                <div className="button-row inline-actions">
+                  <button className="btn" onClick={loginProcessorAccount} disabled={busy === "processor-login" || !processorAccountForm.email || !processorAccountForm.password}>
+                    <ShieldCheck size={16} /> Submit
+                  </button>
+                </div>
+              </details>
             </div>
 
-            <div className="panel" id="store-setup">
+            <div className={`panel ${hasCreditedProcessorAccount ? "" : "panel-disabled"}`} id="store-setup">
               <div className="panel-header">
                 <h2>Store Setup</h2>
                 <KeyRound size={18} />
               </div>
               <div className="form-grid">
                 <TextField label="Store name" value={customerForm.name} onChange={(name) => setCustomerForm({ ...customerForm, name })} />
-                <TextField label="Owner wallet" value={customerForm.ownerWallet} onChange={(ownerWallet) => setCustomerForm({ ...customerForm, ownerWallet })} />
-                <TextField label="Platform fee bps" type="number" value={customerForm.platformFeeBps} onChange={(platformFeeBps) => setCustomerForm({ ...customerForm, platformFeeBps: Number(platformFeeBps) })} />
-                <TextField label="Failure refund bps" type="number" value={customerForm.refundOnFailureBps} onChange={(refundOnFailureBps) => setCustomerForm({ ...customerForm, refundOnFailureBps: Number(refundOnFailureBps) })} />
-                <TextField label="ENS name" value={customerForm.ensName} onChange={(ensName) => setCustomerForm({ ...customerForm, ensName })} />
-                <TextField label="Referrer base URL" value={customerForm.referrerBaseUrl} onChange={(referrerBaseUrl) => setCustomerForm({ ...customerForm, referrerBaseUrl })} full />
                 <TextField label="Storefront category" value={customerForm.storefrontCategory} onChange={(storefrontCategory) => setCustomerForm({ ...customerForm, storefrontCategory })} />
                 <TextField label="Storefront website URL" value={customerForm.storefrontWebsiteUrl} onChange={(storefrontWebsiteUrl) => setCustomerForm({ ...customerForm, storefrontWebsiteUrl })} />
-                <TextField label="Support email" value={customerForm.storefrontSupportEmail} onChange={(storefrontSupportEmail) => setCustomerForm({ ...customerForm, storefrontSupportEmail })} />
-                <TextField label="Storefront tags" value={customerForm.storefrontTags} onChange={(storefrontTags) => setCustomerForm({ ...customerForm, storefrontTags })} />
                 <div className="field full">
                   <label>Storefront description</label>
                   <textarea value={customerForm.storefrontDescription} onChange={(event) => setCustomerForm({ ...customerForm, storefrontDescription: event.target.value })} />
                 </div>
               </div>
+              <div className="setup-wallet-strip">
+                <div className="field">
+                  <label>Store owner e-wallet</label>
+                  <div className="readonly-value mono">{customerForm.ownerWallet || "No wallet connected"}</div>
+                </div>
+                <div className="wallet-provider-grid">
+                  {(walletProviders.length > 0 ? walletProviders : []).map((walletProvider) => (
+                    <button
+                      className="wallet-provider-button"
+                      disabled={connectingCustomerWallet || !hasProcessorAccountSession}
+                      key={walletProvider.id}
+                      onClick={() => connectCustomerWallet(walletProvider)}
+                      type="button"
+                    >
+                      {walletProvider.icon ? <img alt="" src={walletProvider.icon} /> : <Wallet size={16} />}
+                      {walletProvider.name}
+                    </button>
+                  ))}
+                  {walletProviders.length === 0 && (
+                    <button className="wallet-provider-button" disabled={connectingCustomerWallet || !hasProcessorAccountSession} onClick={() => connectCustomerWallet()} type="button">
+                      <Wallet size={16} /> Browser wallet
+                    </button>
+                  )}
+                </div>
+              </div>
+              <details className="advanced-section">
+                <summary>Advanced owner and storefront details</summary>
+                <div className="form-grid">
+                  <TextField label="E-wallet address" value={customerForm.ownerWallet} onChange={(ownerWallet) => setCustomerForm({ ...customerForm, ownerWallet })} full />
+                  <TextField label="ENS name" value={customerForm.ensName} onChange={(ensName) => setCustomerForm({ ...customerForm, ensName })} />
+                  <TextField label="Support email" value={customerForm.storefrontSupportEmail} onChange={(storefrontSupportEmail) => setCustomerForm({ ...customerForm, storefrontSupportEmail })} />
+                  <TextField label="Referrer base URL" value={customerForm.referrerBaseUrl} onChange={(referrerBaseUrl) => setCustomerForm({ ...customerForm, referrerBaseUrl })} full />
+                  <TextField label="Storefront tags" value={customerForm.storefrontTags} onChange={(storefrontTags) => setCustomerForm({ ...customerForm, storefrontTags })} />
+                  <TextField label="Platform fee bps" type="number" value={customerForm.platformFeeBps} onChange={(platformFeeBps) => setCustomerForm({ ...customerForm, platformFeeBps: Number(platformFeeBps) })} />
+                  <TextField label="Failure refund bps" type="number" value={customerForm.refundOnFailureBps} onChange={(refundOnFailureBps) => setCustomerForm({ ...customerForm, refundOnFailureBps: Number(refundOnFailureBps) })} />
+                </div>
+              </details>
               <div className="button-row">
-                <button className="btn primary" onClick={saveCustomer} disabled={busy === "customer"}>
+                <button className="btn primary" onClick={saveCustomer} disabled={busy === "customer" || !hasCreditedProcessorAccount}>
                   <Save size={16} /> Save setup
                 </button>
                 {customerLanding && <a className="btn" href={customerLanding}><ExternalLink size={16} /> Open user landing</a>}
@@ -413,7 +643,7 @@ export default function Dashboard() {
           </section>
 
           <section className="stack">
-            <div className="panel panel-strong" id="usdc-pricing">
+            <div className={`panel panel-strong ${hasCreditedProcessorAccount ? "" : "panel-disabled"}`} id="usdc-pricing">
               <div className="panel-header">
                 <h2>Public Render Pricing</h2>
                 <Database size={18} />
@@ -484,6 +714,32 @@ export default function Dashboard() {
                       value={customerForm.maxImages}
                       onChange={(maxImages) => setCustomerForm({ ...customerForm, maxImages: Number(maxImages) })}
                     />
+                    <TextField
+                      label="Daily wallet render limit"
+                      type="number"
+                      value={customerForm.dailyWalletRenderLimit}
+                      onChange={(dailyWalletRenderLimit) => setCustomerForm({ ...customerForm, dailyWalletRenderLimit })}
+                    />
+                    <label className="toggle-row">
+                      <input
+                        type="checkbox"
+                        checked={customerForm.walletAccessMode === "whitelist"}
+                        onChange={(event) => setCustomerForm({
+                          ...customerForm,
+                          walletAccessMode: event.target.checked ? "whitelist" : "open"
+                        })}
+                      />
+                      Whitelisted wallets only
+                    </label>
+                    {customerForm.walletAccessMode === "whitelist" && (
+                      <div className="field full">
+                        <label>Whitelisted wallet addresses</label>
+                        <textarea
+                          value={customerForm.walletWhitelist}
+                          onChange={(event) => setCustomerForm({ ...customerForm, walletWhitelist: event.target.value })}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -536,7 +792,7 @@ export default function Dashboard() {
                 })}
               </div>
               <div className="button-row">
-                <button className="btn primary" onClick={saveCustomer} disabled={busy === "customer"}>
+                <button className="btn primary" onClick={saveCustomer} disabled={busy === "customer" || !hasCreditedProcessorAccount}>
                   <Save size={16} /> Save pricing
                 </button>
                 <button
@@ -736,4 +992,12 @@ function parseJsonObject(value: string) {
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : "Invalid JSON payload");
   }
+}
+
+function shortWallet(value = "") {
+  const trimmed = value.trim();
+  if (trimmed.length <= 12) {
+    return trimmed || "wallet";
+  }
+  return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`;
 }

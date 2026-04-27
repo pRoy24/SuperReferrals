@@ -4,6 +4,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: [
     "@0gfoundation/0g-ts-sdk",
     "ethers",
+    "samsar-js",
     "viem"
   ]
 };

@@ -3,6 +3,7 @@
 import { Bot, CircleDollarSign, Code2, ExternalLink, ListChecks, Play, Plus, RefreshCw, ShieldCheck, Store, Trash2, Wallet } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
+import { type EthereumProvider } from "@/lib/browser-wallets";
 import {
   findPaymentToken,
   getPaymentTokens,
@@ -20,6 +21,7 @@ import {
   getStorefrontMaxImages,
   resolveModelPriceDetails
 } from "@/lib/pricing";
+import { getStorefrontAccessError } from "@/lib/storefront-access";
 import type {
   Customer,
   Generation,
@@ -33,10 +35,6 @@ import type {
   VideoAspectRatio,
   VideoModel
 } from "@/lib/types";
-
-type EthereumProvider = {
-  request(args: { method: string; params?: unknown[] }): Promise<unknown>;
-};
 
 type GenerationFormState = {
   imageUrls: string;
@@ -92,12 +90,6 @@ type RenderFlowState = {
   txHash?: string;
   generationId?: string;
 };
-
-declare global {
-  interface Window {
-    ethereum?: EthereumProvider;
-  }
-}
 
 const sampleImageUrlBases = new Set([
   "https://images.unsplash.com/photo-1542291026-7eec264c27ff",
@@ -224,6 +216,10 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     videoModel: generationForm.videoModel,
     aspectRatio: generationForm.aspectRatio
   });
+  const renderAccessError = getStorefrontAccessError(customer, store, {
+    wallet: walletAddress || connectedSubAccount?.wallet
+  });
+  const renderGateError = renderConditionError || renderAccessError;
   const selectedPricingDetails = resolveModelPriceDetails(customer, selectedPricing);
   const estimatedDurationSeconds = estimateDurationSeconds(imageCount, selectedPricing);
   const userGenerations = connectedSubAccount
@@ -385,7 +381,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
 
   useEffect(() => {
     setQuote(null);
-  }, [generationForm.imageUrls, generationForm.videoModel, generationForm.aspectRatio, paymentCurrency, transactionChain.id]);
+  }, [generationForm.imageUrls, generationForm.videoModel, generationForm.aspectRatio, paymentCurrency, transactionChain.id, walletAddress]);
 
   useEffect(() => {
     const firstToken = paymentTokens[0];
@@ -596,6 +592,9 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       if (renderConditionError) {
         throw new Error(renderConditionError);
       }
+      if (renderAccessError) {
+        throw new Error(renderAccessError);
+      }
       const account = await ensureWalletSubAccount();
       const quoted = await requestQuote(account);
       setMessage(`${quoted.totalUsd.toFixed(2)} ${quoted.settlementCurrency || "USDC"} quote created for payment in ${quoted.paymentCurrency || paymentCurrency} on ${transactionChain.name}.`);
@@ -740,6 +739,9 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     try {
       if (renderConditionError) {
         throw new Error(renderConditionError);
+      }
+      if (renderAccessError) {
+        throw new Error(renderAccessError);
       }
       const account = await ensureWalletSubAccount();
       const activeQuote = quote || await requestQuote(account);
@@ -984,10 +986,10 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
               selectedPricingDetails={selectedPricingDetails}
             />
             <div className="button-row">
-              <button className="btn" onClick={createQuote} disabled={busy === "quote" || imageCount === 0 || Boolean(renderConditionError)}>
+              <button className="btn" onClick={createQuote} disabled={busy === "quote" || imageCount === 0 || Boolean(renderGateError)}>
                 <CircleDollarSign size={16} /> Quote {paymentCurrency}
               </button>
-              <button className="btn primary" onClick={runGeneration} disabled={busy === "generation" || imageCount === 0 || Boolean(renderConditionError)}>
+              <button className="btn primary" onClick={runGeneration} disabled={busy === "generation" || imageCount === 0 || Boolean(renderGateError)}>
                 <Play size={16} /> Pay {paymentCurrency} & start render
               </button>
               {quote?.checkoutUrl && quote.paymentRail === "uniswap" && (
@@ -1000,7 +1002,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
               </a>
               {autoPolling && <span className="badge ok">polling renders</span>}
             </div>
-            {renderConditionError && imageCount > 0 && <p className="notice">{renderConditionError}</p>}
+            {renderGateError && imageCount > 0 && <p className="notice">{renderGateError}</p>}
             <RenderFlowNotice state={renderFlow} />
           </div>
 
@@ -1016,6 +1018,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
                 <GenerationItem
                   key={generation.id}
                   generation={generation}
+                  quote={store?.quotes.find((quote) => quote.id === generation.payment.quoteId) || null}
                   busy={busy === generation.id}
                   wallet={connectedSubAccount?.wallet || walletAddress}
                   onSync={() => syncGeneration(generation.id)}
@@ -1562,16 +1565,19 @@ function resolveUserPaymentRail(paymentToken: PaymentToken, settlementToken: Pay
 
 function GenerationItem({
   generation,
+  quote,
   busy,
   wallet,
   onSync
 }: {
   generation: Generation;
+  quote?: PaymentQuote | null;
   busy: boolean;
   wallet?: string;
   onSync: () => void;
 }) {
   const badgeClass = generation.status === "COMPLETED" ? "badge ok" : generation.status === "FAILED" ? "badge fail" : "badge";
+  const paymentSummary = formatGenerationPaymentSummary(generation, quote);
   return (
     <div className="item">
       <div className="item-title">
@@ -1579,7 +1585,7 @@ function GenerationItem({
         <span className={badgeClass}>{generation.status}</span>
       </div>
       <p className="subtle">
-        {generation.input.image_urls.length} images · {generation.input.video_model} · {generation.input.aspect_ratio} · {generation.payment.amountUsd.toFixed(2)} {generation.payment.tokenSymbol || "USDC"}
+        {generation.input.image_urls.length} images · {generation.input.video_model} · {generation.input.aspect_ratio} · {paymentSummary}
       </p>
       <div className="mono">{generation.samsarSessionId || "pending Samsar session"}</div>
       {generation.payment.keeperExecutionId && <div className="mono">keeper {generation.payment.keeperExecutionId}</div>}
@@ -1609,6 +1615,43 @@ function GenerationItem({
       )}
     </div>
   );
+}
+
+function formatGenerationPaymentSummary(generation: Generation, quote?: PaymentQuote | null) {
+  const settlementSymbol = quote?.settlementCurrency || generation.payment.settlementTokenSymbol || "USDC";
+  const quoteSummary = `${generation.payment.amountUsd.toFixed(2)} ${settlementSymbol} quote`;
+  const paymentSymbol = quote?.paymentCurrency || generation.payment.tokenSymbol;
+  const paymentAmountAtomic =
+    generation.payment.verification?.amountAtomic ||
+    generation.payment.paymentAmountAtomic ||
+    quote?.paymentAmountAtomic;
+  const paymentToken = resolveGenerationPaymentToken(generation, quote);
+  const paidAmount = formatAtomicAmountString(paymentAmountAtomic, paymentToken?.decimals);
+
+  if (!paymentSymbol || !paidAmount || paymentSymbol === settlementSymbol) {
+    return quoteSummary;
+  }
+
+  return `${quoteSummary} · ${paidAmount} ${paymentSymbol} paid`;
+}
+
+function resolveGenerationPaymentToken(generation: Generation, quote?: PaymentQuote | null) {
+  const chainId = quote?.chainId || generation.payment.chainId || getTransactionChainConfig().id;
+  return (
+    findPaymentToken(quote?.paymentTokenAddress || generation.payment.tokenAddress || "", chainId) ||
+    getPaymentTokens(chainId).find((token) => token.symbol === (quote?.paymentCurrency || generation.payment.tokenSymbol))
+  );
+}
+
+function formatAtomicAmountString(amountAtomic?: string, decimals?: number) {
+  if (!amountAtomic || decimals === undefined) {
+    return "";
+  }
+  try {
+    return formatAtomicAmount(BigInt(amountAtomic), decimals);
+  } catch {
+    return "";
+  }
 }
 
 function TextField({

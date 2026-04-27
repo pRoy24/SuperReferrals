@@ -1,5 +1,10 @@
 import type { Customer, CustomerPricing, GenerationInput, ModelPricingConfiguration, VideoAspectRatio, VideoModel } from "./types";
 import { getTransactionChainId, settlementTokenForCurrency } from "./payment-tokens";
+import {
+  getStorefrontDailyWalletRenderLimit,
+  getStorefrontWalletAccessMode,
+  getStorefrontWalletWhitelist
+} from "./storefront-access";
 
 export const CREDIT_UNIT_USD = 0.01;
 export const DEFAULT_CUSTOMER_MULTIPLIER = 1.25;
@@ -180,6 +185,14 @@ export function getStorefrontConditionTiles(customer?: Customer | null) {
   const maxImages = getStorefrontMaxImages(customer);
   if (maxImages) {
     tiles.push(`Max ${maxImages} image${maxImages === 1 ? "" : "s"}`);
+  }
+  const dailyLimit = getStorefrontDailyWalletRenderLimit(customer);
+  if (dailyLimit) {
+    tiles.push(`${dailyLimit} render${dailyLimit === 1 ? "" : "s"} / wallet / day`);
+  }
+  if (getStorefrontWalletAccessMode(customer) === "whitelist") {
+    const walletCount = getStorefrontWalletWhitelist(customer).length;
+    tiles.push(`${walletCount} whitelisted wallet${walletCount === 1 ? "" : "s"}`);
   }
   return tiles;
 }

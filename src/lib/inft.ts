@@ -2,12 +2,19 @@ import { createPublicClient, createWalletClient, http, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { env, isProviderMock } from "./env";
 import { createId, shortHash } from "./ids";
-import { getZeroGChainConfig } from "./zero-g-chain";
+import {
+  delay,
+  isReplacementTransactionError,
+  withSerializedZeroGTransaction,
+  zeroGTransactionRetryDelayMs,
+  getZeroGChainConfig
+} from "./zero-g-chain";
 
 const inftAbi = parseAbi([
   "function nextTokenId() view returns (uint256)",
   "function mintAgent(address to, string encryptedURI, bytes32 metadataHash, address agentWallet, string referrerCode) returns (uint256)"
 ]);
+const INFT_TRANSACTION_RETRY_COUNT = 3;
 
 function getINFTChain() {
   const configuredChainId = Number(env("INFT_CHAIN_ID") || env("OG_CHAIN_ID") || "");
@@ -63,25 +70,103 @@ export async function mintINFT({
     chain,
     transport: http(rpcUrl)
   });
-  const nextTokenId = await publicClient.readContract({
-    address: contractAddress,
-    abi: inftAbi,
-    functionName: "nextTokenId"
-  });
-  const txHash = await walletClient.writeContract({
-    address: contractAddress,
-    abi: inftAbi,
-    functionName: "mintAgent",
-    args: [ownerWallet, metadataUri, metadataHash, agentWallet, referrerCode]
+  const mint = await withSerializedZeroGTransaction(`0g-inft:${account.address.toLowerCase()}:${rpcUrl}`, async () => {
+    const nextTokenId = await publicClient.readContract({
+      address: contractAddress,
+      abi: inftAbi,
+      functionName: "nextTokenId"
+    });
+    const txHash = await writeMintWithRetry({
+      accountAddress: account.address,
+      agentWallet,
+      contractAddress,
+      metadataHash,
+      metadataUri,
+      ownerWallet,
+      publicClient,
+      referrerCode,
+      walletClient
+    });
+    return {
+      tokenId: String(nextTokenId),
+      txHash
+    };
   });
   return {
-    tokenId: String(nextTokenId),
+    tokenId: mint.tokenId,
     contractAddress,
-    txHash,
+    txHash: mint.txHash,
     mock: false
   };
 }
 
 export function deriveAgentWallet(seed: string) {
   return `0x${shortHash(seed).padEnd(40, "0")}` as `0x${string}`;
+}
+
+async function writeMintWithRetry({
+  accountAddress,
+  agentWallet,
+  contractAddress,
+  metadataHash,
+  metadataUri,
+  ownerWallet,
+  publicClient,
+  referrerCode,
+  walletClient
+}: {
+  accountAddress: `0x${string}`;
+  agentWallet: `0x${string}`;
+  contractAddress: `0x${string}`;
+  metadataHash: `0x${string}`;
+  metadataUri: string;
+  ownerWallet: `0x${string}`;
+  publicClient: any;
+  referrerCode: string;
+  walletClient: any;
+}) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= INFT_TRANSACTION_RETRY_COUNT; attempt += 1) {
+    try {
+      const nonce = await publicClient.getTransactionCount({
+        address: accountAddress,
+        blockTag: "pending"
+      }).catch(() => undefined);
+      const feeOverrides = await buildViemFeeOverrides(publicClient, attempt);
+      return await walletClient.writeContract({
+        address: contractAddress,
+        abi: inftAbi,
+        functionName: "mintAgent",
+        args: [ownerWallet, metadataUri, metadataHash, agentWallet, referrerCode],
+        ...(nonce === undefined ? {} : { nonce }),
+        ...feeOverrides
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt < INFT_TRANSACTION_RETRY_COUNT && isReplacementTransactionError(error)) {
+        await delay(zeroGTransactionRetryDelayMs(attempt));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+async function buildViemFeeOverrides(publicClient: any, attempt: number) {
+  const fees = await publicClient.estimateFeesPerGas().catch(() => null);
+  if (fees?.maxFeePerGas && fees?.maxPriorityFeePerGas) {
+    return {
+      maxFeePerGas: bumpGasPrice(fees.maxFeePerGas, attempt),
+      maxPriorityFeePerGas: bumpGasPrice(fees.maxPriorityFeePerGas, attempt)
+    };
+  }
+
+  const gasPrice = await publicClient.getGasPrice().catch(() => null);
+  return gasPrice ? { gasPrice: bumpGasPrice(gasPrice, attempt) } : {};
+}
+
+function bumpGasPrice(value: bigint, attempt: number) {
+  const multiplier = BigInt(100 + attempt * 25);
+  return (value * multiplier) / 100n + BigInt(attempt + 1);
 }

@@ -54,6 +54,9 @@ export interface CustomerStorefrontConditions {
   allowedModels?: VideoModel[];
   allowedAspectRatios?: VideoAspectRatio[];
   maxImages?: number;
+  dailyWalletRenderLimit?: number;
+  walletAccessMode?: "open" | "whitelist";
+  walletWhitelist?: string[];
 }
 
 export interface Customer {
@@ -61,6 +64,24 @@ export interface Customer {
   name: string;
   ownerWallet: string;
   samsarApiKeyAlias?: string;
+  samsarAccount?: {
+    email?: string;
+    username?: string;
+    userId?: string;
+    authToken?: string;
+    apiKey?: string;
+    hasSession?: boolean;
+    hasApiKey?: boolean;
+    externalProvider?: string;
+    externalUserId?: string;
+    walletAddress?: string;
+    checkoutSessionId?: string;
+    checkoutUrl?: string;
+    paymentStatusEndpoint?: string;
+    loginUrl?: string;
+    passwordSetupUrl?: string;
+    updatedAt?: string;
+  };
   pricing: CustomerPricing;
   referrerBaseUrl: string;
   ensName?: string;
@@ -183,6 +204,10 @@ export interface GenerationPayment {
   amountUsd: number;
   tokenAddress?: string;
   tokenSymbol?: PaymentCurrencySymbol;
+  paymentAmountAtomic?: string;
+  settlementTokenAddress?: string;
+  settlementTokenSymbol?: PaymentCurrencySymbol;
+  settlementAmountAtomic?: string;
   paymentRail?: PaymentRail;
   chainId?: number;
   status: "mock_confirmed" | "quoted" | "pending" | "confirmed" | "refunded" | "failed";

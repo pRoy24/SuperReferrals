@@ -24,6 +24,55 @@ export function getZeroGChainConfig(chainId = Number(env("OG_CHAIN_ID", defaultZ
   };
 }
 
+const transactionQueues = ((globalThis as typeof globalThis & {
+  __superReferralsZeroGTransactionQueues?: Map<string, Promise<void>>;
+}).__superReferralsZeroGTransactionQueues ??= new Map<string, Promise<void>>());
+
+export async function withSerializedZeroGTransaction<T>(key: string, task: () => Promise<T>): Promise<T> {
+  const previous = transactionQueues.get(key) ?? Promise.resolve();
+  const run = previous.catch(() => undefined).then(task);
+  const settled = run.then(() => undefined, () => undefined);
+  transactionQueues.set(key, settled);
+
+  try {
+    return await run;
+  } finally {
+    if (transactionQueues.get(key) === settled) {
+      transactionQueues.delete(key);
+    }
+  }
+}
+
+export function isReplacementTransactionError(error: unknown) {
+  const message = errorToSearchText(error).toLowerCase();
+  return (
+    message.includes("replacement_underpriced") ||
+    message.includes("replacement transaction underpriced") ||
+    message.includes("replacement fee too low") ||
+    message.includes("transaction underpriced") ||
+    message.includes("nonce too low")
+  );
+}
+
+export function zeroGTransactionRetryDelayMs(attempt: number) {
+  return 1500 * (attempt + 1);
+}
+
+export function errorToSearchText(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.name} ${error.message} ${error.stack || ""}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+export function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function defaultZeroGChainId() {
   return env("NODE_ENV") === "production" ? "16661" : "16602";
 }

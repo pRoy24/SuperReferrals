@@ -1,6 +1,25 @@
 import { env, isProviderMock } from "./env";
 import { bytes32From, sha256Hex } from "./ids";
 import type { ZeroGArtifact } from "./types";
+import {
+  delay,
+  errorToSearchText,
+  isReplacementTransactionError,
+  withSerializedZeroGTransaction,
+  zeroGTransactionRetryDelayMs
+} from "./zero-g-chain";
+
+type ZeroGUploadSignerState = {
+  provider: any;
+  signer: any;
+  address: string;
+};
+
+const uploadSigners = ((globalThis as typeof globalThis & {
+  __superReferralsZeroGUploadSigners?: Map<string, ZeroGUploadSignerState>;
+}).__superReferralsZeroGUploadSigners ??= new Map<string, ZeroGUploadSignerState>());
+
+const ZERO_G_TRANSACTION_RETRY_COUNT = 3;
 
 export async function persistRemoteVideoToZeroG(videoUrl: string): Promise<ZeroGArtifact> {
   const response = await fetch(videoUrl);
@@ -96,17 +115,24 @@ export async function uploadBufferToZeroG(
 
   const sdk = await import("@0gfoundation/0g-ts-sdk") as Record<string, any>;
   const ethers = await import("ethers");
-  const signer = new ethers.Wallet(privateKey, new ethers.JsonRpcProvider(rpcUrl));
+  const signerState = getZeroGUploadSigner(ethers, rpcUrl, privateKey);
   const indexer = new sdk.Indexer(indexerRpc);
   const data = new sdk.MemData(new Uint8Array(buffer));
   const [, treeErr] = await data.merkleTree();
   if (treeErr) {
     throw new Error(`0G merkle tree error: ${String(treeErr)}`);
   }
-  const [tx, uploadErr] = await indexer.upload(data, rpcUrl, signer);
-  if (uploadErr) {
-    throw new Error(`0G upload error: ${String(uploadErr)}`);
-  }
+
+  const tx = await withSerializedZeroGTransaction(
+    `0g-storage:${signerState.address}:${rpcUrl}`,
+    async () => uploadDataWithRetry({
+      data,
+      ethers,
+      indexer,
+      privateKey,
+      rpcUrl
+    })
+  );
   const txHash = tx?.txHash || tx?.txHashes?.[0];
   const uploadedRoot = tx?.rootHash || tx?.rootHashes?.[0] || rootHash;
   return {
@@ -117,4 +143,126 @@ export async function uploadBufferToZeroG(
     contentType,
     mock: false
   };
+}
+
+function getZeroGUploadSigner(ethers: any, rpcUrl: string, privateKey: string): ZeroGUploadSignerState {
+  const key = `${rpcUrl}:${privateKey}`;
+  const existing = uploadSigners.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const wallet = new ethers.Wallet(privateKey, provider);
+  const signer = new ethers.NonceManager(wallet);
+  const state = {
+    provider,
+    signer,
+    address: String(wallet.address || "").toLowerCase()
+  };
+  uploadSigners.set(key, state);
+  return state;
+}
+
+function resetZeroGUploadSigner(ethers: any, rpcUrl: string, privateKey: string) {
+  const signerState = getZeroGUploadSigner(ethers, rpcUrl, privateKey);
+  signerState.signer.reset?.();
+}
+
+async function uploadDataWithRetry({
+  data,
+  ethers,
+  indexer,
+  privateKey,
+  rpcUrl
+}: {
+  data: any;
+  ethers: any;
+  indexer: any;
+  privateKey: string;
+  rpcUrl: string;
+}) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= ZERO_G_TRANSACTION_RETRY_COUNT; attempt += 1) {
+    const signerState = getZeroGUploadSigner(ethers, rpcUrl, privateKey);
+    try {
+      const transactionOptions = await buildZeroGUploadTransactionOptions(signerState.provider, attempt);
+      const [tx, uploadErr] = await indexer.upload(
+        data,
+        rpcUrl,
+        signerState.signer,
+        buildZeroGUploadOptions(),
+        undefined,
+        transactionOptions
+      );
+      if (uploadErr) {
+        throw uploadErr;
+      }
+      return tx;
+    } catch (error) {
+      lastError = error;
+      if (attempt < ZERO_G_TRANSACTION_RETRY_COUNT && isReplacementTransactionError(error)) {
+        resetZeroGUploadSigner(ethers, rpcUrl, privateKey);
+        await delay(zeroGTransactionRetryDelayMs(attempt));
+        continue;
+      }
+      throw new Error(`0G upload error: ${formatZeroGError(error)}`);
+    }
+  }
+
+  throw new Error(`0G upload error: ${formatZeroGError(lastError)}`);
+}
+
+function buildZeroGUploadOptions() {
+  return {
+    finalityRequired: parseBooleanEnv("OG_STORAGE_FINALITY_REQUIRED", false)
+  };
+}
+
+async function buildZeroGUploadTransactionOptions(provider: any, attempt: number) {
+  const configuredGasPrice = parseBigIntEnv("OG_GAS_PRICE_WEI");
+  const feeData = configuredGasPrice ? null : await provider.getFeeData().catch(() => null);
+  const gasPrice = configuredGasPrice || feeData?.gasPrice;
+  return gasPrice
+    ? { gasPrice: bumpGasPrice(gasPrice, attempt) }
+    : undefined;
+}
+
+function parseBigIntEnv(name: string) {
+  const raw = env(name);
+  if (!raw) {
+    return null;
+  }
+  try {
+    return BigInt(raw);
+  } catch {
+    return null;
+  }
+}
+
+function parseBooleanEnv(name: string, fallback: boolean) {
+  const raw = env(name);
+  if (!raw) {
+    return fallback;
+  }
+  const normalized = raw.toLowerCase();
+  if (["true", "1", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["false", "0", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
+function bumpGasPrice(value: bigint, attempt: number) {
+  const multiplier = BigInt(100 + attempt * 25);
+  return (value * multiplier) / 100n + BigInt(attempt + 1);
+}
+
+function formatZeroGError(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return errorToSearchText(error);
 }

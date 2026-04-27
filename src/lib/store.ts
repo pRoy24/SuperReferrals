@@ -4,6 +4,7 @@ import { appBaseUrl, env } from "./env";
 import { createId, makeReferrerCode, nowIso, normalizeWallet } from "./ids";
 import { findPaymentToken, getTransactionChainId, settlementTokenForCurrency } from "./payment-tokens";
 import { defaultModelPricingConfigurations, defaultPricing } from "./pricing";
+import { normalizeWalletList } from "./storefront-access";
 import type {
   AgentJob,
   AgentProfile,
@@ -102,6 +103,15 @@ function normalizeStoreForRuntime(store: SuperReferralsStore) {
       customer.pricing = pricing;
       changed = true;
     }
+    const hasSamsarSession = Boolean(customer.samsarAccount?.authToken || customer.samsarAccount?.apiKey);
+    if (!hasSamsarSession && Number(customer.subscription?.creditsRemaining || 0) > 0) {
+      customer.subscription = {
+        ...(customer.subscription || { status: "not_started" }),
+        status: "not_started",
+        creditsRemaining: 0
+      };
+      changed = true;
+    }
   }
   return { store, changed };
 }
@@ -144,8 +154,8 @@ export function seedStore(): SuperReferralsStore {
     referrerBaseUrl: appBaseUrl(),
     ensName: "demo.eth",
     subscription: {
-      status: "active",
-      creditsRemaining: 5000
+      status: "not_started",
+      creditsRemaining: 0
     },
     createdAt: timestamp,
     updatedAt: timestamp
@@ -194,6 +204,46 @@ export async function getINFT(id: string) {
   return store.infts.find((inft) => inft.id === id);
 }
 
+export function publicStore(store: SuperReferralsStore): SuperReferralsStore {
+  return {
+    ...store,
+    customers: store.customers.map(publicCustomer),
+    subAccounts: store.subAccounts.map(publicSubAccount)
+  };
+}
+
+export function publicCustomer(customer: Customer): Customer {
+  const samsarAccount = customer.samsarAccount
+    ? {
+      email: customer.samsarAccount.email,
+      username: customer.samsarAccount.username,
+      userId: customer.samsarAccount.userId,
+      hasSession: Boolean(customer.samsarAccount.authToken || customer.samsarAccount.apiKey),
+      hasApiKey: Boolean(customer.samsarAccount.apiKey),
+      externalProvider: customer.samsarAccount.externalProvider,
+      externalUserId: customer.samsarAccount.externalUserId,
+      walletAddress: customer.samsarAccount.walletAddress,
+      checkoutSessionId: customer.samsarAccount.checkoutSessionId,
+      checkoutUrl: customer.samsarAccount.checkoutUrl,
+      paymentStatusEndpoint: customer.samsarAccount.paymentStatusEndpoint,
+      loginUrl: customer.samsarAccount.loginUrl,
+      passwordSetupUrl: customer.samsarAccount.passwordSetupUrl,
+      updatedAt: customer.samsarAccount.updatedAt
+    }
+    : undefined;
+  return {
+    ...customer,
+    samsarAccount
+  };
+}
+
+export function publicSubAccount(account: SubAccount): SubAccount {
+  return {
+    ...account,
+    externalApiKey: account.externalApiKey ? "connected" : undefined
+  };
+}
+
 export function upsertCustomer(store: SuperReferralsStore, input: Partial<Customer>) {
   const timestamp = nowIso();
   const id = input.id || createId("cus");
@@ -203,6 +253,10 @@ export function upsertCustomer(store: SuperReferralsStore, input: Partial<Custom
     name: input.name?.trim() || existing?.name || "Customer",
     ownerWallet: normalizeWallet(input.ownerWallet || existing?.ownerWallet),
     samsarApiKeyAlias: input.samsarApiKeyAlias || existing?.samsarApiKeyAlias,
+    samsarAccount: {
+      ...(existing?.samsarAccount || {}),
+      ...(input.samsarAccount || {})
+    },
     pricing: {
       ...(existing?.pricing || defaultPricing),
       ...(input.pricing || {}),
@@ -214,13 +268,16 @@ export function upsertCustomer(store: SuperReferralsStore, input: Partial<Custom
     ensName: input.ensName ?? existing?.ensName,
     storefront: normalizeStorefrontDetails(input.storefront, existing?.storefront),
     subscription: {
-      status: input.subscription?.status || existing?.subscription.status || "active",
+      status: input.subscription?.status || existing?.subscription.status || "not_started",
       streamId: input.subscription?.streamId || existing?.subscription.streamId,
-      creditsRemaining: input.subscription?.creditsRemaining ?? existing?.subscription.creditsRemaining
+      creditsRemaining: input.subscription?.creditsRemaining ?? existing?.subscription.creditsRemaining ?? 0
     },
     createdAt: existing?.createdAt || timestamp,
     updatedAt: timestamp
   };
+  if (!next.samsarAccount || Object.values(next.samsarAccount).every((value) => value === undefined || value === "")) {
+    next.samsarAccount = undefined;
+  }
   if (existing) {
     Object.assign(existing, next);
     return existing;
@@ -281,6 +338,17 @@ export function updateGeneration(store: SuperReferralsStore, id: string, patch: 
 }
 
 export function addINFT(store: SuperReferralsStore, inft: INFTRecord) {
+  const existingIndex = store.infts.findIndex((item) =>
+    item.id === inft.id || item.generationId === inft.generationId
+  );
+  if (existingIndex >= 0) {
+    store.infts[existingIndex] = {
+      ...store.infts[existingIndex],
+      ...inft,
+      updatedAt: nowIso()
+    };
+    return store.infts[existingIndex];
+  }
   store.infts.unshift(inft);
   return inft;
 }
@@ -407,7 +475,10 @@ function normalizeStorefrontConditions(
     enabled,
     allowedModels: normalizeEnumList(input?.allowedModels ?? existing?.allowedModels, ["VEO3.1I2V", "SEEDANCEI2V", "KLING3.0", "RUNWAYML"]),
     allowedAspectRatios: normalizeEnumList(input?.allowedAspectRatios ?? existing?.allowedAspectRatios, ["16:9", "9:16"]),
-    maxImages: normalizePositiveInteger(input?.maxImages ?? existing?.maxImages)
+    maxImages: normalizePositiveInteger(input?.maxImages ?? existing?.maxImages),
+    dailyWalletRenderLimit: normalizePositiveInteger(input?.dailyWalletRenderLimit ?? existing?.dailyWalletRenderLimit),
+    walletAccessMode: normalizeWalletAccessMode(input?.walletAccessMode ?? existing?.walletAccessMode),
+    walletWhitelist: normalizeWalletList(input?.walletWhitelist ?? existing?.walletWhitelist)
   };
 }
 
@@ -425,4 +496,8 @@ function normalizeEnumList<T extends string>(value: unknown, allowed: T[]) {
 function normalizePositiveInteger(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+}
+
+function normalizeWalletAccessMode(value: unknown) {
+  return value === "whitelist" ? "whitelist" : "open";
 }
