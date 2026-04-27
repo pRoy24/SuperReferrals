@@ -19,7 +19,7 @@ import {
   Zap
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { subscribeToBrowserWalletProviders, type BrowserWalletProvider } from "@/lib/browser-wallets";
+import { requestWalletAccounts, subscribeToBrowserWalletProviders, type BrowserWalletProvider } from "@/lib/browser-wallets";
 import { getPaymentTokens, getTransactionChainConfig, settlementTokenForCurrency } from "@/lib/payment-tokens";
 import {
   CREDIT_UNIT_USD,
@@ -285,8 +285,8 @@ export default function Dashboard() {
       if (!provider) {
         throw new Error("No browser wallet detected. Install MetaMask, Coinbase Wallet, Rabby, Brave Wallet, or another EIP-1193 wallet.");
       }
-      const accounts = await provider.request({ method: "eth_requestAccounts" });
-      const firstAccount = Array.isArray(accounts) ? String(accounts[0] || "") : "";
+      const accounts = await requestWalletAccounts(provider, { forceAccountSelection: true });
+      const firstAccount = accounts[0] || "";
       if (!firstAccount) {
         throw new Error("Wallet did not return an account");
       }

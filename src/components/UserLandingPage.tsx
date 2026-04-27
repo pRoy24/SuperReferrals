@@ -3,7 +3,12 @@
 import { Bot, CircleDollarSign, Code2, ExternalLink, ListChecks, Play, Plus, RefreshCw, ShieldCheck, Store, Trash2, Wallet } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
-import { type EthereumProvider } from "@/lib/browser-wallets";
+import {
+  requestWalletAccounts,
+  subscribeToBrowserWalletProviders,
+  type BrowserWalletProvider,
+  type EthereumProvider
+} from "@/lib/browser-wallets";
 import {
   findPaymentToken,
   getPaymentTokens,
@@ -135,6 +140,8 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [walletAddress, setWalletAddress] = useState("");
+  const [walletProviders, setWalletProviders] = useState<BrowserWalletProvider[]>([]);
+  const [activeWalletProvider, setActiveWalletProvider] = useState<BrowserWalletProvider | null>(null);
   const [profileForm, setProfileForm] = useState({
     email: "",
     username: ""
@@ -178,6 +185,8 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   useEffect(() => {
     load().catch((error) => setMessage(error.message));
   }, []);
+
+  useEffect(() => subscribeToBrowserWalletProviders(setWalletProviders), []);
 
   const routeAccount = useMemo(
     () => store?.subAccounts.find((account) => account.referrerCode === referrerCode),
@@ -395,9 +404,30 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   }, [paymentCurrency, paymentTokens]);
 
   useEffect(() => {
+    const provider = activeWalletProvider?.provider || walletProviders[0]?.provider;
+    if (!provider?.on) {
+      return;
+    }
+    const handleAccountsChanged = (...args: unknown[]) => {
+      const accounts = Array.isArray(args[0]) ? args[0].map((account) => String(account)) : [];
+      const firstAccount = accounts[0] || "";
+      setWalletAddress(firstAccount);
+      if (firstAccount) {
+        setProfileForm((current) => ({
+          ...current,
+          username: current.username || `wallet-${shortWallet(firstAccount)}`
+        }));
+      }
+    };
+    provider.on("accountsChanged", handleAccountsChanged);
+    return () => provider.removeListener?.("accountsChanged", handleAccountsChanged);
+  }, [activeWalletProvider?.id, walletProviders]);
+
+  useEffect(() => {
     const rawSession = window.localStorage.getItem(sessionStorageKey);
     if (!rawSession) {
-      window.ethereum?.request({ method: "eth_accounts" })
+      const provider = activeWalletProvider?.provider || walletProviders[0]?.provider || window.ethereum;
+      provider?.request({ method: "eth_accounts" })
         .then((accounts) => {
           const firstAccount = Array.isArray(accounts) ? String(accounts[0] || "") : "";
           if (firstAccount) {
@@ -423,7 +453,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     } catch {
       window.localStorage.removeItem(sessionStorageKey);
     }
-  }, [sessionStorageKey]);
+  }, [sessionStorageKey, activeWalletProvider?.id, walletProviders]);
 
   useEffect(() => {
     if (!walletAddress.trim()) {
@@ -492,32 +522,42 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     }
   }, [trackedGeneration?.status, trackedGeneration?.updatedAt, renderFlow.generationId, renderFlow.status]);
 
-  async function connectWallet() {
+  function selectedEthereumProvider(walletProvider?: BrowserWalletProvider) {
+    const selected = walletProvider || activeWalletProvider || walletProviders[0] || null;
+    return {
+      walletProvider: selected,
+      provider: selected?.provider || window.ethereum
+    };
+  }
+
+  async function connectWallet(walletProvider?: BrowserWalletProvider) {
     setBusy("wallet");
     setMessage("");
     try {
-      if (!window.ethereum) {
+      const selected = selectedEthereumProvider(walletProvider);
+      if (!selected.provider) {
         setMessage("No injected wallet detected. Open this page in a wallet-enabled browser or enter a wallet address to continue in mock mode.");
         return;
       }
-      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-      const firstAccount = Array.isArray(accounts) ? String(accounts[0] || "") : "";
+      const accounts = await requestWalletAccounts(selected.provider, { forceAccountSelection: true });
+      const firstAccount = accounts[0] || "";
       if (!firstAccount) {
         throw new Error("Wallet did not return an account");
       }
-      await ensureWalletNetwork(window.ethereum, transactionChain);
+      await ensureWalletNetwork(selected.provider, transactionChain);
       const nextProfile = {
         ...profileForm,
         username: profileForm.username || `wallet-${shortWallet(firstAccount)}`
       };
+      setActiveWalletProvider(selected.walletProvider);
       setWalletAddress(firstAccount);
       setProfileForm(nextProfile);
       const account = await ensureWalletSubAccount(firstAccount, nextProfile);
       const registration = account.blockchainRegistration;
       setMessage(
         registration
-          ? `Wallet connected on ${transactionChain.name}. 0G profile ${shortHash(registration.profileId)} is ready on ${registration.chainName}.`
-          : `Wallet connected on ${transactionChain.name}.`
+          ? `Wallet connected${selected.walletProvider ? ` with ${selected.walletProvider.name}` : ""} on ${transactionChain.name}. 0G profile ${shortHash(registration.profileId)} is ready on ${registration.chainName}.`
+          : `Wallet connected${selected.walletProvider ? ` with ${selected.walletProvider.name}` : ""} on ${transactionChain.name}.`
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Wallet connection failed");
@@ -625,14 +665,15 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     if (!customer) {
       throw new Error("Customer store is not available");
     }
-    if (!window.ethereum) {
+    const walletProvider = selectedEthereumProvider();
+    if (!walletProvider.provider) {
       throw new Error("A wallet transaction is required before rendering. Open this page in a wallet-enabled browser or paste an existing payment transaction hash.");
     }
     if (!activeQuote.settlementAmountAtomic) {
       throw new Error("Quote did not include a settlement amount.");
     }
 
-    await ensureWalletNetwork(window.ethereum, transactionChain);
+    await ensureWalletNetwork(walletProvider.provider, transactionChain);
     const paymentToken = findPaymentToken(activeQuote.paymentTokenAddress || "", transactionChain.id) || selectedPaymentToken;
     const activeSettlementToken =
       findPaymentToken(activeQuote.settlementTokenAddress || "", transactionChain.id) || settlementToken;
@@ -645,13 +686,13 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
 
     if (activeQuote.paymentRail === "uniswap" && !sameToken) {
       updateRenderFlow({ status: "payment", message: "Requesting Uniswap swap transaction from the wallet." });
-      const swapTxHash = await requestUniswapSwap(window.ethereum, activeQuote, account.wallet, transactionChain.name);
+      const swapTxHash = await requestUniswapSwap(walletProvider.provider, activeQuote, account.wallet, transactionChain.name);
       updateRenderFlow({
         status: "confirming",
         message: `Swap ${shortHash(swapTxHash)} submitted. Waiting for settlement tokens before transfer.`,
         txHash: swapTxHash
       });
-      const swapReceipt = await waitForWalletReceipt(window.ethereum, swapTxHash, 120000);
+      const swapReceipt = await waitForWalletReceipt(walletProvider.provider, swapTxHash, 120000);
       if (!swapReceipt) {
         throw new Error("Timed out waiting for the swap transaction to mine. Paste the final settlement transfer hash after the wallet confirms.");
       }
@@ -660,7 +701,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       }
       updateRenderFlow({ status: "payment", message: "Swap mined. Requesting settlement transfer.", txHash: swapTxHash });
       const settlementTxHash = await requestTokenTransfer({
-        provider: window.ethereum,
+        provider: walletProvider.provider,
         from: account.wallet,
         token: activeSettlementToken,
         recipient: customer.ownerWallet,
@@ -673,7 +714,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
         message: `Settlement transfer ${shortHash(settlementTxHash)} submitted. Waiting for confirmation.`,
         txHash: settlementTxHash
       });
-      const settlementReceipt = await waitForWalletReceipt(window.ethereum, settlementTxHash, 120000);
+      const settlementReceipt = await waitForWalletReceipt(walletProvider.provider, settlementTxHash, 120000);
       if (!settlementReceipt) {
         throw new Error("Timed out waiting for the settlement transfer to mine. Paste the transfer hash once it confirms.");
       }
@@ -689,7 +730,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
         message: `Requesting ${paymentToken.symbol} payment for KeeperHub ${activeSettlementToken.symbol} settlement.`
       });
       const keeperPaymentTxHash = await requestTokenTransfer({
-        provider: window.ethereum,
+        provider: walletProvider.provider,
         from: account.wallet,
         token: paymentToken,
         recipient: paymentRecipient,
@@ -702,7 +743,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
         message: `KeeperHub payment ${shortHash(keeperPaymentTxHash)} submitted. Waiting for confirmation before starting render.`,
         txHash: keeperPaymentTxHash
       });
-      const keeperPaymentReceipt = await waitForWalletReceipt(window.ethereum, keeperPaymentTxHash, 120000);
+      const keeperPaymentReceipt = await waitForWalletReceipt(walletProvider.provider, keeperPaymentTxHash, 120000);
       if (!keeperPaymentReceipt) {
         throw new Error("Timed out waiting for the KeeperHub payment to mine. Paste the payment transaction hash once it confirms.");
       }
@@ -718,7 +759,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
 
     updateRenderFlow({ status: "payment", message: `Requesting ${activeSettlementToken.symbol} transfer from the wallet.` });
     const transferTxHash = await requestTokenTransfer({
-      provider: window.ethereum,
+      provider: walletProvider.provider,
       from: account.wallet,
       token: activeSettlementToken,
       recipient: customer.ownerWallet,
@@ -731,7 +772,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       message: `Payment transfer ${shortHash(transferTxHash)} submitted. Waiting for confirmation.`,
       txHash: transferTxHash
     });
-    const transferReceipt = await waitForWalletReceipt(window.ethereum, transferTxHash, 120000);
+    const transferReceipt = await waitForWalletReceipt(walletProvider.provider, transferTxHash, 120000);
     if (!transferReceipt) {
       throw new Error("Timed out waiting for the payment transfer to mine. Paste the transfer hash once it confirms.");
     }
@@ -888,8 +929,27 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
               <TextField label="Email" value={profileForm.email} onChange={(email) => setProfileForm({ ...profileForm, email })} />
               <TextField label="Username" value={profileForm.username} onChange={(username) => setProfileForm({ ...profileForm, username })} />
             </div>
+            <div className="wallet-provider-grid">
+              {walletProviders.map((walletProvider) => (
+                <button
+                  className={`wallet-provider-button ${activeWalletProvider?.id === walletProvider.id ? "active" : ""}`}
+                  disabled={busy === "wallet"}
+                  key={walletProvider.id}
+                  onClick={() => connectWallet(walletProvider)}
+                  type="button"
+                >
+                  {walletProvider.icon ? <img alt="" src={walletProvider.icon} /> : <Wallet size={16} />}
+                  {walletProvider.name}
+                </button>
+              ))}
+              {walletProviders.length === 0 && (
+                <button className="wallet-provider-button" disabled={busy === "wallet"} onClick={() => connectWallet()} type="button">
+                  <Wallet size={16} /> Browser wallet
+                </button>
+              )}
+            </div>
             <div className="button-row">
-              <button className="btn primary" onClick={connectWallet} disabled={busy === "wallet"}>
+              <button className="btn primary" onClick={() => connectWallet()} disabled={busy === "wallet"}>
                 <Wallet size={16} /> {busy === "wallet" ? "Connecting..." : hasWalletAddress ? "Switch wallet" : "Connect wallet"}
               </button>
               <button className="btn" onClick={() => ensureWalletSubAccount().then((account) => setMessage(account.blockchainRegistration ? "Wallet profile and 0G user record ready." : "Wallet profile ready.")).catch((error) => setMessage(error.message))}>

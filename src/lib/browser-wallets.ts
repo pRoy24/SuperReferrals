@@ -2,6 +2,8 @@
 
 export type EthereumProvider = {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
+  on?: (event: string, listener: (...args: unknown[]) => void) => void;
+  removeListener?: (event: string, listener: (...args: unknown[]) => void) => void;
   isBraveWallet?: boolean;
   isCoinbaseWallet?: boolean;
   isMetaMask?: boolean;
@@ -80,6 +82,26 @@ export function subscribeToBrowserWalletProviders(onProviders: (providers: Brows
   };
 }
 
+export async function requestWalletAccounts(
+  provider: EthereumProvider,
+  options: { forceAccountSelection?: boolean } = {}
+) {
+  if (options.forceAccountSelection) {
+    await provider.request({
+      method: "wallet_requestPermissions",
+      params: [{ eth_accounts: {} }]
+    }).catch((error) => {
+      if (!isUnsupportedWalletMethod(error)) {
+        throw error;
+      }
+    });
+  }
+  const accounts = await provider.request({ method: "eth_requestAccounts" });
+  return Array.isArray(accounts)
+    ? accounts.map((account) => String(account)).filter(Boolean)
+    : [];
+}
+
 function normalizeLegacyProviders(provider?: EthereumProvider) {
   if (!provider) {
     return [];
@@ -135,4 +157,12 @@ function walletProviderRank(name: string) {
     return 3;
   }
   return 10;
+}
+
+function isUnsupportedWalletMethod(error: unknown) {
+  const code = typeof error === "object" && error && "code" in error
+    ? Number((error as { code?: unknown }).code)
+    : 0;
+  const message = error instanceof Error ? error.message : "";
+  return code === -32601 || /unsupported|not supported|method not found/i.test(message);
 }
