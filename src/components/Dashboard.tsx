@@ -35,6 +35,13 @@ import type { ModelPricingConfiguration, PaymentCurrencySymbol, SuperReferralsSt
 const processorCreditAmounts = [10, 25, 50, 100];
 const conditionModelOptions: VideoModel[] = ["RUNWAYML", "VEO3.1I2V", "SEEDANCEI2V", "KLING3.0"];
 const conditionAspectOptions: VideoAspectRatio[] = ["9:16", "16:9"];
+const deploymentEnvironment = (
+  process.env.NEXT_PUBLIC_DEPLOYMENT_ENV ||
+  process.env.NEXT_PUBLIC_APP_ENV ||
+  process.env.NODE_ENV ||
+  ""
+).toLowerCase();
+const showStagingEnvironmentNotice = deploymentEnvironment !== "production";
 
 export default function Dashboard() {
   const [store, setStore] = useState<SuperReferralsStore | null>(null);
@@ -475,6 +482,17 @@ export default function Dashboard() {
             <RefreshCw size={16} /> Refresh
           </button>
         </div>
+
+        {showStagingEnvironmentNotice && (
+          <div className="environment-banner" role="status">
+            <span>Staging environment</span>
+            <p>
+              This workspace is for demo purposes only. Merchant production storefront accounts should be created at{" "}
+              <a href="https://super-referrals.vercel.app/" target="_blank" rel="noreferrer">super-referrals.vercel.app</a>{" "}
+              when production onboarding opens. Coming soon.
+            </p>
+          </div>
+        )}
 
         {message && <p className="notice">{message}</p>}
 
