@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "SuperReferrals",
-  description: "On-chain Samsar image-list-to-video referrer adapter"
+  description: "Turn referral links into product video storefronts with catalog data, creative styles, and creator campaign pages."
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

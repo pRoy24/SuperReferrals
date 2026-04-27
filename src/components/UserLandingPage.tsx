@@ -1,7 +1,7 @@
 "use client";
 
-import { Bot, CircleDollarSign, ExternalLink, Play, RefreshCw, ShieldCheck, Sparkles, Wallet } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Bot, CircleDollarSign, Code2, ExternalLink, ListChecks, Play, Plus, RefreshCw, ShieldCheck, Trash2, Wallet } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   findPaymentToken,
   getPaymentTokens,
@@ -49,6 +49,33 @@ type GenerationFormState = {
   publishToFeed: boolean;
   feedTags: string;
   txHash: string;
+};
+
+type RenderFormMode = "simple" | "advanced";
+type RenderFormPatch = Partial<GenerationFormState>;
+
+type ImageWizardItem = {
+  image_url: string;
+  title: string;
+  image_text: string;
+  skip_enhancement?: boolean;
+};
+
+type MetadataWizardItem = {
+  key: string;
+  value: string;
+};
+
+type FooterWizardItem = {
+  url: string;
+  title: string;
+};
+
+type OutroFocusAreaWizard = {
+  x: string;
+  y: string;
+  width: string;
+  height: string;
 };
 
 type RenderFlowState = {
@@ -99,6 +126,7 @@ const starterFooterMetadata = JSON.stringify([
   { url: "https://unsplash.com/s/photos/product-shoes", title: "Limited Offer" }
 ], null, 2);
 
+const starterCampaignMetadata = JSON.stringify({ title: "New launch", campaign: "customer-store" }, null, 2);
 const defaultOutroFocusArea = JSON.stringify({ x: 680, y: 296, width: 432, height: 432 }, null, 2);
 
 export default function UserLandingPage({ referrerCode }: { referrerCode: string }) {
@@ -112,7 +140,7 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
   });
   const [generationForm, setGenerationForm] = useState<GenerationFormState>({
     imageUrls: starterImageMetadata,
-    metadata: JSON.stringify({ title: "New launch", campaign: "customer-store" }, null, 2),
+    metadata: starterCampaignMetadata,
     prompt: "Create a concise product marketing video with clean motion and a strong final call to action.",
     videoModel: "RUNWAYML" as VideoModel,
     aspectRatio: "9:16" as VideoAspectRatio,
@@ -130,6 +158,11 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
     feedTags: "launch, product, referrer",
     txHash: ""
   });
+  const [renderFormMode, setRenderFormMode] = useState<RenderFormMode>("simple");
+  const [imageWizardItems, setImageWizardItems] = useState<ImageWizardItem[]>(() => parseImageWizardItems(starterImageMetadata));
+  const [metadataWizardItems, setMetadataWizardItems] = useState<MetadataWizardItem[]>(() => parseMetadataWizardItems(starterCampaignMetadata));
+  const [footerWizardItems, setFooterWizardItems] = useState<FooterWizardItem[]>(() => parseFooterWizardItems(starterFooterMetadata));
+  const [outroFocusAreaWizard, setOutroFocusAreaWizard] = useState<OutroFocusAreaWizard>(() => parseOutroFocusAreaWizard(defaultOutroFocusArea));
   const [paymentCurrency, setPaymentCurrency] = useState<PaymentCurrencySymbol>("ETH");
   const [quote, setQuote] = useState<PaymentQuote | null>(null);
   const [autoPolling, setAutoPolling] = useState(false);
@@ -207,6 +240,108 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
     () => previewGenerationPayload(generationForm, connectedSubAccount?.referrerCode || referrerCode),
     [generationForm, connectedSubAccount?.referrerCode, referrerCode]
   );
+
+  function updateGenerationForm(patch: RenderFormPatch) {
+    setGenerationForm((current) => ({ ...current, ...patch }));
+  }
+
+  function openRenderFormMode(mode: RenderFormMode) {
+    if (mode === "simple") {
+      setImageWizardItems(parseImageWizardItems(generationForm.imageUrls));
+      setMetadataWizardItems(parseMetadataWizardItems(generationForm.metadata));
+      setFooterWizardItems(parseFooterWizardItems(generationForm.footerMetadata));
+      setOutroFocusAreaWizard(parseOutroFocusAreaWizard(generationForm.outroFocusArea));
+    }
+    setRenderFormMode(mode);
+  }
+
+  function commitImageWizardItems(nextImages: ImageWizardItem[], nextFooters = footerWizardItems) {
+    setImageWizardItems(nextImages);
+    setGenerationForm((current) => ({
+      ...current,
+      imageUrls: serializeImageWizardItems(nextImages),
+      footerMetadata: serializeFooterWizardItems(nextFooters)
+    }));
+  }
+
+  function updateImageWizardItem(index: number, patch: Partial<ImageWizardItem>) {
+    const previousItem = imageWizardItems[index];
+    const nextImages = imageWizardItems.map((item, itemIndex) =>
+      itemIndex === index ? { ...item, ...patch } : item
+    );
+    let nextFooters = footerWizardItems;
+
+    if (patch.image_url !== undefined && footerWizardItems[index]) {
+      const previousUrl = previousItem?.image_url || "";
+      const footerItem = footerWizardItems[index];
+      if (!footerItem.url.trim() || footerItem.url === previousUrl) {
+        nextFooters = footerWizardItems.map((item, itemIndex) =>
+          itemIndex === index ? { ...item, url: patch.image_url || "" } : item
+        );
+        setFooterWizardItems(nextFooters);
+      }
+    }
+
+    commitImageWizardItems(nextImages, nextFooters);
+  }
+
+  function addImageWizardItem() {
+    const nextImages = [...imageWizardItems, { image_url: "", title: "", image_text: "" }];
+    const nextFooters = [...footerWizardItems, { url: "", title: "" }];
+    setFooterWizardItems(nextFooters);
+    commitImageWizardItems(nextImages, nextFooters);
+  }
+
+  function removeImageWizardItem(index: number) {
+    const nextImages = imageWizardItems.filter((_, itemIndex) => itemIndex !== index);
+    const nextFooters = footerWizardItems.filter((_, itemIndex) => itemIndex !== index);
+    setFooterWizardItems(nextFooters);
+    commitImageWizardItems(nextImages, nextFooters);
+  }
+
+  function commitMetadataWizardItems(nextItems: MetadataWizardItem[]) {
+    setMetadataWizardItems(nextItems);
+    updateGenerationForm({ metadata: serializeMetadataWizardItems(nextItems) });
+  }
+
+  function updateMetadataWizardItem(index: number, patch: Partial<MetadataWizardItem>) {
+    commitMetadataWizardItems(metadataWizardItems.map((item, itemIndex) =>
+      itemIndex === index ? { ...item, ...patch } : item
+    ));
+  }
+
+  function addMetadataWizardItem() {
+    commitMetadataWizardItems([...metadataWizardItems, { key: "", value: "" }]);
+  }
+
+  function removeMetadataWizardItem(index: number) {
+    commitMetadataWizardItems(metadataWizardItems.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  function commitFooterWizardItems(nextItems: FooterWizardItem[]) {
+    setFooterWizardItems(nextItems);
+    updateGenerationForm({ footerMetadata: serializeFooterWizardItems(nextItems) });
+  }
+
+  function updateFooterWizardItem(index: number, patch: Partial<FooterWizardItem>) {
+    commitFooterWizardItems(footerWizardItems.map((item, itemIndex) =>
+      itemIndex === index ? { ...item, ...patch } : item
+    ));
+  }
+
+  function addFooterWizardItem() {
+    commitFooterWizardItems([...footerWizardItems, { url: "", title: "" }]);
+  }
+
+  function removeFooterWizardItem(index: number) {
+    commitFooterWizardItems(footerWizardItems.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  function updateOutroFocusAreaWizard(field: keyof OutroFocusAreaWizard, value: string) {
+    const nextFocusArea = { ...outroFocusAreaWizard, [field]: value };
+    setOutroFocusAreaWizard(nextFocusArea);
+    updateGenerationForm({ outroFocusArea: serializeOutroFocusAreaWizard(nextFocusArea) });
+  }
 
   useEffect(() => {
     if (!selectedPricing) return;
@@ -737,82 +872,61 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
               <h2>Render Task</h2>
               <Play size={18} />
             </div>
-            <div className="form-grid">
-              <div className="field full">
-                <label>Image URL metadata JSON array</label>
-                <textarea value={generationForm.imageUrls} onChange={(event) => setGenerationForm({ ...generationForm, imageUrls: event.target.value })} />
-              </div>
-              <div className="field full">
-                <label>JSON payload metadata</label>
-                <textarea value={generationForm.metadata} onChange={(event) => setGenerationForm({ ...generationForm, metadata: event.target.value })} />
-              </div>
-              <label className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={generationForm.publishToFeed}
-                  onChange={(event) => setGenerationForm({ ...generationForm, publishToFeed: event.target.checked })}
-                />
-                Publish video to feed
-              </label>
-              <TextField label="Feed tags" value={generationForm.feedTags} onChange={(feedTags) => setGenerationForm({ ...generationForm, feedTags })} />
-              <div className="field full">
-                <label>Prompt</label>
-                <textarea value={generationForm.prompt} onChange={(event) => setGenerationForm({ ...generationForm, prompt: event.target.value })} />
-              </div>
-              <PaymentMethodSelector
-                tokens={paymentTokens}
-                selectedSymbol={paymentCurrency}
-                settlementToken={settlementToken}
-                onSelect={(currency) => setPaymentCurrency(currency)}
-              />
-              <TextField label="CTA outro URL" value={generationForm.ctaUrl} onChange={(ctaUrl) => setGenerationForm({ ...generationForm, ctaUrl })} />
-              <TextField label="CTA top text" value={generationForm.ctaTextTop} onChange={(ctaTextTop) => setGenerationForm({ ...generationForm, ctaTextTop })} />
-              <TextField label="CTA bottom text" value={generationForm.ctaTextBottom} onChange={(ctaTextBottom) => setGenerationForm({ ...generationForm, ctaTextBottom })} />
-              <TextField label="CTA logo URL" value={generationForm.ctaLogo} onChange={(ctaLogo) => setGenerationForm({ ...generationForm, ctaLogo })} />
-              <TextField label="Payment tx hash (manual fallback)" value={generationForm.txHash} onChange={(txHash) => setGenerationForm({ ...generationForm, txHash })} full />
-              <label className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={generationForm.addOutroAnimation}
-                  onChange={(event) => setGenerationForm({ ...generationForm, addOutroAnimation: event.target.checked })}
-                />
-                Server-generated outro animation
-              </label>
-              <label className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={generationForm.addOutroFocusArea}
-                  onChange={(event) => setGenerationForm({ ...generationForm, addOutroFocusArea: event.target.checked })}
-                />
-                Server-generated outro focus area
-              </label>
-              <div className="field full">
-                <label>Outro focus area JSON</label>
-                <textarea
-                  value={generationForm.outroFocusArea}
-                  onChange={(event) => setGenerationForm({ ...generationForm, outroFocusArea: event.target.value })}
-                />
-              </div>
-              <label className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={generationForm.addFooterAnimation}
-                  onChange={(event) => setGenerationForm({ ...generationForm, addFooterAnimation: event.target.checked })}
-                />
-                Bottom CTA footer cards
-              </label>
-              <div className="field full">
-                <label>Footer metadata JSON array ({imageCount} items)</label>
-                <textarea
-                  value={generationForm.footerMetadata}
-                  onChange={(event) => setGenerationForm({ ...generationForm, footerMetadata: event.target.value })}
-                />
-              </div>
-              <div className="field full">
-                <label>Generated Samsar payload preview</label>
-                <textarea className="payload-preview" value={generationPayloadPreview} readOnly />
+            <div className="render-mode-toolbar">
+              <span className="subtle">Input mode</span>
+              <div className="mode-toggle" role="group" aria-label="Render input mode">
+                <button
+                  type="button"
+                  className={renderFormMode === "simple" ? "active" : ""}
+                  onClick={() => openRenderFormMode("simple")}
+                >
+                  <ListChecks size={16} /> Simple wizard
+                </button>
+                <button
+                  type="button"
+                  className={renderFormMode === "advanced" ? "active" : ""}
+                  onClick={() => openRenderFormMode("advanced")}
+                >
+                  <Code2 size={16} /> Advanced JSON
+                </button>
               </div>
             </div>
+            {renderFormMode === "simple" ? (
+              <SimpleRenderForm
+                form={generationForm}
+                imageWizardItems={imageWizardItems}
+                metadataWizardItems={metadataWizardItems}
+                footerWizardItems={footerWizardItems}
+                outroFocusAreaWizard={outroFocusAreaWizard}
+                imageCount={imageCount}
+                paymentTokens={paymentTokens}
+                paymentCurrency={paymentCurrency}
+                settlementToken={settlementToken}
+                onPatch={updateGenerationForm}
+                onPaymentCurrencySelect={setPaymentCurrency}
+                onImageChange={updateImageWizardItem}
+                onImageAdd={addImageWizardItem}
+                onImageRemove={removeImageWizardItem}
+                onMetadataChange={updateMetadataWizardItem}
+                onMetadataAdd={addMetadataWizardItem}
+                onMetadataRemove={removeMetadataWizardItem}
+                onFooterChange={updateFooterWizardItem}
+                onFooterAdd={addFooterWizardItem}
+                onFooterRemove={removeFooterWizardItem}
+                onFocusAreaChange={updateOutroFocusAreaWizard}
+              />
+            ) : (
+              <AdvancedRenderForm
+                form={generationForm}
+                imageCount={imageCount}
+                generationPayloadPreview={generationPayloadPreview}
+                paymentTokens={paymentTokens}
+                paymentCurrency={paymentCurrency}
+                settlementToken={settlementToken}
+                onPatch={updateGenerationForm}
+                onPaymentCurrencySelect={setPaymentCurrency}
+              />
+            )}
             <PaymentSummary
               imageCount={imageCount}
               quote={quote}
@@ -859,6 +973,364 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
         </section>
       </div>
     </main>
+  );
+}
+
+function SimpleRenderForm({
+  form,
+  imageWizardItems,
+  metadataWizardItems,
+  footerWizardItems,
+  outroFocusAreaWizard,
+  imageCount,
+  paymentTokens,
+  paymentCurrency,
+  settlementToken,
+  onPatch,
+  onPaymentCurrencySelect,
+  onImageChange,
+  onImageAdd,
+  onImageRemove,
+  onMetadataChange,
+  onMetadataAdd,
+  onMetadataRemove,
+  onFooterChange,
+  onFooterAdd,
+  onFooterRemove,
+  onFocusAreaChange
+}: {
+  form: GenerationFormState;
+  imageWizardItems: ImageWizardItem[];
+  metadataWizardItems: MetadataWizardItem[];
+  footerWizardItems: FooterWizardItem[];
+  outroFocusAreaWizard: OutroFocusAreaWizard;
+  imageCount: number;
+  paymentTokens: PaymentToken[];
+  paymentCurrency: PaymentCurrencySymbol;
+  settlementToken: PaymentToken;
+  onPatch: (patch: RenderFormPatch) => void;
+  onPaymentCurrencySelect: (currency: PaymentCurrencySymbol) => void;
+  onImageChange: (index: number, patch: Partial<ImageWizardItem>) => void;
+  onImageAdd: () => void;
+  onImageRemove: (index: number) => void;
+  onMetadataChange: (index: number, patch: Partial<MetadataWizardItem>) => void;
+  onMetadataAdd: () => void;
+  onMetadataRemove: (index: number) => void;
+  onFooterChange: (index: number, patch: Partial<FooterWizardItem>) => void;
+  onFooterAdd: () => void;
+  onFooterRemove: (index: number) => void;
+  onFocusAreaChange: (field: keyof OutroFocusAreaWizard, value: string) => void;
+}) {
+  const footerCardCount = countCompletedFooterWizardItems(footerWizardItems);
+
+  return (
+    <div className="form-grid render-wizard-grid">
+      <WizardSection
+        title="Image scenes"
+        badge={`${imageCount} ready`}
+        actionLabel="Add image"
+        onAction={onImageAdd}
+      >
+        <div className="wizard-list">
+          {imageWizardItems.map((item, index) => (
+            <div className="wizard-entry" key={`image-${index}`}>
+              <div className="wizard-entry-title">
+                <strong>Image {index + 1}</strong>
+                <button type="button" className="icon-btn danger" onClick={() => onImageRemove(index)} title="Remove image">
+                  <Trash2 size={16} />
+                </button>
+              </div>
+              <div className="wizard-image-grid">
+                <div className="field full">
+                  <label>Image URL</label>
+                  <input
+                    value={item.image_url}
+                    onChange={(event) => onImageChange(index, { image_url: event.target.value })}
+                    placeholder="https://..."
+                  />
+                </div>
+                <TextField
+                  label="Title"
+                  value={item.title}
+                  onChange={(title) => onImageChange(index, { title })}
+                />
+                <TextField
+                  label="Image text"
+                  value={item.image_text}
+                  onChange={(image_text) => onImageChange(index, { image_text })}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </WizardSection>
+
+      <div className="field full">
+        <label>Prompt</label>
+        <textarea value={form.prompt} onChange={(event) => onPatch({ prompt: event.target.value })} />
+      </div>
+
+      <WizardSection title="Campaign metadata" actionLabel="Add field" onAction={onMetadataAdd}>
+        <div className="wizard-list">
+          {metadataWizardItems.map((item, index) => (
+            <div className="wizard-key-value" key={`metadata-${index}`}>
+              <div className="field">
+                <label>Field</label>
+                <input
+                  value={item.key}
+                  onChange={(event) => onMetadataChange(index, { key: event.target.value })}
+                  placeholder="campaign"
+                />
+              </div>
+              <div className="field">
+                <label>Value</label>
+                <input
+                  value={item.value}
+                  onChange={(event) => onMetadataChange(index, { value: event.target.value })}
+                  placeholder="customer-store"
+                />
+              </div>
+              <button type="button" className="icon-btn danger" onClick={() => onMetadataRemove(index)} title="Remove field">
+                <Trash2 size={16} />
+              </button>
+            </div>
+          ))}
+        </div>
+      </WizardSection>
+
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={form.publishToFeed}
+          onChange={(event) => onPatch({ publishToFeed: event.target.checked })}
+        />
+        Publish video to feed
+      </label>
+      <TextField label="Feed tags" value={form.feedTags} onChange={(feedTags) => onPatch({ feedTags })} />
+
+      <PaymentMethodSelector
+        tokens={paymentTokens}
+        selectedSymbol={paymentCurrency}
+        settlementToken={settlementToken}
+        onSelect={onPaymentCurrencySelect}
+      />
+
+      <TextField label="CTA outro URL" value={form.ctaUrl} onChange={(ctaUrl) => onPatch({ ctaUrl })} />
+      <TextField label="CTA top text" value={form.ctaTextTop} onChange={(ctaTextTop) => onPatch({ ctaTextTop })} />
+      <TextField label="CTA bottom text" value={form.ctaTextBottom} onChange={(ctaTextBottom) => onPatch({ ctaTextBottom })} />
+      <TextField label="CTA logo URL" value={form.ctaLogo} onChange={(ctaLogo) => onPatch({ ctaLogo })} />
+
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={form.addOutroAnimation}
+          onChange={(event) => onPatch({ addOutroAnimation: event.target.checked })}
+        />
+        Server-generated outro animation
+      </label>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={form.addOutroFocusArea}
+          onChange={(event) => onPatch({ addOutroFocusArea: event.target.checked })}
+        />
+        Server-generated outro focus area
+      </label>
+
+      {form.addOutroFocusArea && (
+        <WizardSection title="Outro focus area">
+          <div className="focus-area-grid">
+            {(["x", "y", "width", "height"] as Array<keyof OutroFocusAreaWizard>).map((field) => (
+              <div className="field" key={field}>
+                <label>{field}</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={outroFocusAreaWizard[field]}
+                  onChange={(event) => onFocusAreaChange(field, event.target.value)}
+                />
+              </div>
+            ))}
+          </div>
+        </WizardSection>
+      )}
+
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={form.addFooterAnimation}
+          onChange={(event) => onPatch({ addFooterAnimation: event.target.checked })}
+        />
+        Bottom CTA footer cards
+      </label>
+
+      {form.addFooterAnimation && (
+        <WizardSection
+          title="Footer cards"
+          badge={`${footerCardCount}/${imageCount} ready`}
+          actionLabel="Add card"
+          onAction={onFooterAdd}
+        >
+          <div className="wizard-list">
+            {footerWizardItems.map((item, index) => (
+              <div className="wizard-key-value" key={`footer-${index}`}>
+                <div className="field">
+                  <label>URL</label>
+                  <input
+                    value={item.url}
+                    onChange={(event) => onFooterChange(index, { url: event.target.value })}
+                    placeholder="https://..."
+                  />
+                </div>
+                <div className="field">
+                  <label>Title</label>
+                  <input
+                    value={item.title}
+                    onChange={(event) => onFooterChange(index, { title: event.target.value })}
+                    placeholder="Launch Shoe"
+                  />
+                </div>
+                <button type="button" className="icon-btn danger" onClick={() => onFooterRemove(index)} title="Remove card">
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </WizardSection>
+      )}
+
+      <TextField label="Payment tx hash (manual fallback)" value={form.txHash} onChange={(txHash) => onPatch({ txHash })} full />
+    </div>
+  );
+}
+
+function AdvancedRenderForm({
+  form,
+  imageCount,
+  generationPayloadPreview,
+  paymentTokens,
+  paymentCurrency,
+  settlementToken,
+  onPatch,
+  onPaymentCurrencySelect
+}: {
+  form: GenerationFormState;
+  imageCount: number;
+  generationPayloadPreview: string;
+  paymentTokens: PaymentToken[];
+  paymentCurrency: PaymentCurrencySymbol;
+  settlementToken: PaymentToken;
+  onPatch: (patch: RenderFormPatch) => void;
+  onPaymentCurrencySelect: (currency: PaymentCurrencySymbol) => void;
+}) {
+  return (
+    <div className="form-grid">
+      <div className="field full">
+        <label>Image URL metadata JSON array</label>
+        <textarea value={form.imageUrls} onChange={(event) => onPatch({ imageUrls: event.target.value })} />
+      </div>
+      <div className="field full">
+        <label>JSON payload metadata</label>
+        <textarea value={form.metadata} onChange={(event) => onPatch({ metadata: event.target.value })} />
+      </div>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={form.publishToFeed}
+          onChange={(event) => onPatch({ publishToFeed: event.target.checked })}
+        />
+        Publish video to feed
+      </label>
+      <TextField label="Feed tags" value={form.feedTags} onChange={(feedTags) => onPatch({ feedTags })} />
+      <div className="field full">
+        <label>Prompt</label>
+        <textarea value={form.prompt} onChange={(event) => onPatch({ prompt: event.target.value })} />
+      </div>
+      <PaymentMethodSelector
+        tokens={paymentTokens}
+        selectedSymbol={paymentCurrency}
+        settlementToken={settlementToken}
+        onSelect={onPaymentCurrencySelect}
+      />
+      <TextField label="CTA outro URL" value={form.ctaUrl} onChange={(ctaUrl) => onPatch({ ctaUrl })} />
+      <TextField label="CTA top text" value={form.ctaTextTop} onChange={(ctaTextTop) => onPatch({ ctaTextTop })} />
+      <TextField label="CTA bottom text" value={form.ctaTextBottom} onChange={(ctaTextBottom) => onPatch({ ctaTextBottom })} />
+      <TextField label="CTA logo URL" value={form.ctaLogo} onChange={(ctaLogo) => onPatch({ ctaLogo })} />
+      <TextField label="Payment tx hash (manual fallback)" value={form.txHash} onChange={(txHash) => onPatch({ txHash })} full />
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={form.addOutroAnimation}
+          onChange={(event) => onPatch({ addOutroAnimation: event.target.checked })}
+        />
+        Server-generated outro animation
+      </label>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={form.addOutroFocusArea}
+          onChange={(event) => onPatch({ addOutroFocusArea: event.target.checked })}
+        />
+        Server-generated outro focus area
+      </label>
+      <div className="field full">
+        <label>Outro focus area JSON</label>
+        <textarea
+          value={form.outroFocusArea}
+          onChange={(event) => onPatch({ outroFocusArea: event.target.value })}
+        />
+      </div>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={form.addFooterAnimation}
+          onChange={(event) => onPatch({ addFooterAnimation: event.target.checked })}
+        />
+        Bottom CTA footer cards
+      </label>
+      <div className="field full">
+        <label>Footer metadata JSON array ({imageCount} items)</label>
+        <textarea
+          value={form.footerMetadata}
+          onChange={(event) => onPatch({ footerMetadata: event.target.value })}
+        />
+      </div>
+      <div className="field full">
+        <label>Generated Samsar payload preview</label>
+        <textarea className="payload-preview" value={generationPayloadPreview} readOnly />
+      </div>
+    </div>
+  );
+}
+
+function WizardSection({
+  title,
+  badge,
+  actionLabel,
+  onAction,
+  children
+}: {
+  title: string;
+  badge?: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="wizard-section full">
+      <div className="wizard-section-header">
+        <div>
+          <label>{title}</label>
+          {badge && <span className="badge">{badge}</span>}
+        </div>
+        {actionLabel && onAction && (
+          <button type="button" className="btn small" onClick={onAction}>
+            <Plus size={15} /> {actionLabel}
+          </button>
+        )}
+      </div>
+      {children}
+    </div>
   );
 }
 
@@ -1399,6 +1871,190 @@ async function assertOk(response: Response) {
     throw new Error(data.message || "Request failed");
   }
   return data;
+}
+
+function parseImageWizardItems(raw: string): ImageWizardItem[] {
+  try {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return [emptyImageWizardItem()];
+    }
+    const parsed = trimmed.startsWith("[") ? JSON.parse(trimmed) as unknown[] : parseImageInputs(trimmed);
+    if (!Array.isArray(parsed)) {
+      return [emptyImageWizardItem()];
+    }
+    const items = parsed.map((item) => {
+      if (typeof item === "string") {
+        return {
+          image_url: item,
+          title: "",
+          image_text: ""
+        };
+      }
+      const record = item && typeof item === "object" && !Array.isArray(item)
+        ? item as Record<string, unknown>
+        : {};
+      return {
+        image_url: getImageInputUrl(record),
+        title: String(record.title || ""),
+        image_text: String(record.image_text || record.imageText || ""),
+        skip_enhancement: Boolean(record.skip_enhancement || record.skipEnhancement)
+      };
+    });
+    return items.length > 0 ? items : [emptyImageWizardItem()];
+  } catch {
+    return [emptyImageWizardItem()];
+  }
+}
+
+function emptyImageWizardItem(): ImageWizardItem {
+  return { image_url: "", title: "", image_text: "" };
+}
+
+function serializeImageWizardItems(items: ImageWizardItem[]) {
+  const payload = items
+    .map((item) => ({
+      image_url: item.image_url.trim(),
+      title: item.title.trim(),
+      image_text: item.image_text.trim(),
+      skip_enhancement: item.skip_enhancement
+    }))
+    .filter((item) => item.image_url)
+    .map((item) => {
+      const output: Record<string, unknown> = { image_url: item.image_url };
+      if (item.title) {
+        output.title = item.title;
+      }
+      if (item.image_text) {
+        output.image_text = item.image_text;
+      }
+      if (item.skip_enhancement) {
+        output.skip_enhancement = true;
+      }
+      return output;
+    });
+  return JSON.stringify(payload, null, 2);
+}
+
+function parseMetadataWizardItems(raw: string): MetadataWizardItem[] {
+  try {
+    const parsed = parseJsonObject(raw);
+    const items = Object.entries(parsed).map(([key, value]) => ({
+      key,
+      value: formatWizardValue(value)
+    }));
+    return items.length > 0 ? items : [emptyMetadataWizardItem()];
+  } catch {
+    return [emptyMetadataWizardItem()];
+  }
+}
+
+function emptyMetadataWizardItem(): MetadataWizardItem {
+  return { key: "", value: "" };
+}
+
+function serializeMetadataWizardItems(items: MetadataWizardItem[]) {
+  const metadata: Record<string, unknown> = {};
+  for (const item of items) {
+    const key = item.key.trim();
+    if (key) {
+      metadata[key] = coerceWizardValue(item.value);
+    }
+  }
+  return JSON.stringify(metadata, null, 2);
+}
+
+function parseFooterWizardItems(raw: string): FooterWizardItem[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [emptyFooterWizardItem()];
+    }
+    const items = parsed.map((item) => {
+      const record = item && typeof item === "object" && !Array.isArray(item)
+        ? item as Record<string, unknown>
+        : {};
+      return {
+        url: String(record.url || ""),
+        title: String(record.title || "")
+      };
+    });
+    return items.length > 0 ? items : [emptyFooterWizardItem()];
+  } catch {
+    return [emptyFooterWizardItem()];
+  }
+}
+
+function emptyFooterWizardItem(): FooterWizardItem {
+  return { url: "", title: "" };
+}
+
+function serializeFooterWizardItems(items: FooterWizardItem[]) {
+  const payload = items
+    .map((item) => ({
+      url: item.url.trim(),
+      title: item.title.trim()
+    }))
+    .filter((item) => item.url)
+    .map((item) => item.title ? item : { url: item.url });
+  return JSON.stringify(payload, null, 2);
+}
+
+function countCompletedFooterWizardItems(items: FooterWizardItem[]) {
+  return items.filter((item) => item.url.trim()).length;
+}
+
+function parseOutroFocusAreaWizard(raw: string): OutroFocusAreaWizard {
+  try {
+    const parsed = parseOutroFocusArea(raw);
+    return {
+      x: String(parsed.x),
+      y: String(parsed.y),
+      width: String(parsed.width),
+      height: String(parsed.height)
+    };
+  } catch {
+    return { x: "", y: "", width: "", height: "" };
+  }
+}
+
+function serializeOutroFocusAreaWizard(focusArea: OutroFocusAreaWizard) {
+  return JSON.stringify({
+    x: parseWizardNumber(focusArea.x),
+    y: parseWizardNumber(focusArea.y),
+    width: parseWizardNumber(focusArea.width),
+    height: parseWizardNumber(focusArea.height)
+  }, null, 2);
+}
+
+function parseWizardNumber(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function formatWizardValue(value: unknown) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function coerceWizardValue(value: string): unknown {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (trimmed === "true" || trimmed === "false" || trimmed === "null" || /^-?\d+(\.\d+)?$/.test(trimmed) || trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return value;
+    }
+  }
+  return value;
 }
 
 function parseJsonObject(raw: string) {

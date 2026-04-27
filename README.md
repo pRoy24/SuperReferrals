@@ -1,32 +1,52 @@
 # SuperReferrals
 
-SuperReferrals is an ETHGlobal Open Agents hackathon project for agentic, on-chain referral video campaigns.
+Turn referral links into product video storefronts.
 
-Customers configure a Samsar-powered referral page, set per-second render pricing, and share the page with users. Users connect a wallet, pay on-chain, generate a personalized `image_list_to_video` ad through Samsar, and receive a public INFT page backed by 0G records and storage.
+SuperReferrals helps product teams and creators turn a plain referral URL into a guided campaign page with product images, product details, video generation, CTA actions, and shareable output.
 
-The project is built to show how agents can coordinate real commerce, media generation, storage, settlement, and rollback workflows across Samsar, 0G, Uniswap, KeeperHub, and Gensyn AXL.
+Instead of sending buyers through a bare tracking URL, a creator shares a page that explains the product, shows the offer, and can generate a tailored marketing video before or after purchase. Customers get enough context to feel good about the recommendation, while referrers and brands get reusable product media instead of another passive link.
+
+Built for the ETHGlobal Open Agents hackathon, SuperReferrals focuses on practical referral commerce: connect product data, generate campaign videos, route users through a branded referral experience, and keep the operational workflow auditable.
+
+## Unique Offering
+
+- Product/admin integration: plug into merchant dashboards, catalog systems, or admin frameworks to pull product images, descriptions, price points, CTA URLs, and campaign metadata.
+- Flexible video styles: generate natural explainers, fast-paced launch ads, anime promos, futuristic edits, product walkthroughs, or brand-specific creative variants.
+- Customer-friendly referral pages: buyers see the product story and creator context instead of landing on an opaque tracking URL.
+- Creator-ready campaigns: referrers promote with useful product media, not just a code or link.
+- Reusable output: generated videos can be viewed, shared, and reused as campaign assets.
 
 ## What To Review
 
-- `/`: customer console for Samsar Processor credits, store setup, pricing, render history, and Agent Town.
+- `/`: product landing page with entry points into the demo surfaces.
+- `/dashboard`: customer console for store setup, pricing, campaign automation, render history, and Samsar Processor credits.
 - `/r/:referrerCode`: public user referral page for wallet signup, payment, image-to-video generation, and prior renders.
 - `/feed`: public feed for generated referral videos.
-- `/inft/:id`: public INFT page with video playback, 0G metadata, wallet/referrer attribution, assistant actions, and AXL messaging.
-- `Agent Town`: multi-agent console that produces receipts for 0G Chain, 0G Storage, 0G DA, 0G Compute, 0G Service Marketplace, Uniswap charge signals, KeeperHub settlement, and AXL messages.
+- `/inft/:id`: public output page with video playback, attribution, assistant actions, and share/download actions.
+- `Agent Town`: campaign automation console for planning, pricing, settlement, rollback, and media operations.
 
 ## Core Flow
 
 1. A customer creates or tops up a Samsar Processor account.
-2. The customer configures a public referral page, pricing, wallet, currency, and refund policy.
-3. A user connects a wallet on the referral page and gets a wallet-backed Samsar external-user profile.
-4. The profile manifest is stored on 0G Storage and anchored in `SuperReferralsUserRegistry` on 0G Chain.
-5. The user submits image URLs, prompt, metadata, CTA URL, model, and aspect ratio.
+2. The customer configures a public referral page, product context, pricing, wallet, currency, and refund policy from `/dashboard`.
+3. A creator or buyer opens the referral page and connects a wallet.
+4. The app creates or reuses the buyer profile for that customer/referrer route.
+5. The user submits or reuses product image URLs, product metadata, CTA URL, prompt, model, style, and aspect ratio.
 6. The app quotes payment, verifies a mined transaction, and grants Samsar render credits.
 7. Samsar generates the video.
-8. Completion persists video metadata to 0G Storage and mints an ERC-7857-inspired INFT through `SuperReferralsINFT`.
-9. The public INFT page exposes the video, attribution, agent metadata, and post-render actions.
+8. Completion saves the video metadata, creates the public output record, and exposes the generated campaign asset.
+9. The public output page exposes the video, attribution, campaign metadata, and post-render actions.
 
-## Network Constraints
+## Product Data And Creative Styles
+
+SuperReferrals is designed to sit next to existing merchant/admin tooling. A production integration can pull:
+
+- Product images and alternate media.
+- Names, descriptions, variants, prices, tags, and availability.
+- Brand voice, campaign copy, CTA URLs, and referrer metadata.
+- Creative presets such as natural demo, fast-paced launch, anime, futuristic, luxury, educational, or UGC-style explainers.
+
+## Technical Network Notes
 
 Staging uses 0G staging/Galileo and Ethereum Sepolia.
 
