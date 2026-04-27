@@ -20,10 +20,10 @@ const rpcUrl =
 const explorerUrl =
   process.env.OG_BLOCK_EXPLORER_URL ||
   (isMainnet ? "https://chainscan.0g.ai" : "https://chainscan-galileo.0g.ai");
-const privateKey = process.env.INFT_DEPLOYER_PRIVATE_KEY || process.env.INFT_MINTER_PRIVATE_KEY || process.env.OG_PRIVATE_KEY;
+const privateKey = process.env.OG_PRIVATE_KEY;
 
 if (!privateKey) {
-  throw new Error("INFT_DEPLOYER_PRIVATE_KEY, INFT_MINTER_PRIVATE_KEY, or OG_PRIVATE_KEY is required to deploy SuperReferralsINFT");
+  throw new Error("OG_PRIVATE_KEY is required to deploy SuperReferralsINFT");
 }
 
 const artifactPath = path.resolve("artifacts/contracts/SuperReferralsINFT.sol/SuperReferralsINFT.json");
@@ -33,7 +33,7 @@ if (!fs.existsSync(artifactPath)) {
 
 const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
 const account = privateKeyToAccount(privateKey);
-const ownerAddress = process.env.INFT_INITIAL_OWNER || process.env.INFT_OWNER_ADDRESS || account.address;
+const ownerAddress = account.address;
 const chain = defineChain({
   id: chainId,
   name: isMainnet ? "0G Mainnet" : "0G Galileo Testnet",

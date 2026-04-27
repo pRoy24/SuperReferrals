@@ -44,7 +44,7 @@ export async function mintINFT({
   referrerCode: string;
 }) {
   const contractAddress = env("INFT_CONTRACT_ADDRESS") as `0x${string}`;
-  const privateKey = (env("INFT_MINTER_PRIVATE_KEY") || env("OG_PRIVATE_KEY")) as `0x${string}`;
+  const privateKey = env("OG_PRIVATE_KEY") as `0x${string}`;
   const chain = getINFTChain();
   const rpcUrl = chain.rpcUrls.default.http[0];
 
@@ -57,7 +57,7 @@ export async function mintINFT({
     };
   }
   if (!contractAddress || !privateKey) {
-    throw new Error("INFT_CONTRACT_ADDRESS and INFT_MINTER_PRIVATE_KEY or OG_PRIVATE_KEY are required when INFT_MOCKS=false");
+    throw new Error("INFT_CONTRACT_ADDRESS and OG_PRIVATE_KEY are required when INFT_MOCKS=false");
   }
 
   const account = privateKeyToAccount(privateKey);

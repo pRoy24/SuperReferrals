@@ -177,11 +177,11 @@ For staging previews, Vercel needs a Git event it can deploy. Push a new commit 
 - `SAMSAR_API_KEY`: required for live Samsar generation when a logged-in customer account does not provide its own API key.
 - `TRANSACTION_NETWORK`, `TRANSACTION_CHAIN_ID`, `TRANSACTION_RPC_URL`: payment and wallet network.
 - `NEXT_PUBLIC_TRANSACTION_NETWORK`, `NEXT_PUBLIC_TRANSACTION_CHAIN_ID`, `NEXT_PUBLIC_TRANSACTION_RPC_URL`: browser wallet prompts.
-- `KEEPERHUB_API_KEY`, `KEEPERHUB_PAYMENT_WORKFLOW_ID`, `KEEPERHUB_PLATFORM_WALLET_ADDRESS`: live KeeperHub settlement.
+- `KEEPERHUB_API_KEY`, `KEEPERHUB_WALLET_ADDRESS`, `KEEPERHUB_PAYMENT_WORKFLOW_ID`: live KeeperHub payment and settlement.
 - `UNISWAP_API_KEY`: live Uniswap quote and swap transaction data.
-- `OG_NETWORK`, `OG_CHAIN_ID`, `OG_RPC_URL`, `OG_STORAGE_INDEXER_RPC`, `OG_PRIVATE_KEY`: 0G Chain and Storage.
+- `OG_NETWORK`, `OG_CHAIN_ID`, `OG_RPC_URL`, `OG_STORAGE_INDEXER_RPC`, `OG_PRIVATE_KEY`: 0G Chain, Storage, registry, and INFT signer.
 - `USER_REGISTRY_CONTRACT_ADDRESS`: deployed `SuperReferralsUserRegistry` address.
-- `INFT_CONTRACT_ADDRESS`, `INFT_MINTER_PRIVATE_KEY`: deployed INFT collection and mint signer.
+- `INFT_CONTRACT_ADDRESS`: deployed INFT collection. Minting uses `OG_PRIVATE_KEY`.
 - `AXL_BASE_URL`: local Gensyn AXL node API, default `http://localhost:9002`.
 
 ## Contracts
@@ -206,7 +206,7 @@ npm run contracts:deploy:inft:testnet
 npm run contracts:deploy:inft:mainnet
 ```
 
-The deploy script uses `INFT_DEPLOYER_PRIVATE_KEY`, `INFT_MINTER_PRIVATE_KEY`, or `OG_PRIVATE_KEY` as the signer. It uses the same signer as owner unless `INFT_INITIAL_OWNER` is set.
+The deploy script uses `OG_PRIVATE_KEY` as the signer and initial owner.
 
 ## Docs
 

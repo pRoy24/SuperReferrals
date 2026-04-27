@@ -223,7 +223,6 @@ export async function executeKeeperRefund({
       network: env("KEEPERHUB_REFUND_NETWORK", getTransactionChainConfig().keeperHubNetwork),
       recipientAddress,
       amount,
-      tokenAddress: env("KEEPERHUB_REFUND_TOKEN_ADDRESS") || undefined,
       chainId: getTransactionChainConfig().id,
       gasLimitMultiplier: "1.2"
     })
@@ -338,8 +337,8 @@ export function getKeeperHubPaymentWorkflowId(chainId: number) {
     env("KEEPERHUB_PAYMENT_WORKFLOW_ID");
 }
 
-export function getKeeperHubPlatformWalletAddress(fallback = "") {
-  return env("KEEPERHUB_PLATFORM_WALLET_ADDRESS", fallback);
+export function getKeeperHubWalletAddress(fallback = "") {
+  return env("KEEPERHUB_WALLET_ADDRESS", fallback);
 }
 
 function getKeeperHubPaymentNetwork(chainId: number) {

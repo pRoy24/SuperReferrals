@@ -27,7 +27,7 @@ export async function registerZeroGUserProfile(input: {
   const configuredChainId = Number(env("USER_REGISTRY_CHAIN_ID") || env("OG_CHAIN_ID") || "");
   const chain = getZeroGChainConfig(Number.isFinite(configuredChainId) && configuredChainId > 0 ? configuredChainId : undefined);
   const contractAddress = env("USER_REGISTRY_CONTRACT_ADDRESS") as `0x${string}`;
-  const privateKey = (env("USER_REGISTRY_PRIVATE_KEY") || env("OG_PRIVATE_KEY")) as `0x${string}`;
+  const privateKey = env("OG_PRIVATE_KEY") as `0x${string}`;
   const profileId = zeroGUserProfileId(input.customerId, wallet);
   const registeredAt = new Date().toISOString();
 
@@ -46,7 +46,7 @@ export async function registerZeroGUserProfile(input: {
     };
   }
   if (!contractAddress || !privateKey) {
-    throw new Error("USER_REGISTRY_CONTRACT_ADDRESS and USER_REGISTRY_PRIVATE_KEY or OG_PRIVATE_KEY are required when USER_REGISTRY_MOCKS=false");
+    throw new Error("USER_REGISTRY_CONTRACT_ADDRESS and OG_PRIVATE_KEY are required when USER_REGISTRY_MOCKS=false");
   }
 
   const account = privateKeyToAccount(privateKey);

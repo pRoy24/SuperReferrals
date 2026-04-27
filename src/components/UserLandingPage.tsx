@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, CircleDollarSign, Code2, ExternalLink, ListChecks, Play, Plus, RefreshCw, Store, Trash2, Wallet } from "lucide-react";
+import { Bot, CircleDollarSign, Code2, ExternalLink, ListChecks, Play, Plus, RefreshCw, Store, Trash2, Undo2, Wallet } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { UserStoreCreatorSkeleton } from "@/components/FormLoadingSkeletons";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
@@ -106,21 +106,21 @@ const sampleImageUrlBases = new Set([
 
 const starterImages = [
   {
-    image_url: "https://images.unsplash.com/photo-1542291026-7eec264c27ff",
-    title: "Launch Shoe",
-    image_text: "Lightweight daily trainer",
+    image_url: "https://images.pexels.com/photos/7562351/pexels-photo-7562351.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    title: "Immersive Reality",
+    image_text: "Step into a new way to play, explore, and connect.",
     skip_enhancement: true
   },
   {
-    image_url: "https://images.unsplash.com/photo-1460353581641-37baddab0fa2",
-    title: "Lifestyle Bundle",
-    image_text: "Built for movement",
+    image_url: "https://images.pexels.com/photos/4240501/pexels-photo-4240501.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    title: "Mobile Workspace",
+    image_text: "Stay connected and productive from anywhere.",
     skip_enhancement: true
   },
   {
-    image_url: "https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77",
-    title: "Limited Offer",
-    image_text: "Available this week",
+    image_url: "https://images.pexels.com/photos/7605937/pexels-photo-7605937.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    title: "Creator Flow",
+    image_text: "Plan, create, and multitask with tools that move with you.",
     skip_enhancement: true
   }
 ];
@@ -128,13 +128,92 @@ const starterImages = [
 const starterImageMetadata = JSON.stringify(starterImages, null, 2);
 
 const starterFooterMetadata = JSON.stringify([
-  { url: "https://unsplash.com/s/photos/running-shoes", title: "Launch Shoe" },
-  { url: "https://unsplash.com/s/photos/sneakers", title: "Lifestyle Bundle" },
-  { url: "https://unsplash.com/s/photos/product-shoes", title: "Limited Offer" }
+  { url: "https://www.pexels.com/photo/man-and-woman-in-virtual-reality-headsets-7562351/", title: "Immersive Reality" },
+  { url: "https://www.pexels.com/photo/standing-woman-using-her-smartphone-4240501/", title: "Mobile Workspace" },
+  { url: "https://www.pexels.com/photo/a-man-using-digital-tablet-and-laptop-7605937/", title: "Creator Flow" }
 ], null, 2);
 
-const starterCampaignMetadata = JSON.stringify({ title: "New launch", campaign: "customer-store" }, null, 2);
+const starterCampaignMetadata = JSON.stringify({ title: "Tech lifestyle launch", campaign: "customer-store" }, null, 2);
+const starterPrompt = [
+  "Create a polished tech lifestyle ad with smooth cinematic motion and clean transitions.",
+  "Make each scene feel premium, useful, and aspirational.",
+  "End with a strong modern product-launch energy."
+].join("\n");
 const defaultOutroFocusArea = JSON.stringify({ x: 680, y: 296, width: 432, height: 432 }, null, 2);
+
+function createDefaultGenerationForm(modelSelection?: Pick<GenerationFormState, "videoModel" | "aspectRatio">): GenerationFormState {
+  return {
+    imageUrls: starterImageMetadata,
+    metadata: starterCampaignMetadata,
+    prompt: starterPrompt,
+    videoModel: modelSelection?.videoModel || ("RUNWAYML" as VideoModel),
+    aspectRatio: modelSelection?.aspectRatio || ("9:16" as VideoAspectRatio),
+    language: "en",
+    addOutroAnimation: true,
+    addOutroFocusArea: true,
+    outroFocusArea: defaultOutroFocusArea,
+    ctaUrl: "https://www.pexels.com/search/technology%20lifestyle/",
+    ctaTextTop: "Explore the upgrade",
+    ctaTextBottom: "Built for modern life",
+    ctaLogo: "",
+    addFooterAnimation: true,
+    footerMetadata: starterFooterMetadata,
+    publishToFeed: true,
+    feedTags: "tech, lifestyle, product",
+    txHash: ""
+  };
+}
+
+function restorePersistedGenerationForm(
+  persisted: Partial<GenerationFormState> | undefined,
+  pricingOptions: ModelPricingConfiguration[]
+): GenerationFormState {
+  const next = createDefaultGenerationForm();
+  if (persisted && typeof persisted === "object" && !Array.isArray(persisted)) {
+    if (typeof persisted.imageUrls === "string") next.imageUrls = persisted.imageUrls;
+    if (typeof persisted.metadata === "string") next.metadata = persisted.metadata;
+    if (typeof persisted.prompt === "string") next.prompt = persisted.prompt;
+    if (typeof persisted.videoModel === "string") next.videoModel = persisted.videoModel as VideoModel;
+    if (typeof persisted.aspectRatio === "string") next.aspectRatio = persisted.aspectRatio as VideoAspectRatio;
+    if (typeof persisted.language === "string") next.language = persisted.language;
+    if (typeof persisted.addOutroAnimation === "boolean") next.addOutroAnimation = persisted.addOutroAnimation;
+    if (typeof persisted.addOutroFocusArea === "boolean") next.addOutroFocusArea = persisted.addOutroFocusArea;
+    if (typeof persisted.outroFocusArea === "string") next.outroFocusArea = persisted.outroFocusArea;
+    if (typeof persisted.ctaUrl === "string") next.ctaUrl = persisted.ctaUrl;
+    if (typeof persisted.ctaTextTop === "string") next.ctaTextTop = persisted.ctaTextTop;
+    if (typeof persisted.ctaTextBottom === "string") next.ctaTextBottom = persisted.ctaTextBottom;
+    if (typeof persisted.ctaLogo === "string") next.ctaLogo = persisted.ctaLogo;
+    if (typeof persisted.addFooterAnimation === "boolean") next.addFooterAnimation = persisted.addFooterAnimation;
+    if (typeof persisted.footerMetadata === "string") next.footerMetadata = persisted.footerMetadata;
+    if (typeof persisted.publishToFeed === "boolean") next.publishToFeed = persisted.publishToFeed;
+    if (typeof persisted.feedTags === "string") next.feedTags = persisted.feedTags;
+    if (typeof persisted.txHash === "string") next.txHash = persisted.txHash;
+  }
+  return {
+    ...next,
+    ...resolveValidModelSelection(pricingOptions, next)
+  };
+}
+
+function resolveValidModelSelection(
+  pricingOptions: ModelPricingConfiguration[],
+  preferred: Pick<GenerationFormState, "videoModel" | "aspectRatio">
+): Pick<GenerationFormState, "videoModel" | "aspectRatio"> {
+  const exact = pricingOptions.find((item) =>
+    item.videoModel === preferred.videoModel &&
+    item.aspectRatio === preferred.aspectRatio
+  );
+  const sameModel = pricingOptions.find((item) => item.videoModel === preferred.videoModel);
+  const fallback = createDefaultGenerationForm();
+  const defaultOption = pricingOptions.find((item) =>
+    item.videoModel === fallback.videoModel &&
+    item.aspectRatio === fallback.aspectRatio
+  );
+  const selected = exact || sameModel || defaultOption || pricingOptions[0];
+  return selected
+    ? { videoModel: selected.videoModel, aspectRatio: selected.aspectRatio }
+    : { videoModel: preferred.videoModel, aspectRatio: preferred.aspectRatio };
+}
 
 export default function UserLandingPage({ referrerCode = "", customerId = "" }: { referrerCode?: string; customerId?: string }) {
   const [store, setStore] = useState<SuperReferralsStore | null>(null);
@@ -144,30 +223,12 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const [walletProviders, setWalletProviders] = useState<BrowserWalletProvider[]>([]);
   const [activeWalletProvider, setActiveWalletProvider] = useState<BrowserWalletProvider | null>(null);
   const hydratedWalletSessionKey = useRef("");
+  const [renderFormHydratedKey, setRenderFormHydratedKey] = useState("");
   const [profileForm, setProfileForm] = useState({
     email: "",
     username: ""
   });
-  const [generationForm, setGenerationForm] = useState<GenerationFormState>({
-    imageUrls: starterImageMetadata,
-    metadata: starterCampaignMetadata,
-    prompt: "Create a concise product marketing video with clean motion and a strong final call to action.",
-    videoModel: "RUNWAYML" as VideoModel,
-    aspectRatio: "9:16" as VideoAspectRatio,
-    language: "en",
-    addOutroAnimation: true,
-    addOutroFocusArea: true,
-    outroFocusArea: defaultOutroFocusArea,
-    ctaUrl: "https://unsplash.com/s/photos/running-shoes",
-    ctaTextTop: "Scan to buy",
-    ctaTextBottom: "Limited availability",
-    ctaLogo: "",
-    addFooterAnimation: true,
-    footerMetadata: starterFooterMetadata,
-    publishToFeed: true,
-    feedTags: "launch, product, referrer",
-    txHash: ""
-  });
+  const [generationForm, setGenerationForm] = useState<GenerationFormState>(() => createDefaultGenerationForm());
   const [renderFormMode, setRenderFormMode] = useState<RenderFormMode>("simple");
   const [imageWizardItems, setImageWizardItems] = useState<ImageWizardItem[]>(() => parseImageWizardItems(starterImageMetadata));
   const [metadataWizardItems, setMetadataWizardItems] = useState<MetadataWizardItem[]>(() => parseMetadataWizardItems(starterCampaignMetadata));
@@ -254,6 +315,10 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     () => `superreferrals:user-session:${routeAccount?.referrerCode || customer?.id || referrerCode || customerId || "default"}`,
     [routeAccount?.referrerCode, customer?.id, referrerCode, customerId]
   );
+  const renderFormStorageKey = useMemo(() => {
+    const key = routeAccount?.referrerCode || customer?.id || referrerCode || customerId;
+    return key ? `superreferrals:render-form:${key}:v1` : "";
+  }, [routeAccount?.referrerCode, customer?.id, referrerCode, customerId]);
   const transactionChain = useMemo(
     () => getTransactionChainConfig(normalizeTransactionChainIdForEnvironment(customer?.pricing.chainId)),
     [customer?.pricing.chainId]
@@ -282,14 +347,28 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     setGenerationForm((current) => ({ ...current, ...patch }));
   }
 
+  function syncRenderWizardState(form: GenerationFormState) {
+    setImageWizardItems(parseImageWizardItems(form.imageUrls));
+    setMetadataWizardItems(parseMetadataWizardItems(form.metadata));
+    setFooterWizardItems(parseFooterWizardItems(form.footerMetadata));
+    setOutroFocusAreaWizard(parseOutroFocusAreaWizard(form.outroFocusArea));
+  }
+
   function openRenderFormMode(mode: RenderFormMode) {
     if (mode === "simple") {
-      setImageWizardItems(parseImageWizardItems(generationForm.imageUrls));
-      setMetadataWizardItems(parseMetadataWizardItems(generationForm.metadata));
-      setFooterWizardItems(parseFooterWizardItems(generationForm.footerMetadata));
-      setOutroFocusAreaWizard(parseOutroFocusAreaWizard(generationForm.outroFocusArea));
+      syncRenderWizardState(generationForm);
     }
     setRenderFormMode(mode);
+  }
+
+  function resetGenerationForm() {
+    const selection = resolveValidModelSelection(pricingOptions, generationForm);
+    const nextForm = createDefaultGenerationForm(selection);
+    setGenerationForm(nextForm);
+    syncRenderWizardState(nextForm);
+    setQuote(null);
+    setRenderFlow({ status: "idle", message: "" });
+    setMessage("Render form reset.");
   }
 
   function commitImageWizardItems(nextImages: ImageWizardItem[], nextFooters = footerWizardItems) {
@@ -383,6 +462,43 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     setOutroFocusAreaWizard(nextFocusArea);
     updateGenerationForm({ outroFocusArea: serializeOutroFocusAreaWizard(nextFocusArea) });
   }
+
+  useEffect(() => {
+    if (!customer || !renderFormStorageKey || renderFormHydratedKey === renderFormStorageKey) {
+      return;
+    }
+    const raw = window.localStorage.getItem(renderFormStorageKey);
+    if (!raw) {
+      setRenderFormHydratedKey(renderFormStorageKey);
+      return;
+    }
+    try {
+      const persisted = JSON.parse(raw) as {
+        form?: Partial<GenerationFormState>;
+        renderFormMode?: RenderFormMode;
+      };
+      const nextForm = restorePersistedGenerationForm(persisted.form, pricingOptions);
+      setGenerationForm(nextForm);
+      syncRenderWizardState(nextForm);
+      if (persisted.renderFormMode === "simple" || persisted.renderFormMode === "advanced") {
+        setRenderFormMode(persisted.renderFormMode);
+      }
+      setRenderFormHydratedKey(renderFormStorageKey);
+    } catch {
+      window.localStorage.removeItem(renderFormStorageKey);
+      setRenderFormHydratedKey(renderFormStorageKey);
+    }
+  }, [customer, renderFormHydratedKey, renderFormStorageKey, pricingOptions]);
+
+  useEffect(() => {
+    if (!customer || !renderFormStorageKey || renderFormHydratedKey !== renderFormStorageKey) {
+      return;
+    }
+    window.localStorage.setItem(renderFormStorageKey, JSON.stringify({
+      form: generationForm,
+      renderFormMode
+    }));
+  }, [customer, generationForm, renderFormHydratedKey, renderFormMode, renderFormStorageKey]);
 
   useEffect(() => {
     if (!selectedPricing) return;
@@ -989,7 +1105,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
                   key={item.id}
                   customer={customer}
                   selected={selectedPricing?.id === item.id}
-                  onSelect={() => setGenerationForm({ ...generationForm, videoModel: item.videoModel, aspectRatio: item.aspectRatio })}
+                  onSelect={() => updateGenerationForm({ videoModel: item.videoModel, aspectRatio: item.aspectRatio })}
                 />
               ))}
               {pricingOptions.length === 0 && <p className="subtle">This storefront has no enabled pricing options.</p>}
@@ -1005,20 +1121,25 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
             </div>
             <div className="render-mode-toolbar">
               <span className="subtle">Input mode</span>
-              <div className="mode-toggle" role="group" aria-label="Render input mode">
-                <button
-                  type="button"
-                  className={renderFormMode === "simple" ? "active" : ""}
-                  onClick={() => openRenderFormMode("simple")}
-                >
-                  <ListChecks size={16} /> Simple wizard
-                </button>
-                <button
-                  type="button"
-                  className={renderFormMode === "advanced" ? "active" : ""}
-                  onClick={() => openRenderFormMode("advanced")}
-                >
-                  <Code2 size={16} /> Advanced JSON
+              <div className="render-mode-actions">
+                <div className="mode-toggle" role="group" aria-label="Render input mode">
+                  <button
+                    type="button"
+                    className={renderFormMode === "simple" ? "active" : ""}
+                    onClick={() => openRenderFormMode("simple")}
+                  >
+                    <ListChecks size={16} /> Simple wizard
+                  </button>
+                  <button
+                    type="button"
+                    className={renderFormMode === "advanced" ? "active" : ""}
+                    onClick={() => openRenderFormMode("advanced")}
+                  >
+                    <Code2 size={16} /> Advanced JSON
+                  </button>
+                </div>
+                <button type="button" className="btn small" onClick={resetGenerationForm}>
+                  <Undo2 size={15} /> Reset form
                 </button>
               </div>
             </div>
@@ -1030,11 +1151,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
                 footerWizardItems={footerWizardItems}
                 outroFocusAreaWizard={outroFocusAreaWizard}
                 imageCount={imageCount}
-                paymentTokens={selectablePaymentTokens}
-                paymentCurrency={paymentCurrency}
-                settlementToken={settlementToken}
                 onPatch={updateGenerationForm}
-                onPaymentCurrencySelect={setPaymentCurrency}
                 onImageChange={updateImageWizardItem}
                 onImageAdd={addImageWizardItem}
                 onImageRemove={removeImageWizardItem}
@@ -1051,11 +1168,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
                 form={generationForm}
                 imageCount={imageCount}
                 generationPayloadPreview={generationPayloadPreview}
-                paymentTokens={selectablePaymentTokens}
-                paymentCurrency={paymentCurrency}
-                settlementToken={settlementToken}
                 onPatch={updateGenerationForm}
-                onPaymentCurrencySelect={setPaymentCurrency}
               />
             )}
             <PaymentSummary
@@ -1072,17 +1185,15 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
               <button className="btn" onClick={createQuote} disabled={busy === "quote" || imageCount === 0}>
                 <CircleDollarSign size={16} /> Quote {paymentCurrency}
               </button>
-              {selectablePaymentTokens.map((token) => (
-                <button
-                  className={`btn ${token.symbol === paymentCurrency ? "primary" : ""}`}
-                  disabled={busy === "generation" || imageCount === 0}
-                  key={`pay-${token.chainId}-${token.address}`}
-                  onClick={() => runGeneration(token.symbol)}
-                  type="button"
-                >
-                  <Play size={16} /> Pay {token.symbol} & start render
-                </button>
-              ))}
+              <PaymentActionControl
+                tokens={selectablePaymentTokens}
+                selectedSymbol={paymentCurrency}
+                settlementToken={settlementToken}
+                disabled={busy === "generation" || imageCount === 0}
+                busy={busy === "generation"}
+                onSelect={setPaymentCurrency}
+                onPay={() => runGeneration(paymentCurrency)}
+              />
               {quote?.checkoutUrl && quote.paymentRail === "uniswap" && (
                 <a className="btn" href={quote.checkoutUrl} target="_blank" rel="noreferrer">
                   <ExternalLink size={16} /> Open Uniswap
@@ -1130,11 +1241,7 @@ function SimpleRenderForm({
   footerWizardItems,
   outroFocusAreaWizard,
   imageCount,
-  paymentTokens,
-  paymentCurrency,
-  settlementToken,
   onPatch,
-  onPaymentCurrencySelect,
   onImageChange,
   onImageAdd,
   onImageRemove,
@@ -1152,11 +1259,7 @@ function SimpleRenderForm({
   footerWizardItems: FooterWizardItem[];
   outroFocusAreaWizard: OutroFocusAreaWizard;
   imageCount: number;
-  paymentTokens: PaymentToken[];
-  paymentCurrency: PaymentCurrencySymbol;
-  settlementToken: PaymentToken;
   onPatch: (patch: RenderFormPatch) => void;
-  onPaymentCurrencySelect: (currency: PaymentCurrencySymbol) => void;
   onImageChange: (index: number, patch: Partial<ImageWizardItem>) => void;
   onImageAdd: () => void;
   onImageRemove: (index: number) => void;
@@ -1255,13 +1358,6 @@ function SimpleRenderForm({
       </label>
       <TextField label="Feed tags" value={form.feedTags} onChange={(feedTags) => onPatch({ feedTags })} />
 
-      <PaymentMethodSelector
-        tokens={paymentTokens}
-        selectedSymbol={paymentCurrency}
-        settlementToken={settlementToken}
-        onSelect={onPaymentCurrencySelect}
-      />
-
       <TextField label="CTA outro URL" value={form.ctaUrl} onChange={(ctaUrl) => onPatch({ ctaUrl })} />
       <TextField label="CTA top text" value={form.ctaTextTop} onChange={(ctaTextTop) => onPatch({ ctaTextTop })} />
       <TextField label="CTA bottom text" value={form.ctaTextBottom} onChange={(ctaTextBottom) => onPatch({ ctaTextBottom })} />
@@ -1355,20 +1451,12 @@ function AdvancedRenderForm({
   form,
   imageCount,
   generationPayloadPreview,
-  paymentTokens,
-  paymentCurrency,
-  settlementToken,
-  onPatch,
-  onPaymentCurrencySelect
+  onPatch
 }: {
   form: GenerationFormState;
   imageCount: number;
   generationPayloadPreview: string;
-  paymentTokens: PaymentToken[];
-  paymentCurrency: PaymentCurrencySymbol;
-  settlementToken: PaymentToken;
   onPatch: (patch: RenderFormPatch) => void;
-  onPaymentCurrencySelect: (currency: PaymentCurrencySymbol) => void;
 }) {
   return (
     <div className="form-grid">
@@ -1393,12 +1481,6 @@ function AdvancedRenderForm({
         <label>Prompt</label>
         <textarea value={form.prompt} onChange={(event) => onPatch({ prompt: event.target.value })} />
       </div>
-      <PaymentMethodSelector
-        tokens={paymentTokens}
-        selectedSymbol={paymentCurrency}
-        settlementToken={settlementToken}
-        onSelect={onPaymentCurrencySelect}
-      />
       <TextField label="CTA outro URL" value={form.ctaUrl} onChange={(ctaUrl) => onPatch({ ctaUrl })} />
       <TextField label="CTA top text" value={form.ctaTextTop} onChange={(ctaTextTop) => onPatch({ ctaTextTop })} />
       <TextField label="CTA bottom text" value={form.ctaTextBottom} onChange={(ctaTextBottom) => onPatch({ ctaTextBottom })} />
@@ -1537,42 +1619,51 @@ function PricingOption({
   );
 }
 
-function PaymentMethodSelector({
+function PaymentActionControl({
   tokens,
   selectedSymbol,
   settlementToken,
-  onSelect
+  disabled,
+  busy,
+  onSelect,
+  onPay
 }: {
   tokens: PaymentToken[];
   selectedSymbol: PaymentCurrencySymbol;
   settlementToken: PaymentToken;
+  disabled: boolean;
+  busy: boolean;
   onSelect: (symbol: PaymentCurrencySymbol) => void;
+  onPay: () => void;
 }) {
   const orderedTokens = [...tokens].sort((left, right) => paymentTokenRank(left) - paymentTokenRank(right));
   return (
-    <div className="field full">
-      <label>Payment currency</label>
-      <div className="amount-grid payment-method-grid">
-        {orderedTokens.map((token) => {
-          const active = token.symbol === selectedSymbol;
-          const rail = resolveUserPaymentRail(token, settlementToken);
-          const settlementLabel = rail === "direct" ? "direct transfer" : `${settlementToken.symbol} settlement`;
-          return (
-            <button
-              type="button"
-              className={`amount-choice ${active ? "active" : ""}`}
-              onClick={() => onSelect(token.symbol)}
-              key={`${token.chainId}:${token.address}`}
-            >
-              <span className="subtle">{token.native ? "Native token" : "ERC-20 token"}</span>
-              <strong>{token.symbol}</strong>
-              <span>{settlementLabel}</span>
-            </button>
-          );
-        })}
-      </div>
+    <div className="payment-action-control">
+      <label>
+        <span>Payment currency</span>
+        <select
+          value={selectedSymbol}
+          onChange={(event) => onSelect(event.target.value as PaymentCurrencySymbol)}
+          disabled={busy}
+        >
+          {orderedTokens.map((token) => (
+            <option value={token.symbol} key={`${token.chainId}:${token.address}`}>
+              {paymentCurrencyOptionLabel(token, settlementToken)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button className="btn primary" disabled={disabled} onClick={onPay} type="button">
+        <Play size={16} /> {busy ? "Starting..." : `Pay ${selectedSymbol} & start render`}
+      </button>
     </div>
   );
+}
+
+function paymentCurrencyOptionLabel(token: PaymentToken, settlementToken: PaymentToken) {
+  const rail = resolveUserPaymentRail(token, settlementToken);
+  const settlementLabel = rail === "direct" ? "direct" : `via KeeperHub to ${settlementToken.symbol}`;
+  return `${token.symbol} (${settlementLabel})`;
 }
 
 function PaymentSummary({
@@ -1919,7 +2010,7 @@ async function assertWalletBalance(provider: EthereumProvider, owner: string, to
     : await readErc20Balance(provider, token.address, owner);
   if (balance < requiredAmount) {
     const recovery = token.symbol === "USDC"
-      ? "Use Pay ETH & start render to create a fresh KeeperHub ETH settlement quote."
+      ? "Select ETH in the payment currency dropdown and click Pay ETH & start render to create a fresh KeeperHub settlement quote."
       : "Use another payment currency and start again to create a fresh quote.";
     throw new Error(`Insufficient ${token.symbol} balance for payment. Required ${formatAtomicAmount(requiredAmount, token.decimals)} ${token.symbol}, available ${formatAtomicAmount(balance, token.decimals)} ${token.symbol}. ${recovery} Render was not started.`);
   }

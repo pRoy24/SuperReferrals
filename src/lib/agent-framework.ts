@@ -512,7 +512,7 @@ function buildHeuristicPlan({
 
 function buildKeeperAllocations(customer: Customer, agents: AgentProfile[], totalUsd: number) {
   const director = agents.find((agent) => agent.id.includes("_director_")) || agents[0];
-  const platformWallet = env("KEEPERHUB_PLATFORM_WALLET_ADDRESS", customer.ownerWallet);
+  const keeperHubWallet = env("KEEPERHUB_WALLET_ADDRESS", customer.ownerWallet);
   return [
     {
       label: "customer_render_revenue",
@@ -526,7 +526,7 @@ function buildKeeperAllocations(customer: Customer, agents: AgentProfile[], tota
     },
     {
       label: "platform_coordination_fee",
-      recipientAddress: platformWallet,
+      recipientAddress: keeperHubWallet,
       amountUsd: roundMoney(totalUsd * 0.1)
     }
   ];
@@ -588,7 +588,7 @@ async function anchorAgentJobOnZeroGChain({
   outputRoot: string;
 }): Promise<AgentPillarReceipt> {
   const contractAddress = env("AGENT_REGISTRY_CONTRACT_ADDRESS") as `0x${string}`;
-  const privateKey = (env("AGENT_REGISTRY_PRIVATE_KEY") || env("OG_PRIVATE_KEY")) as `0x${string}`;
+  const privateKey = env("OG_PRIVATE_KEY") as `0x${string}`;
   const configuredChainId = Number(env("AGENT_REGISTRY_CHAIN_ID") || env("OG_CHAIN_ID") || "");
   const configuredChain = getZeroGChainConfig(
     Number.isFinite(configuredChainId) && configuredChainId > 0 ? configuredChainId : undefined
@@ -609,7 +609,7 @@ async function anchorAgentJobOnZeroGChain({
     };
   }
   if (!contractAddress || !privateKey) {
-    throw new Error("AGENT_REGISTRY_CONTRACT_ADDRESS and AGENT_REGISTRY_PRIVATE_KEY or OG_PRIVATE_KEY are required when AGENT_REGISTRY_MOCKS=false");
+    throw new Error("AGENT_REGISTRY_CONTRACT_ADDRESS and OG_PRIVATE_KEY are required when AGENT_REGISTRY_MOCKS=false");
   }
 
   const account = privateKeyToAccount(privateKey);

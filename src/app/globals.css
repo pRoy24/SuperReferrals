@@ -1466,6 +1466,42 @@ button.item {
   font-weight: 700;
 }
 
+.payment-action-control {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: min(100%, 360px);
+}
+
+.payment-action-control label {
+  display: grid;
+  gap: 4px;
+  min-width: 180px;
+}
+
+.payment-action-control label span {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.payment-action-control select {
+  min-height: 40px;
+  border: 1px solid rgba(31, 91, 160, 0.18);
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 800;
+  padding: 0 34px 0 12px;
+}
+
+.payment-action-control .btn {
+  min-height: 40px;
+  align-self: end;
+}
+
 .render-mode-toolbar {
   display: flex;
   justify-content: space-between;
@@ -1476,6 +1512,15 @@ button.item {
   border: 1px solid rgba(31, 91, 160, 0.12);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.72);
+  min-width: 0;
+}
+
+.render-mode-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
   min-width: 0;
 }
 
@@ -2423,6 +2468,11 @@ button.item {
 
   .render-mode-toolbar {
     display: grid;
+  }
+
+  .render-mode-actions {
+    display: grid;
+    justify-content: stretch;
   }
 
   .mode-toggle {

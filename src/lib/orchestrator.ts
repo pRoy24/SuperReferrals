@@ -10,7 +10,7 @@ import {
   createKeeperPaymentIntent,
   executeKeeperRefund,
   getKeeperHubPaymentWorkflowId,
-  getKeeperHubPlatformWalletAddress
+  getKeeperHubWalletAddress
 } from "./keeperhub";
 import {
   amountToAtomic,
@@ -305,17 +305,20 @@ export async function quotePayment(input: {
   ) {
     throw new Error("KEEPERHUB_PAYMENT_WORKFLOW_ID is required for non-stable token payments so KeeperHub can run the swap before settlement.");
   }
+  const keeperHubWallet = getKeeperHubWalletAddress();
   if (
     paymentRail === "keeperhub" &&
     !sameToken &&
-    !getKeeperHubPlatformWalletAddress() &&
+    !isUsableEvmAddress(keeperHubWallet) &&
     !isMockMode() &&
     !isProviderMock("KEEPERHUB")
   ) {
-    throw new Error(`KEEPERHUB_PLATFORM_WALLET_ADDRESS is required so KeeperHub can receive ${paymentToken.symbol} and settle ${settlementToken.symbol}.`);
+    throw new Error(`ETH payments are not configured for this deployment. Set KEEPERHUB_WALLET_ADDRESS to a valid non-zero EVM address so KeeperHub can receive ${paymentToken.symbol} and settle ${settlementToken.symbol}.`);
   }
   const keeperPaymentRecipient = paymentRail === "keeperhub" && !sameToken
-    ? assertUsableEvmAddress(getKeeperHubPlatformWalletAddress(), "KEEPERHUB_PLATFORM_WALLET_ADDRESS")
+    ? isUsableEvmAddress(keeperHubWallet)
+      ? assertUsableEvmAddress(keeperHubWallet, "KEEPERHUB_WALLET_ADDRESS")
+      : customerSettlementWallet
     : "";
   const conversionQuote = paymentRail === "uniswap" && !sameToken && input.swapper
     ? await createUniswapQuote({
@@ -1342,11 +1345,11 @@ function resolveRenderPaymentRecipientWallet(customer: Customer) {
   if (isUsableEvmAddress(customer.ownerWallet)) {
     return assertUsableEvmAddress(customer.ownerWallet, "Customer owner wallet");
   }
-  const platformWallet = getKeeperHubPlatformWalletAddress();
-  if (isUsableEvmAddress(platformWallet)) {
-    return assertUsableEvmAddress(platformWallet, "KEEPERHUB_PLATFORM_WALLET_ADDRESS");
+  const keeperHubWallet = getKeeperHubWalletAddress();
+  if (isUsableEvmAddress(keeperHubWallet)) {
+    return assertUsableEvmAddress(keeperHubWallet, "KEEPERHUB_WALLET_ADDRESS");
   }
-  throw new Error("Payment recipient wallet is not configured. Connect a merchant payout wallet or set KEEPERHUB_PLATFORM_WALLET_ADDRESS before accepting render payments.");
+  throw new Error("Payment recipient wallet is not configured. Connect a merchant payout wallet or set KEEPERHUB_WALLET_ADDRESS before accepting render payments.");
 }
 
 function shouldRunKeeperSettlement({
