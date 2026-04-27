@@ -7,6 +7,7 @@ import {
   ExternalLink,
   KeyRound,
   Network,
+  Plus,
   Radio,
   RefreshCw,
   Save,
@@ -32,7 +33,7 @@ import {
   resolveModelPriceDetails
 } from "@/lib/pricing";
 import { isUsableEvmAddress } from "@/lib/wallet-address";
-import type { ModelPricingConfiguration, PaymentCurrencySymbol, SuperReferralsStore, VideoAspectRatio, VideoModel } from "@/lib/types";
+import type { Customer, ModelPricingConfiguration, PaymentCurrencySymbol, SuperReferralsStore, VideoAspectRatio, VideoModel } from "@/lib/types";
 
 const processorCreditAmounts = [10, 25, 50, 100];
 const conditionModelOptions: VideoModel[] = ["RUNWAYML", "VEO3.1I2V", "SEEDANCEI2V", "KLING3.0"];
@@ -49,6 +50,8 @@ export default function Dashboard() {
   const [store, setStore] = useState<SuperReferralsStore | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
+  const [activeCustomerId, setActiveCustomerId] = useState("");
+  const [creatingNewStorefront, setCreatingNewStorefront] = useState(false);
   const [processorAmountUsd, setProcessorAmountUsd] = useState(25);
   const [processorAccountForm, setProcessorAccountForm] = useState({
     email: "",
@@ -104,10 +107,24 @@ export default function Dashboard() {
 
   useEffect(() => subscribeToBrowserWalletProviders(setWalletProviders), []);
 
+  const activeCustomer = store?.customers.find((item) => item.id === activeCustomerId) || store?.customers[0];
+  const accountStorefronts = useMemo(
+    () => activeCustomer && store
+      ? store.customers.filter((item) => sameProcessorAccount(item, activeCustomer))
+      : [],
+    [activeCustomer, store]
+  );
+
   useEffect(() => {
     if (!store) return;
-    const customer = store.customers[0];
+    const customer = activeCustomer;
     if (!customer) return;
+    if (!activeCustomerId) {
+      setActiveCustomerId(customer.id);
+    }
+    if (creatingNewStorefront) {
+      return;
+    }
     const ownerWallet = isUsableEvmAddress(customer.ownerWallet)
       ? customer.ownerWallet
       : isUsableEvmAddress(customer.samsarAccount?.walletAddress)
@@ -147,11 +164,17 @@ export default function Dashboard() {
       ...current,
       email: customer.samsarAccount?.email || current.email
     }));
-  }, [store]);
+  }, [activeCustomer, activeCustomerId, creatingNewStorefront, store]);
 
-  const customer = store?.customers[0];
-  const activeJobs = store?.generations.filter((item) => ["QUEUED", "PROCESSING"].includes(item.status)).length || 0;
-  const completedJobs = store?.generations.filter((item) => item.status === "COMPLETED").length || 0;
+  const customer = activeCustomer;
+  const activeStorefrontGenerations = customer
+    ? store?.generations.filter((item) => item.customerId === customer.id) || []
+    : [];
+  const activeStorefrontSubAccounts = customer
+    ? store?.subAccounts.filter((item) => item.customerId === customer.id) || []
+    : [];
+  const activeJobs = activeStorefrontGenerations.filter((item) => ["QUEUED", "PROCESSING"].includes(item.status)).length;
+  const completedJobs = activeStorefrontGenerations.filter((item) => item.status === "COMPLETED").length;
   const agentJobs = store?.agentJobs || [];
   const latestAgentJob = agentJobs[0];
   const transactionChain = getTransactionChainConfig();
@@ -163,11 +186,9 @@ export default function Dashboard() {
   const linkedSamsarWallet = customer?.samsarAccount?.walletAddress || customerForm.ownerWallet;
   const connectingCustomerWallet = busy.startsWith("customer-wallet");
   const customerLanding = useMemo(() => {
-    const seedAccount = customer
-      ? store?.subAccounts.find((account) => account.customerId === customer.id)
-      : null;
+    const seedAccount = activeStorefrontSubAccounts[0];
     return seedAccount ? `/r/${seedAccount.referrerCode}` : customer ? `/storefronts/${customer.id}` : "";
-  }, [customer, store?.subAccounts]);
+  }, [activeStorefrontSubAccounts, customer]);
 
   function updatePricingRow(id: string, patch: Partial<ModelPricingConfiguration>) {
     setCustomerForm((current) => ({
@@ -196,6 +217,47 @@ export default function Dashboard() {
     }));
   }
 
+  function selectStorefront(customerId: string) {
+    setCreatingNewStorefront(false);
+    setActiveCustomerId(customerId);
+    setMessage("");
+  }
+
+  function startNewStorefront() {
+    const base = customer;
+    const ownerWallet = isUsableEvmAddress(base?.ownerWallet)
+      ? base?.ownerWallet || ""
+      : isUsableEvmAddress(base?.samsarAccount?.walletAddress)
+      ? base?.samsarAccount?.walletAddress || ""
+      : customerForm.ownerWallet;
+    setCreatingNewStorefront(true);
+    setCustomerForm({
+      id: "",
+      name: `${processorAccountEmail || base?.name || "Customer"} storefront`,
+      ownerWallet,
+      platformFeeBps: base?.pricing.platformFeeBps ?? customerForm.platformFeeBps,
+      refundOnFailureBps: base?.pricing.refundOnFailureBps ?? customerForm.refundOnFailureBps,
+      customerMultiplier: DEFAULT_CUSTOMER_MULTIPLIER,
+      creditUnitUsd: CREDIT_UNIT_USD,
+      referrerBaseUrl: base?.referrerBaseUrl || customerForm.referrerBaseUrl,
+      ensName: base?.ensName || "",
+      storefrontDescription: "",
+      storefrontWebsiteUrl: "",
+      storefrontSupportEmail: base?.storefront?.supportEmail || "",
+      storefrontCategory: "",
+      storefrontTags: "",
+      conditionalsEnabled: false,
+      allowedModels: conditionModelOptions,
+      allowedAspectRatios: conditionAspectOptions,
+      maxImages: 6,
+      dailyWalletRenderLimit: "",
+      walletAccessMode: "open",
+      walletWhitelist: "",
+      modelConfigurations: defaultModelPricingConfigurations.map((item) => ({ ...item }))
+    });
+    setMessage("Editing a new storefront. Save setup to publish it in the directory.");
+  }
+
   async function saveCustomer() {
     if (!hasCreditedProcessorAccount) {
       setMessage("Purchase credits or sign in before saving your SuperReferrals storefront.");
@@ -219,6 +281,7 @@ export default function Dashboard() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           id: customerForm.id,
+          createNewStorefront: creatingNewStorefront || !customerForm.id,
           name: customerForm.name,
           ownerWallet: customerForm.ownerWallet,
           referrerBaseUrl: customerForm.referrerBaseUrl,
@@ -264,9 +327,13 @@ export default function Dashboard() {
           }
         })
       });
-      await assertOk(response);
+      const data = await assertOk(response);
+      if (data.customer?.id) {
+        setActiveCustomerId(data.customer.id);
+      }
+      setCreatingNewStorefront(false);
       await load();
-      setMessage("Customer store configuration saved.");
+      setMessage(creatingNewStorefront ? "New storefront saved." : "Customer store configuration saved.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Save failed");
     } finally {
@@ -508,8 +575,8 @@ export default function Dashboard() {
         {message && <p className="notice">{message}</p>}
 
         <section className="stat-row">
-          <div className="stat"><strong>{store.subAccounts.length}</strong><span className="subtle">wallet users</span></div>
-          <div className="stat"><strong>{store.generations.length}</strong><span className="subtle">render tasks</span></div>
+          <div className="stat"><strong>{activeStorefrontSubAccounts.length}</strong><span className="subtle">wallet users</span></div>
+          <div className="stat"><strong>{activeStorefrontGenerations.length}</strong><span className="subtle">render tasks</span></div>
           <div className="stat"><strong>{activeJobs}</strong><span className="subtle">active jobs</span></div>
           <div className="stat"><strong>{completedJobs}</strong><span className="subtle">completed jobs</span></div>
           <div className="stat"><strong>{store.agents.length}</strong><span className="subtle">agent citizens</span></div>
@@ -618,6 +685,36 @@ export default function Dashboard() {
                 <h2>Store Setup</h2>
                 <KeyRound size={18} />
               </div>
+              {accountStorefronts.length > 0 && (
+                <div className="list storefront-switcher">
+                  <div className="item-title">
+                    <strong>Your storefronts</strong>
+                    <button className="btn small" type="button" onClick={startNewStorefront} disabled={!hasCreditedProcessorAccount}>
+                      <Plus size={15} /> New storefront
+                    </button>
+                  </div>
+                  {accountStorefronts.map((item) => (
+                    <button
+                      className="item"
+                      key={item.id}
+                      onClick={() => selectStorefront(item.id)}
+                      style={{ textAlign: "left", borderColor: !creatingNewStorefront && item.id === customer?.id ? "var(--accent-cool)" : undefined }}
+                      type="button"
+                    >
+                      <div className="item-title">
+                        <strong>{item.name}</strong>
+                        <span className="badge">{store.generations.filter((generation) => generation.customerId === item.id).length} renders</span>
+                      </div>
+                      <p className="subtle">
+                        {item.storefront?.category || "Customer store"} · {item.storefront?.conditions?.enabled ? "custom policies" : "default policies"}
+                      </p>
+                    </button>
+                  ))}
+                  {creatingNewStorefront && (
+                    <div className="notice">New storefront draft. Saving creates a separate directory item with its own policies, pricing, ratings, and render history.</div>
+                  )}
+                </div>
+              )}
               <div className="form-grid">
                 <TextField label="Store name" value={customerForm.name} onChange={(name) => setCustomerForm({ ...customerForm, name })} />
                 <TextField label="Storefront category" value={customerForm.storefrontCategory} onChange={(storefrontCategory) => setCustomerForm({ ...customerForm, storefrontCategory })} />
@@ -848,8 +945,8 @@ export default function Dashboard() {
                 <Bot size={18} />
               </div>
               <div className="list">
-                {store.generations.length === 0 && <p className="subtle">No render tasks yet.</p>}
-                {store.generations.slice(0, 8).map((generation) => (
+                {activeStorefrontGenerations.length === 0 && <p className="subtle">No render tasks yet.</p>}
+                {activeStorefrontGenerations.slice(0, 8).map((generation) => (
                   <div className="item" key={generation.id}>
                     <div className="item-title">
                       <strong>{generation.id}</strong>
@@ -1004,6 +1101,20 @@ function TextField({
       <input type={type} value={value} onChange={(event) => onChange(event.target.value)} />
     </div>
   );
+}
+
+function sameProcessorAccount(left: Customer, right: Customer) {
+  const leftUserId = left.samsarAccount?.userId || left.samsarAccount?.externalUserId;
+  const rightUserId = right.samsarAccount?.userId || right.samsarAccount?.externalUserId;
+  if (leftUserId && rightUserId) {
+    return leftUserId === rightUserId;
+  }
+  const leftEmail = left.samsarAccount?.email?.toLowerCase();
+  const rightEmail = right.samsarAccount?.email?.toLowerCase();
+  if (leftEmail && rightEmail) {
+    return leftEmail === rightEmail;
+  }
+  return left.id === right.id;
 }
 
 async function assertOk(response: Response) {

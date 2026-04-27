@@ -120,7 +120,14 @@ export interface SubAccount {
   externalUser: ExternalUserIdentity;
   externalApiKey?: string;
   blockchainRegistration?: SubAccountBlockchainRegistration;
+  preferences?: SubAccountPreferences;
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface SubAccountPreferences {
+  renderForm?: Record<string, unknown>;
+  renderFormMode?: "simple" | "advanced";
   updatedAt: string;
 }
 

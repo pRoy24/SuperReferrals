@@ -184,5 +184,5 @@ function formatRating(average: number, count: number) {
 }
 
 function isDirectoryStorefrontCustomer(customer: Customer) {
-  return Boolean(customer.id);
+  return Boolean(customer.storefront) && isUsableEvmAddress(customer.ownerWallet);
 }

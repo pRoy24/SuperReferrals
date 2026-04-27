@@ -18,6 +18,7 @@ import type {
   PaymentQuote,
   StorefrontRating,
   SubAccount,
+  SubAccountPreferences,
   SuperReferralsStore
 } from "./types";
 
@@ -382,6 +383,26 @@ export function addSubAccount(store: SuperReferralsStore, input: {
   return account;
 }
 
+export function updateSubAccountPreferences(store: SuperReferralsStore, input: {
+  id?: string;
+  customerId?: string;
+  wallet?: string;
+  preferences: Partial<SubAccountPreferences>;
+}) {
+  const normalizedWallet = input.wallet ? normalizeWallet(input.wallet) : "";
+  const account = store.subAccounts.find((item) =>
+    input.id
+      ? item.id === input.id
+      : Boolean(input.customerId && normalizedWallet && item.customerId === input.customerId && normalizeWallet(item.wallet) === normalizedWallet)
+  );
+  if (!account) {
+    return null;
+  }
+  account.preferences = normalizeSubAccountPreferences(input.preferences, account.preferences);
+  account.updatedAt = nowIso();
+  return account;
+}
+
 export function addQuote(store: SuperReferralsStore, quote: PaymentQuote) {
   store.quotes.unshift(quote);
   return quote;
@@ -564,6 +585,23 @@ function normalizePositiveInteger(value: unknown) {
 
 function normalizeWalletAccessMode(value: unknown) {
   return value === "whitelist" ? "whitelist" : "open";
+}
+
+function normalizeSubAccountPreferences(
+  input: Partial<SubAccountPreferences>,
+  existing?: SubAccountPreferences
+): SubAccountPreferences {
+  const renderForm = input.renderForm && typeof input.renderForm === "object" && !Array.isArray(input.renderForm)
+    ? input.renderForm
+    : existing?.renderForm;
+  const renderFormMode = input.renderFormMode === "simple" || input.renderFormMode === "advanced"
+    ? input.renderFormMode
+    : existing?.renderFormMode;
+  return {
+    renderForm,
+    renderFormMode,
+    updatedAt: nowIso()
+  };
 }
 
 function firstUsableWallet(...values: Array<string | undefined | null>) {

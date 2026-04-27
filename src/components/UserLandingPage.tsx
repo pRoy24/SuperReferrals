@@ -224,6 +224,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const [activeWalletProvider, setActiveWalletProvider] = useState<BrowserWalletProvider | null>(null);
   const hydratedWalletSessionKey = useRef("");
   const [renderFormHydratedKey, setRenderFormHydratedKey] = useState("");
+  const [serverRenderFormHydratedKey, setServerRenderFormHydratedKey] = useState("");
   const [profileForm, setProfileForm] = useState({
     email: "",
     username: ""
@@ -319,6 +320,12 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     const key = routeAccount?.referrerCode || customer?.id || referrerCode || customerId;
     return key ? `superreferrals:render-form:${key}:v1` : "";
   }, [routeAccount?.referrerCode, customer?.id, referrerCode, customerId]);
+  const subAccountPreferenceKey = useMemo(
+    () => connectedSubAccount
+      ? `${connectedSubAccount.id}:${connectedSubAccount.preferences?.updatedAt || connectedSubAccount.updatedAt}`
+      : "",
+    [connectedSubAccount?.id, connectedSubAccount?.preferences?.updatedAt, connectedSubAccount?.updatedAt]
+  );
   const transactionChain = useMemo(
     () => getTransactionChainConfig(normalizeTransactionChainIdForEnvironment(customer?.pricing.chainId)),
     [customer?.pricing.chainId]
@@ -499,6 +506,62 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       renderFormMode
     }));
   }, [customer, generationForm, renderFormHydratedKey, renderFormMode, renderFormStorageKey]);
+
+  useEffect(() => {
+    if (!customer || !connectedSubAccount || !subAccountPreferenceKey || serverRenderFormHydratedKey === subAccountPreferenceKey) {
+      return;
+    }
+    const preferences = connectedSubAccount.preferences;
+    if (preferences?.renderForm) {
+      const nextForm = restorePersistedGenerationForm(preferences.renderForm as Partial<GenerationFormState>, pricingOptions);
+      setGenerationForm(nextForm);
+      syncRenderWizardState(nextForm);
+    }
+    if (preferences?.renderFormMode === "simple" || preferences?.renderFormMode === "advanced") {
+      setRenderFormMode(preferences.renderFormMode);
+    }
+    setServerRenderFormHydratedKey(subAccountPreferenceKey);
+  }, [connectedSubAccount, customer, pricingOptions, serverRenderFormHydratedKey, subAccountPreferenceKey]);
+
+  useEffect(() => {
+    if (
+      !customer ||
+      !connectedSubAccount ||
+      !subAccountPreferenceKey ||
+      serverRenderFormHydratedKey !== subAccountPreferenceKey
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      fetch("/api/subaccounts", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          subAccountId: connectedSubAccount.id,
+          customerId: customer.id,
+          wallet: connectedSubAccount.wallet,
+          preferences: {
+            renderForm: generationForm,
+            renderFormMode
+          }
+        })
+      }).catch(() => undefined);
+    }, 600);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [
+    connectedSubAccount?.id,
+    connectedSubAccount?.wallet,
+    customer?.id,
+    generationForm,
+    renderFormMode,
+    serverRenderFormHydratedKey,
+    subAccountPreferenceKey
+  ]);
 
   useEffect(() => {
     if (!selectedPricing) return;

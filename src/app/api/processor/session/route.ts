@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { processorSessionFromCustomer, setProcessorAccountSessionCookie } from "@/lib/account-session";
 import { nowIso } from "@/lib/ids";
 import { loginSamsarProcessorAccount } from "@/lib/samsar-processor";
-import { mutateStore, publicCustomer, upsertCustomer } from "@/lib/store";
+import { mutateStore, publicCustomer, readStore, upsertCustomer } from "@/lib/store";
 
 export async function POST(request: Request) {
   try {
@@ -11,11 +11,21 @@ export async function POST(request: Request) {
       email: String(body.email || ""),
       password: String(body.password || "")
     });
+    const store = await readStore();
+    const requestedCustomer = body.customerId
+      ? store.customers.find((item) => item.id === String(body.customerId))
+      : undefined;
+    const existingCustomer = requestedCustomer ||
+      oldestCustomer(store.customers.filter((item) =>
+        item.samsarAccount?.userId === session.userId ||
+        item.samsarAccount?.email?.toLowerCase() === session.email.toLowerCase()
+      ));
     const customer = await mutateStore((store) => upsertCustomer(store, {
-      id: String(body.customerId || "") || undefined,
-      name: String(body.customerName || "") || session.username || session.email.split("@")[0] || "SuperReferrals Account",
+      id: existingCustomer?.id,
+      name: existingCustomer?.name || String(body.customerName || "") || session.username || session.email.split("@")[0] || "SuperReferrals Account",
       samsarApiKeyAlias: session.apiKey ? "samsar-user-api-key" : undefined,
       samsarAccount: {
+        ...(existingCustomer?.samsarAccount || {}),
         email: session.email,
         username: session.username,
         userId: session.userId,
@@ -50,4 +60,10 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+}
+
+function oldestCustomer<T extends { createdAt: string }>(customers: T[]) {
+  return [...customers].sort((left, right) =>
+    Date.parse(left.createdAt || "") - Date.parse(right.createdAt || "")
+  )[0];
 }

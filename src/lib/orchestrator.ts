@@ -91,11 +91,7 @@ export async function restoreProcessorAccountSession(session?: ProcessorAccountC
     }
   }
   const store = await readStore();
-  const existing = store.customers.find((customer) =>
-    customer.id === session.customerId ||
-    customer.samsarAccount?.userId === session.userId ||
-    customer.samsarAccount?.email?.toLowerCase() === session.email.toLowerCase()
-  );
+  const existing = findProcessorSessionCustomer(store.customers, session);
   const existingOwnerWallet = isUsableEvmAddress(existing?.ownerWallet) ? existing?.ownerWallet : undefined;
   return mutateStore((mutableStore) => upsertCustomer(mutableStore, {
     id: existing?.id || session.customerId,
@@ -125,7 +121,7 @@ export async function restoreProcessorAccountSession(session?: ProcessorAccountC
   }));
 }
 
-export async function createOrUpdateCustomer(input: Partial<Customer>) {
+export async function createOrUpdateCustomer(input: Partial<Customer> & { createNewStorefront?: boolean }) {
   const existingStore = await readStore();
   const existingCustomer = input.id
     ? existingStore.customers.find((item) => item.id === input.id)
@@ -140,6 +136,17 @@ export async function createOrUpdateCustomer(input: Partial<Customer>) {
       "Store owner wallet"
     );
   }
+  if (input.createNewStorefront) {
+    const ownerWallet = input.ownerWallet || existingCustomer.ownerWallet || existingCustomer.samsarAccount?.walletAddress;
+    return mutateStore((store) => upsertCustomer(store, {
+      ...input,
+      id: undefined,
+      ownerWallet,
+      samsarAccount: existingCustomer.samsarAccount,
+      samsarApiKeyAlias: existingCustomer.samsarApiKeyAlias,
+      subscription: existingCustomer.subscription
+    }));
+  }
   return mutateStore((store) => upsertCustomer(store, {
     ...input,
     id: existingCustomer.id,
@@ -147,6 +154,29 @@ export async function createOrUpdateCustomer(input: Partial<Customer>) {
     samsarApiKeyAlias: existingCustomer.samsarApiKeyAlias,
     subscription: existingCustomer.subscription
   }));
+}
+
+function findProcessorSessionCustomer(customers: Customer[], session: ProcessorAccountCookieSession) {
+  const exact = customers.find((customer) => customer.id === session.customerId);
+  if (exact) {
+    return exact;
+  }
+  const userIdMatches = session.userId
+    ? customers.filter((customer) => customer.samsarAccount?.userId === session.userId)
+    : [];
+  if (userIdMatches.length) {
+    return oldestCustomer(userIdMatches);
+  }
+  const emailMatches = session.email
+    ? customers.filter((customer) => customer.samsarAccount?.email?.toLowerCase() === session.email.toLowerCase())
+    : [];
+  return emailMatches.length ? oldestCustomer(emailMatches) : undefined;
+}
+
+function oldestCustomer(customers: Customer[]) {
+  return [...customers].sort((left, right) =>
+    Date.parse(left.createdAt || "") - Date.parse(right.createdAt || "")
+  )[0];
 }
 
 export async function createSubAccountForCustomer(input: {
