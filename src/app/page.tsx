@@ -80,16 +80,16 @@ export default async function Home() {
           </p>
           <div className="landing-actions" aria-label="Open project routes">
             <a className="btn primary large" href={referrerHref} target="_blank" rel="noreferrer">
-              <Sparkles size={18} /> Launch Demo Campaign
+              <Sparkles size={18} /> Create Product Video
             </a>
             <a className="btn large" href="/storefronts" target="_blank" rel="noreferrer">
-              <Store size={18} /> Browse Storefronts
+              <Store size={18} /> Choose Storefront
             </a>
             <a className="btn large" href="/dashboard" target="_blank" rel="noreferrer">
-              <Network size={18} /> Open Admin Console
+              <Network size={18} /> Manage Storefront
             </a>
             <a className="btn large" href="/feed" target="_blank" rel="noreferrer">
-              <Film size={18} /> Watch Generated Videos
+              <Film size={18} /> View Video Gallery
             </a>
           </div>
         </div>
@@ -161,14 +161,14 @@ export default async function Home() {
 
       <section className="landing-section route-section">
         <div>
-          <div className="eyebrow">Reviewer Entry Points</div>
-          <h2>Open each surface in a new tab.</h2>
+          <div className="eyebrow">Marketing Video Creator</div>
+          <h2>Start with the workflow you need.</h2>
         </div>
         <div className="route-grid">
-          <RouteButton href="/dashboard" title="Customer console" copy="Configure product context, pricing, campaign automation, credits, and render history." />
-          <RouteButton href="/storefronts" title="Storefront directory" copy="Choose from created storefronts, connect a wallet profile, and generate a product video." />
-          <RouteButton href="/feed" title="Generated video feed" copy="Browse completed referral videos and social actions." />
-          <RouteButton href={inftHref} title="Output viewer" copy="Inspect a completed render when one exists, otherwise opens the feed." />
+          <RouteButton href="/dashboard" title="Manage storefront" copy="Set products, pricing, credits, and campaign automation." />
+          <RouteButton href="/storefronts" title="Create a product video" copy="Choose a storefront, connect a wallet, and generate a video." />
+          <RouteButton href="/feed" title="View video gallery" copy="Browse completed marketing videos and social actions." />
+          <RouteButton href={inftHref} title="Open latest video" copy="Preview a completed render or continue to the gallery." />
         </div>
       </section>
     </main>
