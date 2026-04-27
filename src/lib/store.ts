@@ -301,7 +301,7 @@ export function isPublicStorefrontCustomer(customer: Customer) {
 }
 
 export function isEnabledStorefrontCustomer(customer: Customer) {
-  return customer.storefront?.conditions?.enabled === true;
+  return Boolean(customer.storefront);
 }
 
 export function upsertCustomer(store: SuperReferralsStore, input: Partial<Customer>) {
