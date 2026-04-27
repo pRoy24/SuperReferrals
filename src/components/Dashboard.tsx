@@ -38,6 +38,7 @@ import type { Customer, ModelPricingConfiguration, PaymentCurrencySymbol, SuperR
 const processorCreditAmounts = [10, 25, 50, 100];
 const conditionModelOptions: VideoModel[] = ["RUNWAYML", "VEO3.1I2V", "SEEDANCEI2V", "KLING3.0"];
 const conditionAspectOptions: VideoAspectRatio[] = ["9:16", "16:9"];
+type ToastState = { id: number; kind: "success" | "error"; message: string } | null;
 const deploymentEnvironment = (
   process.env.NEXT_PUBLIC_DEPLOYMENT_ENV ||
   process.env.NEXT_PUBLIC_APP_ENV ||
@@ -50,6 +51,7 @@ export default function Dashboard() {
   const [store, setStore] = useState<SuperReferralsStore | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
+  const [toast, setToast] = useState<ToastState>(null);
   const [activeCustomerId, setActiveCustomerId] = useState("");
   const [creatingNewStorefront, setCreatingNewStorefront] = useState(false);
   const [processorAmountUsd, setProcessorAmountUsd] = useState(25);
@@ -106,6 +108,14 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => subscribeToBrowserWalletProviders(setWalletProviders), []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timeout = window.setTimeout(() => {
+      setToast((current) => current?.id === toast.id ? null : current);
+    }, 3600);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
 
   const activeCustomer = store?.customers.find((item) => item.id === activeCustomerId) || store?.customers[0];
   const accountStorefronts = useMemo(
@@ -217,6 +227,10 @@ export default function Dashboard() {
     }));
   }
 
+  function showToast(message: string, kind: "success" | "error" = "success") {
+    setToast({ id: Date.now(), kind, message });
+  }
+
   function selectStorefront(customerId: string) {
     setCreatingNewStorefront(false);
     setActiveCustomerId(customerId);
@@ -260,11 +274,15 @@ export default function Dashboard() {
 
   async function saveCustomer() {
     if (!hasCreditedProcessorAccount) {
-      setMessage("Purchase credits or sign in before saving your SuperReferrals storefront.");
+      const error = "Purchase credits or sign in before saving your SuperReferrals storefront.";
+      setMessage(error);
+      showToast(error, "error");
       return;
     }
     if (!isUsableEvmAddress(customerForm.ownerWallet)) {
-      setMessage("Connect a store owner e-wallet before saving your SuperReferrals storefront.");
+      const error = "Connect a store owner e-wallet before saving your SuperReferrals storefront.";
+      setMessage(error);
+      showToast(error, "error");
       return;
     }
     setBusy("customer");
@@ -333,9 +351,15 @@ export default function Dashboard() {
       }
       setCreatingNewStorefront(false);
       await load();
-      setMessage(creatingNewStorefront ? "New storefront saved." : "Customer store configuration saved.");
+      const successMessage = creatingNewStorefront
+        ? "New storefront saved."
+        : "Storefront pricing, allowlist, and setup saved.";
+      setMessage(successMessage);
+      showToast(successMessage);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Save failed");
+      const errorMessage = error instanceof Error ? error.message : "Save failed";
+      setMessage(errorMessage);
+      showToast(errorMessage, "error");
     } finally {
       setBusy("");
     }
@@ -529,6 +553,7 @@ export default function Dashboard() {
 
   return (
     <div className="app-shell">
+      <SaveToast toast={toast} />
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark"><Sparkles size={18} /></span>
@@ -1099,6 +1124,18 @@ function TextField({
     <div className={`field ${full ? "full" : ""}`}>
       <label>{label}</label>
       <input type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+    </div>
+  );
+}
+
+function SaveToast({ toast }: { toast: ToastState }) {
+  if (!toast) {
+    return null;
+  }
+  return (
+    <div className={`save-toast ${toast.kind}`} role="status" aria-live="polite">
+      <strong>{toast.kind === "success" ? "Saved" : "Update failed"}</strong>
+      <span>{toast.message}</span>
     </div>
   );
 }
