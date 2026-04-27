@@ -300,10 +300,6 @@ export function isPublicStorefrontCustomer(customer: Customer) {
   return hasAccountSession && Number(customer.subscription.creditsRemaining || 0) > 0;
 }
 
-export function isEnabledStorefrontCustomer(customer: Customer) {
-  return Boolean(customer.storefront);
-}
-
 export function upsertCustomer(store: SuperReferralsStore, input: Partial<Customer>) {
   const timestamp = nowIso();
   const id = input.id || createId("cus");
