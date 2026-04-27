@@ -220,7 +220,10 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const renderAccessError = getStorefrontAccessError(customer, store, {
     wallet: walletAddress || connectedSubAccount?.wallet
   });
-  const renderGateError = renderConditionError || renderAccessError;
+  const paymentSetupError = customer && !isUsableEvmAddress(customer.ownerWallet)
+    ? "This storefront is waiting for an owner wallet before payments can start."
+    : "";
+  const renderGateError = renderConditionError || renderAccessError || paymentSetupError;
   const selectedPricingDetails = resolveModelPriceDetails(customer, selectedPricing);
   const estimatedDurationSeconds = estimateDurationSeconds(imageCount, selectedPricing);
   const userGenerations = connectedSubAccount
@@ -596,6 +599,9 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       if (renderAccessError) {
         throw new Error(renderAccessError);
       }
+      if (paymentSetupError) {
+        throw new Error(paymentSetupError);
+      }
       const account = await ensureWalletSubAccount();
       const quoted = await requestQuote(account);
       setMessage(`${quoted.totalUsd.toFixed(2)} ${quoted.settlementCurrency || "USDC"} quote created for payment in ${quoted.paymentCurrency || paymentCurrency} on ${transactionChain.name}.`);
@@ -747,6 +753,9 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       if (renderAccessError) {
         throw new Error(renderAccessError);
       }
+      if (paymentSetupError) {
+        throw new Error(paymentSetupError);
+      }
       const account = await ensureWalletSubAccount();
       const activeQuote = quote || await requestQuote(account);
       const paymentTxHash = await executePaymentForRender(activeQuote, account);
@@ -840,10 +849,6 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     return <main className="public-main"><div className="notice">Customer store was not found.</div></main>;
   }
 
-  if (!isUsableEvmAddress(customer.ownerWallet)) {
-    return <main className="public-main"><div className="notice">This storefront is not ready for payments because the owner wallet is missing.</div></main>;
-  }
-
   return (
     <main className="public-main">
       <section className="hero-band public-hero">
@@ -854,7 +859,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
             {customer.storefront?.description || "Connect your wallet, choose a render configuration, pay the store price, and track your previous render tasks."}
           </p>
           <div className="storefront-landing-meta">
-            <span><Wallet size={15} /> owner {shortWallet(customer.ownerWallet)}</span>
+            <span><Wallet size={15} /> owner {isUsableEvmAddress(customer.ownerWallet) ? shortWallet(customer.ownerWallet) : "not connected"}</span>
             {customer.storefront?.category && <span><Store size={15} /> {customer.storefront.category}</span>}
             {customer.ensName && <span>{customer.ensName}</span>}
           </div>

@@ -30,7 +30,7 @@ export default function StorefrontDirectory() {
 
   const storefronts = useMemo(
     () => store?.customers
-      .filter(isPublicStorefrontCustomer)
+      .filter(isDirectoryStorefrontCustomer)
       .map((customer) => buildStorefrontDirectoryItem(store, customer)) || [],
     [store]
   );
@@ -92,7 +92,7 @@ export default function StorefrontDirectory() {
               <Wallet size={16} />
               <span>
                 <strong>Owner wallet</strong>
-                <code>{item.customer.ownerWallet}</code>
+                <code>{isUsableEvmAddress(item.customer.ownerWallet) ? item.customer.ownerWallet : "Not connected"}</code>
               </span>
             </div>
 
@@ -183,7 +183,6 @@ function formatRating(average: number, count: number) {
   return `${average.toFixed(1)} (${count})`;
 }
 
-function isPublicStorefrontCustomer(customer: Customer) {
-  return Boolean(customer.storefront) &&
-    isUsableEvmAddress(customer.ownerWallet);
+function isDirectoryStorefrontCustomer(customer: Customer) {
+  return Boolean(customer.id);
 }
