@@ -4,7 +4,7 @@ import {
   getStorefrontConditionTiles,
   resolveModelPriceDetails
 } from "@/lib/pricing";
-import { isPublicStorefrontCustomer, readStore } from "@/lib/store";
+import { isEnabledStorefrontCustomer, readStore } from "@/lib/store";
 import type { Customer, StorefrontRating, SuperReferralsStore } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function StorefrontDirectoryPage() {
   const store = await readStore();
   const storefronts = store.customers
-    .filter(isPublicStorefrontCustomer)
+    .filter(isEnabledStorefrontCustomer)
     .map((customer) => buildStorefrontDirectoryItem(store, customer));
 
   return (
