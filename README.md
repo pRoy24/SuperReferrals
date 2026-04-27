@@ -141,12 +141,13 @@ cp .env.production.example .env.production
 chmod 600 .env.staging .env.production
 ```
 
-For a project-specific Vercel token, either export `VERCEL_TOKEN` for the current shell or put the token in `.vercel-token` and run `chmod 600 .vercel-token`.
+For a project-specific Vercel token, either export `VERCEL_TOKEN` for the current shell or put the token in `.vercel-token` and run `chmod 600 .vercel-token`. If the project belongs to a different Vercel account than the globally logged-in CLI account, create the token from the account that owns the project and do not use `--use-global-token`. The script defaults to scope `proy24s-projects`; override with `--scope <vercel-account-or-team-slug>` if the owner scope differs.
 
 Preview what would change without touching Vercel:
 
 ```bash
 npm run vercel:env:sync -- staging --dry-run
+npm run vercel:env:staging:local -- --dry-run
 npm run vercel:env:sync -- production --dry-run
 ```
 
@@ -156,6 +157,7 @@ Apply changes only when you intentionally run the script:
 
 ```bash
 npm run vercel:env:staging
+npm run vercel:env:staging:local
 npm run vercel:env:production
 ```
 
