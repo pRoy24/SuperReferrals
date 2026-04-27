@@ -39,6 +39,7 @@ import type {
   PaymentRail,
   SubAccount,
   SuperReferralsStore,
+  GenerationStatus,
   VideoAspectRatio,
   VideoModel
 } from "@/lib/types";
@@ -97,6 +98,13 @@ type RenderFlowState = {
   txHash?: string;
   generationId?: string;
 };
+
+const activeGenerationStatuses = new Set<GenerationStatus>([
+  "PAYMENT_PENDING",
+  "PAYMENT_CONFIRMED",
+  "QUEUED",
+  "PROCESSING"
+]);
 
 const sampleImageUrlBases = new Set([
   "https://images.unsplash.com/photo-1542291026-7eec264c27ff",
@@ -239,6 +247,8 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const [quote, setQuote] = useState<PaymentQuote | null>(null);
   const [autoPolling, setAutoPolling] = useState(false);
   const [renderFlow, setRenderFlow] = useState<RenderFlowState>({ status: "idle", message: "" });
+  const [renderSessionLocked, setRenderSessionLocked] = useState(false);
+  const generationSubmitInFlightRef = useRef(false);
 
   async function load() {
     const response = await fetch("/api/bootstrap", { cache: "no-store" });
@@ -307,11 +317,12 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     : undefined;
   const pollingGenerationIds = useMemo(
     () => userGenerations
-      .filter((generation) => ["QUEUED", "PROCESSING", "PAYMENT_CONFIRMED"].includes(generation.status))
+      .filter((generation) => activeGenerationStatuses.has(generation.status))
       .map((generation) => generation.id),
     [userGenerations]
   );
   const pollingKey = pollingGenerationIds.join("|");
+  const hasActiveUserGenerations = pollingGenerationIds.length > 0;
   const sessionStorageKey = useMemo(
     () => `superreferrals:user-session:${routeAccount?.referrerCode || customer?.id || referrerCode || customerId || "default"}`,
     [routeAccount?.referrerCode, customer?.id, referrerCode, customerId]
@@ -349,6 +360,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     () => previewGenerationPayload(generationForm, connectedSubAccount?.referrerCode || referrerCode || customer?.id || "storefront"),
     [generationForm, connectedSubAccount?.referrerCode, referrerCode, customer?.id]
   );
+  const renderSubmitDisabled = busy === "generation" || renderSessionLocked || imageCount === 0;
 
   function updateGenerationForm(patch: RenderFormPatch) {
     setGenerationForm((current) => ({ ...current, ...patch }));
@@ -374,6 +386,8 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     setGenerationForm(nextForm);
     syncRenderWizardState(nextForm);
     setQuote(null);
+    setRenderSessionLocked(false);
+    generationSubmitInFlightRef.current = false;
     setRenderFlow({ status: "idle", message: "" });
     setMessage("Render form reset.");
   }
@@ -659,12 +673,13 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     if (!pollingKey) {
       return;
     }
+    const activeGenerationIds = pollingKey.split("|").filter(Boolean);
     let cancelled = false;
 
     async function pollActiveGenerations() {
       setAutoPolling(true);
       try {
-        await Promise.all(pollingGenerationIds.map((id) =>
+        await Promise.all(activeGenerationIds.map((id) =>
           fetch(`/api/generations/${id}/sync`, { method: "POST" }).catch(() => null)
         ));
         if (!cancelled) {
@@ -981,9 +996,15 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
 
   async function runGeneration(currency = paymentCurrency) {
     if (!customer) return;
+    if (generationSubmitInFlightRef.current || renderSessionLocked) {
+      setMessage("A render is already pending for this form. Reset the form to start a fresh session before submitting again.");
+      return;
+    }
+    generationSubmitInFlightRef.current = true;
     setBusy("generation");
     setMessage("");
     setRenderFlow({ status: "payment", message: "Preparing payment before starting the render." });
+    let createdGeneration: Generation | undefined;
     try {
       if (renderConditionError) {
         throw new Error(renderConditionError);
@@ -1030,26 +1051,30 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       });
       const data = await assertOk(response);
       await load();
-      const created = data.generation as Generation | undefined;
-      if (!created) {
+      createdGeneration = data.generation as Generation | undefined;
+      if (!createdGeneration) {
         throw new Error("Render API did not return a render task.");
       }
-      if (created?.status === "PAYMENT_PENDING") {
+      setRenderSessionLocked(activeGenerationStatuses.has(createdGeneration.status));
+      if (createdGeneration.status === "PAYMENT_PENDING") {
         updateRenderFlow({
           status: "confirming",
-          message: `Payment is pending for render task ${created.id}. Confirm the payment before the render starts.`,
+          message: `Payment is pending for render task ${createdGeneration.id}. Reset the form to start another session while this task is tracked below.`,
           txHash: paymentTxHash,
-          generationId: created.id
+          generationId: createdGeneration.id
         });
       } else {
         updateRenderFlow({
           status: "started",
-          message: `Payment transaction ${shortHash(paymentTxHash)} accepted and render task ${created?.id || ""} started. Auto-polling is active until completion.`,
+          message: `Payment transaction ${shortHash(paymentTxHash)} accepted and render task ${createdGeneration.id} started. Reset the form to start another session while auto-polling tracks this task below.`,
           txHash: paymentTxHash,
-          generationId: created?.id
+          generationId: createdGeneration.id
         });
       }
     } catch (error) {
+      if (!createdGeneration || !activeGenerationStatuses.has(createdGeneration.status)) {
+        setRenderSessionLocked(false);
+      }
       const errorMessage = formatErrorMessage(error, "Render request failed");
       updateRenderFlow({
         status: "failed",
@@ -1058,6 +1083,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
           : `${errorMessage} Render was not started.`
       });
     } finally {
+      generationSubmitInFlightRef.current = false;
       setBusy("");
     }
   }
@@ -1202,7 +1228,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
                   </button>
                 </div>
                 <button type="button" className="btn small" onClick={resetGenerationForm}>
-                  <Undo2 size={15} /> Reset form
+                  <Undo2 size={15} /> Reset session
                 </button>
               </div>
             </div>
@@ -1252,8 +1278,9 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
                 tokens={selectablePaymentTokens}
                 selectedSymbol={paymentCurrency}
                 settlementToken={settlementToken}
-                disabled={busy === "generation" || imageCount === 0}
+                disabled={renderSubmitDisabled}
                 busy={busy === "generation"}
+                locked={renderSessionLocked}
                 onSelect={setPaymentCurrency}
                 onPay={() => runGeneration(paymentCurrency)}
               />
@@ -1265,8 +1292,12 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
               <a className="btn" href="/feed">
                 <ExternalLink size={16} /> Open feed
               </a>
-              {autoPolling && <span className="badge ok">polling renders</span>}
+              {autoPolling && <span className="badge ok">polling {pollingGenerationIds.length} render{pollingGenerationIds.length === 1 ? "" : "s"}</span>}
+              {!autoPolling && hasActiveUserGenerations && <span className="badge">tracking {pollingGenerationIds.length} active</span>}
             </div>
+            {renderSessionLocked && (
+              <p className="notice">This render session has already been submitted. Reset the session to enable a fresh payment and start another render.</p>
+            )}
             {renderGateError && imageCount > 0 && <p className="notice">{renderGateError}</p>}
             <RenderFlowNotice state={renderFlow} />
           </div>
@@ -1688,6 +1719,7 @@ function PaymentActionControl({
   settlementToken,
   disabled,
   busy,
+  locked,
   onSelect,
   onPay
 }: {
@@ -1696,6 +1728,7 @@ function PaymentActionControl({
   settlementToken: PaymentToken;
   disabled: boolean;
   busy: boolean;
+  locked: boolean;
   onSelect: (symbol: PaymentCurrencySymbol) => void;
   onPay: () => void;
 }) {
@@ -1707,7 +1740,7 @@ function PaymentActionControl({
   return (
     <div className="payment-action-control" title={currencyTooltip}>
       <button className="btn primary payment-action-main" disabled={disabled} onClick={onPay} type="button">
-        <Play size={16} /> {busy ? "Starting..." : `Pay ${selectedSymbol} & start render`}
+        <Play size={16} /> {busy ? "Starting..." : locked ? "Reset session first" : `Pay ${selectedSymbol} & start render`}
       </button>
       <span className="payment-action-currency">
         <select

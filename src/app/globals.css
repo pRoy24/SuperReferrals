@@ -63,6 +63,86 @@ body::before {
   mask-image: radial-gradient(circle at 50% 42%, black 0%, transparent 75%);
 }
 
+.production-hackathon-banner {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  border-bottom: 1px solid rgba(31, 91, 160, 0.16);
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(14px);
+}
+
+.production-hackathon-banner-inner {
+  width: min(1180px, calc(100% - 28px));
+  min-height: 48px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.production-hackathon-banner-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--soft-orange);
+  color: #9a3412;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.production-hackathon-banner-copy {
+  color: var(--muted);
+}
+
+.production-hackathon-banner-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent-cool);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.production-hackathon-banner-close {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(31, 91, 160, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.production-hackathon-banner-close:hover,
+.production-hackathon-banner-close:focus-visible {
+  color: var(--ink);
+  border-color: rgba(37, 99, 235, 0.32);
+  outline: none;
+}
+
+@media (max-width: 680px) {
+  .production-hackathon-banner-inner {
+    min-height: 58px;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    padding: 8px 0;
+  }
+
+  .production-hackathon-banner-close {
+    margin-left: auto;
+  }
+}
+
 button,
 input,
 textarea,

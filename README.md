@@ -8,6 +8,12 @@ Instead of sending buyers through a bare tracking URL, a creator shares a page t
 
 Built for the ETHGlobal Open Agents hackathon, SuperReferrals focuses on practical referral commerce: connect product data, generate campaign videos, route users through a branded referral experience, and keep the operational workflow auditable.
 
+## ETHGlobal Hackathon Judging
+
+For hackathon testing and judging, use the staging website:
+
+[https://super-referrals-git-develop-proy24s-projects.vercel.app](https://super-referrals-git-develop-proy24s-projects.vercel.app)
+
 ## Unique Offering
 
 - Product/admin integration: plug into merchant dashboards, catalog systems, or admin frameworks to pull product images, descriptions, price points, CTA URLs, and campaign metadata.
@@ -177,6 +183,7 @@ For staging previews, Vercel needs a Git event it can deploy. Push a new commit 
 - `<PROVIDER>_MOCKS`: per-provider overrides such as `SAMSAR_MOCKS`, `KEEPERHUB_MOCKS`, `ZERO_G_MOCKS`, `INFT_MOCKS`, `OG_COMPUTE_MOCKS`, and `AXL_MOCKS`.
 - `SAMSAR_API_URL`: production Samsar API origin. Defaults to `https://api.samsar.one`.
 - `SAMSAR_API_KEY`: required for live Samsar generation when a logged-in customer account does not provide its own API key.
+- `NEXT_PUBLIC_HACKATHON_STAGING_URL`: optional production banner link for ETHGlobal hackathon testing. Defaults to the develop staging deployment.
 - `TRANSACTION_NETWORK`, `TRANSACTION_CHAIN_ID`, `TRANSACTION_RPC_URL`: payment and wallet network.
 - `NEXT_PUBLIC_TRANSACTION_NETWORK`, `NEXT_PUBLIC_TRANSACTION_CHAIN_ID`, `NEXT_PUBLIC_TRANSACTION_RPC_URL`: browser wallet prompts.
 - `KEEPERHUB_API_KEY`, `KEEPERHUB_WALLET_ADDRESS`, `KEEPERHUB_PAYMENT_WORKFLOW_ID`: live KeeperHub payment and settlement.
