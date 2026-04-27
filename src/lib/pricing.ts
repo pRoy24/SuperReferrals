@@ -4,6 +4,8 @@ import { getTransactionChainId, settlementTokenForCurrency } from "./payment-tok
 export const CREDIT_UNIT_USD = 0.01;
 export const DEFAULT_CUSTOMER_MULTIPLIER = 1.25;
 type PricingOwner = { pricing?: Partial<CustomerPricing> };
+const allVideoModels: VideoModel[] = ["VEO3.1I2V", "SEEDANCEI2V", "KLING3.0", "RUNWAYML"];
+const allAspectRatios: VideoAspectRatio[] = ["16:9", "9:16"];
 
 export const defaultModelPricingConfigurations: ModelPricingConfiguration[] = [
   {
@@ -118,6 +120,121 @@ export function priceGeneration(customer: Customer, imageCount: number, input?: 
   };
 }
 
+export function getAllowedModelPricingConfigurations(customer?: Customer | null) {
+  const configurations = getModelPricingConfigurations(customer).filter((item) => item.enabled !== false);
+  if (!customer?.storefront?.conditions?.enabled) {
+    return configurations;
+  }
+  const allowedModels = getAllowedStorefrontModels(customer);
+  const allowedAspectRatios = getAllowedStorefrontAspectRatios(customer);
+  return configurations.filter((item) =>
+    allowedModels.includes(item.videoModel) &&
+    allowedAspectRatios.includes(item.aspectRatio)
+  );
+}
+
+export function getAllowedStorefrontModels(customer?: Customer | null): VideoModel[] {
+  if (!customer?.storefront?.conditions?.enabled) {
+    return allVideoModels;
+  }
+  const configured = customer.storefront.conditions.allowedModels;
+  if (!Array.isArray(configured)) {
+    return allVideoModels;
+  }
+  return configured.filter((item): item is VideoModel =>
+    allVideoModels.includes(item as VideoModel)
+  );
+}
+
+export function getAllowedStorefrontAspectRatios(customer?: Customer | null): VideoAspectRatio[] {
+  if (!customer?.storefront?.conditions?.enabled) {
+    return allAspectRatios;
+  }
+  const configured = customer.storefront.conditions.allowedAspectRatios;
+  if (!Array.isArray(configured)) {
+    return allAspectRatios;
+  }
+  return configured.filter((item): item is VideoAspectRatio =>
+    allAspectRatios.includes(item as VideoAspectRatio)
+  );
+}
+
+export function getStorefrontMaxImages(customer?: Customer | null) {
+  if (!customer?.storefront?.conditions?.enabled) {
+    return undefined;
+  }
+  const maxImages = Number(customer.storefront.conditions.maxImages);
+  return Number.isFinite(maxImages) && maxImages > 0 ? Math.floor(maxImages) : undefined;
+}
+
+export function getStorefrontConditionTiles(customer?: Customer | null) {
+  if (!customer?.storefront?.conditions?.enabled) {
+    return ["Standard render rules"];
+  }
+  const allowedModels = getAllowedStorefrontModels(customer);
+  const allowedAspectRatios = getAllowedStorefrontAspectRatios(customer);
+  const tiles = [
+    `Models: ${allowedModels.length ? allowedModels.join(", ") : "none"}`,
+    `Aspects: ${allowedAspectRatios.length ? allowedAspectRatios.join(", ") : "none"}`
+  ];
+  const maxImages = getStorefrontMaxImages(customer);
+  if (maxImages) {
+    tiles.push(`Max ${maxImages} image${maxImages === 1 ? "" : "s"}`);
+  }
+  return tiles;
+}
+
+export function getRenderConditionError(
+  customer: Customer | null | undefined,
+  input: {
+    imageCount?: number;
+    videoModel?: VideoModel;
+    aspectRatio?: VideoAspectRatio;
+  }
+) {
+  if (!customer) {
+    return "Customer store is not available";
+  }
+  const imageCount = Number(input.imageCount || 0);
+  const maxImages = getStorefrontMaxImages(customer);
+  if (maxImages && imageCount > maxImages) {
+    return `This storefront allows up to ${maxImages} image${maxImages === 1 ? "" : "s"} per render.`;
+  }
+  if (input.videoModel && !getAllowedStorefrontModels(customer).includes(input.videoModel)) {
+    return `${input.videoModel} is not enabled for this storefront.`;
+  }
+  if (input.aspectRatio && !getAllowedStorefrontAspectRatios(customer).includes(input.aspectRatio)) {
+    return `${input.aspectRatio} is not enabled for this storefront.`;
+  }
+  if (input.videoModel && input.aspectRatio) {
+    const pricing = getAllowedModelPricingConfigurations(customer).find((item) =>
+      item.videoModel === input.videoModel &&
+      item.aspectRatio === input.aspectRatio
+    );
+    if (!pricing) {
+      return `${input.videoModel} ${input.aspectRatio} is not priced or enabled for this storefront.`;
+    }
+  }
+  if (getAllowedModelPricingConfigurations(customer).length === 0) {
+    return "This storefront has no enabled render models.";
+  }
+  return "";
+}
+
+export function assertRenderConditions(
+  customer: Customer,
+  input: {
+    imageCount?: number;
+    videoModel?: VideoModel;
+    aspectRatio?: VideoAspectRatio;
+  }
+) {
+  const error = getRenderConditionError(customer, input);
+  if (error) {
+    throw new Error(error);
+  }
+}
+
 export function getModelPricingConfigurations(customer?: Customer | null) {
   const configured = customer?.pricing?.modelConfigurations;
   if (!Array.isArray(configured) || configured.length === 0) {
@@ -148,8 +265,7 @@ export function resolveModelPricing(
   if (!videoModel || !aspectRatio) {
     return null;
   }
-  return getModelPricingConfigurations(customer).find((item) =>
-    item.enabled !== false &&
+  return getAllowedModelPricingConfigurations(customer).find((item) =>
     item.videoModel === videoModel &&
     item.aspectRatio === aspectRatio
   ) || null;

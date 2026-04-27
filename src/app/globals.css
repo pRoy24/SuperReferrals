@@ -552,6 +552,207 @@ h3 {
   grid-template-columns: minmax(300px, 0.85fr) minmax(420px, 1.35fr);
 }
 
+.landing-hero-actions,
+.storefront-landing-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.landing-hero-actions {
+  justify-content: flex-end;
+}
+
+.storefront-landing-meta {
+  margin-top: 12px;
+}
+
+.storefront-landing-meta span {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(31, 91, 160, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.76);
+  color: #475569;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.storefront-directory {
+  max-width: 1220px;
+}
+
+.storefront-search-strip {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--muted);
+  padding: 10px 14px;
+  margin-bottom: 18px;
+  box-shadow: var(--shadow);
+  font-weight: 800;
+}
+
+.storefront-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.storefront-card {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle at top right, rgba(255, 237, 213, 0.74), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 251, 255, 0.92));
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+
+.storefront-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.storefront-card h2 {
+  margin-top: 4px;
+  font-size: clamp(22px, 3vw, 34px);
+  line-height: 1.04;
+  overflow-wrap: anywhere;
+}
+
+.route-code {
+  margin: 6px 0 0;
+  color: var(--accent-cool);
+}
+
+.storefront-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-cool));
+  color: #fff;
+}
+
+.storefront-description {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.storefront-owner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1px solid rgba(31, 91, 160, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 10px;
+}
+
+.storefront-owner svg {
+  flex: 0 0 auto;
+  color: var(--accent-cool);
+  margin-top: 2px;
+}
+
+.storefront-owner strong,
+.storefront-owner code {
+  display: block;
+}
+
+.storefront-owner strong {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.storefront-owner code {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.storefront-meta-row,
+.storefront-tags,
+.storefront-condition-tiles {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.storefront-meta-row span,
+.storefront-tags span,
+.storefront-condition-tiles span {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(31, 91, 160, 0.14);
+  border-radius: 999px;
+  background: #fff;
+  color: #475569;
+  padding: 6px 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.storefront-condition-tiles span {
+  color: #1d4ed8;
+  background: var(--soft-blue);
+  border-color: rgba(37, 99, 235, 0.18);
+}
+
+.storefront-condition-tiles span.price {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: rgba(21, 128, 61, 0.18);
+}
+
+.storefront-tags span {
+  color: #9a3412;
+  background: var(--soft-orange);
+  border-color: rgba(249, 115, 22, 0.18);
+}
+
+.storefront-route-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.storefront-route-row a {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(31, 91, 160, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #1d4ed8;
+  padding: 5px 9px;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .stack {
   display: grid;
   gap: 18px;
@@ -806,6 +1007,50 @@ button.item {
   margin: 6px 0 8px;
 }
 
+.rating-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  border: 1px solid rgba(249, 115, 22, 0.2);
+  border-radius: 12px;
+  background: rgba(255, 247, 237, 0.72);
+  padding: 12px;
+}
+
+.rating-form-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.rating-stars {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.rating-stars button {
+  width: 34px;
+  min-height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(249, 115, 22, 0.2);
+  border-radius: 8px;
+  background: #fff;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+
+.rating-stars button.active {
+  color: var(--accent);
+  background: #fff7ed;
+}
+
+.rating-stars button.active svg {
+  fill: currentColor;
+}
+
 .payment-summary {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -998,6 +1243,52 @@ button.item {
   display: grid;
   gap: 10px;
   margin-top: 14px;
+}
+
+.render-conditions-editor {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  border: 1px solid rgba(31, 91, 160, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 12px;
+}
+
+.conditions-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.55fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.condition-chip-grid {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.condition-chip-grid.compact {
+  max-width: 260px;
+}
+
+.toggle-chip {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(31, 91, 160, 0.14);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #475569;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.toggle-chip input {
+  width: 16px;
+  min-height: 16px;
 }
 
 .pricing-row {
@@ -1622,6 +1913,7 @@ button.item {
 
   .grid,
   .public-grid,
+  .storefront-grid,
   .inft-grid,
   .agent-town-grid,
   .landing-split,
@@ -1663,6 +1955,7 @@ button.item {
   .amount-grid,
   .wizard-image-grid,
   .wizard-key-value,
+  .conditions-editor-grid,
   .focus-area-grid {
     grid-template-columns: 1fr;
   }
@@ -1729,6 +2022,10 @@ button.item {
   .pricing-row {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .landing-hero-actions {
+    justify-content: flex-start;
   }
 
   .feed-shell {

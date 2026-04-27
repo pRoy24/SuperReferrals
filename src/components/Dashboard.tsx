@@ -12,6 +12,7 @@ import {
   Save,
   ShieldCheck,
   Sparkles,
+  Store,
   Undo2,
   Users,
   Zap
@@ -27,9 +28,11 @@ import {
   getModelPricingConfigurations,
   resolveModelPriceDetails
 } from "@/lib/pricing";
-import type { ModelPricingConfiguration, PaymentCurrencySymbol, SuperReferralsStore } from "@/lib/types";
+import type { ModelPricingConfiguration, PaymentCurrencySymbol, SuperReferralsStore, VideoAspectRatio, VideoModel } from "@/lib/types";
 
 const processorCreditAmounts = [10, 25, 50, 100];
+const conditionModelOptions: VideoModel[] = ["RUNWAYML", "VEO3.1I2V", "SEEDANCEI2V", "KLING3.0"];
+const conditionAspectOptions: VideoAspectRatio[] = ["9:16", "16:9"];
 
 export default function Dashboard() {
   const [store, setStore] = useState<SuperReferralsStore | null>(null);
@@ -58,6 +61,15 @@ export default function Dashboard() {
     creditUnitUsd: CREDIT_UNIT_USD,
     referrerBaseUrl: "http://localhost:3000",
     ensName: "demo.eth",
+    storefrontDescription: "Product video storefront for SuperReferrals render tasks.",
+    storefrontWebsiteUrl: "",
+    storefrontSupportEmail: "",
+    storefrontCategory: "Product videos",
+    storefrontTags: "launch, product, referral",
+    conditionalsEnabled: false,
+    allowedModels: conditionModelOptions,
+    allowedAspectRatios: conditionAspectOptions,
+    maxImages: 6,
     modelConfigurations: defaultModelPricingConfigurations
   });
 
@@ -85,6 +97,19 @@ export default function Dashboard() {
       creditUnitUsd: getCreditUnitUsd(customer),
       referrerBaseUrl: customer.referrerBaseUrl,
       ensName: customer.ensName || "",
+      storefrontDescription: customer.storefront?.description || "",
+      storefrontWebsiteUrl: customer.storefront?.websiteUrl || "",
+      storefrontSupportEmail: customer.storefront?.supportEmail || "",
+      storefrontCategory: customer.storefront?.category || "",
+      storefrontTags: customer.storefront?.tags?.join(", ") || "",
+      conditionalsEnabled: customer.storefront?.conditions?.enabled || false,
+      allowedModels: customer.storefront?.conditions?.allowedModels?.length
+        ? customer.storefront.conditions.allowedModels
+        : conditionModelOptions,
+      allowedAspectRatios: customer.storefront?.conditions?.allowedAspectRatios?.length
+        ? customer.storefront.conditions.allowedAspectRatios
+        : conditionAspectOptions,
+      maxImages: customer.storefront?.conditions?.maxImages || 6,
       modelConfigurations: getModelPricingConfigurations(customer)
     });
   }, [store]);
@@ -97,8 +122,10 @@ export default function Dashboard() {
   const transactionChain = getTransactionChainConfig();
   const settlementToken = settlementTokenForCurrency("USDC", transactionChain.id) || getPaymentTokens(transactionChain.id)[0];
   const customerLanding = useMemo(() => {
-    const seedAccount = customer ? store?.subAccounts.find((account) => account.customerId === customer.id) : null;
-    return seedAccount ? `${customer?.referrerBaseUrl}/r/${seedAccount.referrerCode}` : "";
+    const seedAccount = customer
+      ? store?.subAccounts.find((account) => account.customerId === customer.id)
+      : null;
+    return seedAccount ? `/r/${seedAccount.referrerCode}` : customer ? `/storefronts/${customer.id}` : "";
   }, [customer, store?.subAccounts]);
 
   function updatePricingRow(id: string, patch: Partial<ModelPricingConfiguration>) {
@@ -107,6 +134,24 @@ export default function Dashboard() {
       modelConfigurations: current.modelConfigurations.map((item) =>
         item.id === id ? { ...item, ...patch } : item
       )
+    }));
+  }
+
+  function toggleAllowedModel(model: VideoModel) {
+    setCustomerForm((current) => ({
+      ...current,
+      allowedModels: current.allowedModels.includes(model)
+        ? current.allowedModels.filter((item) => item !== model)
+        : [...current.allowedModels, model]
+    }));
+  }
+
+  function toggleAllowedAspectRatio(aspectRatio: VideoAspectRatio) {
+    setCustomerForm((current) => ({
+      ...current,
+      allowedAspectRatios: current.allowedAspectRatios.includes(aspectRatio)
+        ? current.allowedAspectRatios.filter((item) => item !== aspectRatio)
+        : [...current.allowedAspectRatios, aspectRatio]
     }));
   }
 
@@ -129,6 +174,19 @@ export default function Dashboard() {
           ownerWallet: customerForm.ownerWallet,
           referrerBaseUrl: customerForm.referrerBaseUrl,
           ensName: customerForm.ensName,
+          storefront: {
+            description: customerForm.storefrontDescription,
+            websiteUrl: customerForm.storefrontWebsiteUrl,
+            supportEmail: customerForm.storefrontSupportEmail,
+            category: customerForm.storefrontCategory,
+            tags: customerForm.storefrontTags,
+            conditions: {
+              enabled: customerForm.conditionalsEnabled,
+              allowedModels: customerForm.allowedModels,
+              allowedAspectRatios: customerForm.allowedAspectRatios,
+              maxImages: Number(customerForm.maxImages) || undefined
+            }
+          },
           pricing: {
             currency: "USDC" as PaymentCurrencySymbol,
             pricePerImageUsd: Number(enabledDetails.pricePerSecondUsd * (enabledPricing?.maxSecondsPerImage || 1)),
@@ -256,6 +314,7 @@ export default function Dashboard() {
           <a className="nav-item" href="#usdc-pricing"><ShieldCheck size={16} /> USDC pricing</a>
           <a className="nav-item" href="#render-history"><Bot size={16} /> Render history</a>
           <a className="nav-item" href="#agent-town"><Network size={16} /> Agent Town</a>
+          <a className="nav-item" href="/storefronts"><Store size={16} /> Storefront directory</a>
         </nav>
       </aside>
 
@@ -334,12 +393,21 @@ export default function Dashboard() {
                 <TextField label="Failure refund bps" type="number" value={customerForm.refundOnFailureBps} onChange={(refundOnFailureBps) => setCustomerForm({ ...customerForm, refundOnFailureBps: Number(refundOnFailureBps) })} />
                 <TextField label="ENS name" value={customerForm.ensName} onChange={(ensName) => setCustomerForm({ ...customerForm, ensName })} />
                 <TextField label="Referrer base URL" value={customerForm.referrerBaseUrl} onChange={(referrerBaseUrl) => setCustomerForm({ ...customerForm, referrerBaseUrl })} full />
+                <TextField label="Storefront category" value={customerForm.storefrontCategory} onChange={(storefrontCategory) => setCustomerForm({ ...customerForm, storefrontCategory })} />
+                <TextField label="Storefront website URL" value={customerForm.storefrontWebsiteUrl} onChange={(storefrontWebsiteUrl) => setCustomerForm({ ...customerForm, storefrontWebsiteUrl })} />
+                <TextField label="Support email" value={customerForm.storefrontSupportEmail} onChange={(storefrontSupportEmail) => setCustomerForm({ ...customerForm, storefrontSupportEmail })} />
+                <TextField label="Storefront tags" value={customerForm.storefrontTags} onChange={(storefrontTags) => setCustomerForm({ ...customerForm, storefrontTags })} />
+                <div className="field full">
+                  <label>Storefront description</label>
+                  <textarea value={customerForm.storefrontDescription} onChange={(event) => setCustomerForm({ ...customerForm, storefrontDescription: event.target.value })} />
+                </div>
               </div>
               <div className="button-row">
                 <button className="btn primary" onClick={saveCustomer} disabled={busy === "customer"}>
                   <Save size={16} /> Save setup
                 </button>
                 {customerLanding && <a className="btn" href={customerLanding}><ExternalLink size={16} /> Open user landing</a>}
+                <a className="btn" href="/storefronts"><Store size={16} /> Directory</a>
               </div>
             </div>
           </section>
@@ -362,6 +430,64 @@ export default function Dashboard() {
                   <div className="readonly-value">{customerForm.creditUnitUsd.toFixed(3)} USDC / credit</div>
                 </div>
               </div>
+
+              <div className="render-conditions-editor">
+                <div className="item-title">
+                  <div>
+                    <strong>Storefront render conditions</strong>
+                    <p className="subtle">Restrict which render choices are available on this storefront route.</p>
+                  </div>
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={customerForm.conditionalsEnabled}
+                      onChange={(event) => setCustomerForm({ ...customerForm, conditionalsEnabled: event.target.checked })}
+                    />
+                    Enabled
+                  </label>
+                </div>
+                {customerForm.conditionalsEnabled && (
+                  <div className="conditions-editor-grid">
+                    <div className="field full">
+                      <label>Enabled models</label>
+                      <div className="condition-chip-grid">
+                        {conditionModelOptions.map((model) => (
+                          <label className="toggle-chip" key={model}>
+                            <input
+                              type="checkbox"
+                              checked={customerForm.allowedModels.includes(model)}
+                              onChange={() => toggleAllowedModel(model)}
+                            />
+                            {model}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="field">
+                      <label>Enabled aspect ratios</label>
+                      <div className="condition-chip-grid compact">
+                        {conditionAspectOptions.map((aspectRatio) => (
+                          <label className="toggle-chip" key={aspectRatio}>
+                            <input
+                              type="checkbox"
+                              checked={customerForm.allowedAspectRatios.includes(aspectRatio)}
+                              onChange={() => toggleAllowedAspectRatio(aspectRatio)}
+                            />
+                            {aspectRatio}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <TextField
+                      label="Max images per render"
+                      type="number"
+                      value={customerForm.maxImages}
+                      onChange={(maxImages) => setCustomerForm({ ...customerForm, maxImages: Number(maxImages) })}
+                    />
+                  </div>
+                )}
+              </div>
+
               <div className="pricing-table">
                 {customerForm.modelConfigurations.map((config) => {
                   const details = resolveModelPriceDetails(

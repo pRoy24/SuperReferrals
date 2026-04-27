@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Store,
 } from "lucide-react";
 import { readStore } from "@/lib/store";
 
@@ -56,6 +57,9 @@ export default async function Home() {
           <a className="btn ghost" href="/feed" target="_blank" rel="noreferrer">
             <Clapperboard size={16} /> Feed
           </a>
+          <a className="btn ghost" href="/storefronts" target="_blank" rel="noreferrer">
+            <Store size={16} /> Storefronts
+          </a>
           <a className="btn primary" href="/dashboard" target="_blank" rel="noreferrer">
             <ExternalLink size={16} /> Open Console
           </a>
@@ -77,6 +81,9 @@ export default async function Home() {
           <div className="landing-actions" aria-label="Open project routes">
             <a className="btn primary large" href={referrerHref} target="_blank" rel="noreferrer">
               <Sparkles size={18} /> Launch Demo Campaign
+            </a>
+            <a className="btn large" href="/storefronts" target="_blank" rel="noreferrer">
+              <Store size={18} /> Browse Storefronts
             </a>
             <a className="btn large" href="/dashboard" target="_blank" rel="noreferrer">
               <Network size={18} /> Open Admin Console
@@ -159,7 +166,7 @@ export default async function Home() {
         </div>
         <div className="route-grid">
           <RouteButton href="/dashboard" title="Customer console" copy="Configure product context, pricing, campaign automation, credits, and render history." />
-          <RouteButton href={referrerHref} title="Demo referral page" copy="Open the customer-facing campaign and generate a product video." />
+          <RouteButton href="/storefronts" title="Storefront directory" copy="Choose from created storefronts, connect a wallet profile, and generate a product video." />
           <RouteButton href="/feed" title="Generated video feed" copy="Browse completed referral videos and social actions." />
           <RouteButton href={inftHref} title="Output viewer" copy="Inspect a completed render when one exists, otherwise opens the feed." />
         </div>

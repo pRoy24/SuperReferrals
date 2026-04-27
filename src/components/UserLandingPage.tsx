@@ -1,7 +1,8 @@
 "use client";
 
-import { Bot, CircleDollarSign, Code2, ExternalLink, ListChecks, Play, Plus, RefreshCw, ShieldCheck, Trash2, Wallet } from "lucide-react";
+import { Bot, CircleDollarSign, Code2, ExternalLink, ListChecks, Play, Plus, RefreshCw, ShieldCheck, Store, Trash2, Wallet } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import StorefrontRatingForm from "@/components/StorefrontRatingForm";
 import {
   findPaymentToken,
   getPaymentTokens,
@@ -11,7 +12,14 @@ import {
   type PaymentToken,
   type TransactionChainConfig
 } from "@/lib/payment-tokens";
-import { estimateDurationSeconds, getModelPricingConfigurations, resolveModelPriceDetails } from "@/lib/pricing";
+import {
+  estimateDurationSeconds,
+  getAllowedModelPricingConfigurations,
+  getRenderConditionError,
+  getStorefrontConditionTiles,
+  getStorefrontMaxImages,
+  resolveModelPriceDetails
+} from "@/lib/pricing";
 import type {
   Customer,
   Generation,
@@ -129,7 +137,7 @@ const starterFooterMetadata = JSON.stringify([
 const starterCampaignMetadata = JSON.stringify({ title: "New launch", campaign: "customer-store" }, null, 2);
 const defaultOutroFocusArea = JSON.stringify({ x: 680, y: 296, width: 432, height: 432 }, null, 2);
 
-export default function UserLandingPage({ referrerCode }: { referrerCode: string }) {
+export default function UserLandingPage({ referrerCode = "", customerId = "" }: { referrerCode?: string; customerId?: string }) {
   const [store, setStore] = useState<SuperReferralsStore | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
@@ -184,12 +192,16 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
   );
   const customer = useMemo(() => {
     if (!store) return null;
-    return routeAccount
-      ? store.customers.find((item) => item.id === routeAccount.customerId) || store.customers[0]
-      : store.customers[0];
-  }, [store, routeAccount]);
+    if (routeAccount) {
+      return store.customers.find((item) => item.id === routeAccount.customerId) || null;
+    }
+    if (customerId) {
+      return store.customers.find((item) => item.id === customerId) || null;
+    }
+    return store.customers[0] || null;
+  }, [store, routeAccount, customerId]);
   const pricingOptions = useMemo(
-    () => getModelPricingConfigurations(customer).filter((item) => item.enabled !== false),
+    () => getAllowedModelPricingConfigurations(customer),
     [customer]
   );
   const selectedPricing = pricingOptions.find((item) =>
@@ -205,6 +217,13 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
     [store, customer, walletAddress]
   );
   const imageCount = countImageInputs(generationForm.imageUrls);
+  const maxImages = getStorefrontMaxImages(customer);
+  const conditionTiles = getStorefrontConditionTiles(customer);
+  const renderConditionError = getRenderConditionError(customer, {
+    imageCount,
+    videoModel: generationForm.videoModel,
+    aspectRatio: generationForm.aspectRatio
+  });
   const selectedPricingDetails = resolveModelPriceDetails(customer, selectedPricing);
   const estimatedDurationSeconds = estimateDurationSeconds(imageCount, selectedPricing);
   const userGenerations = connectedSubAccount
@@ -220,7 +239,10 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
     [userGenerations]
   );
   const pollingKey = pollingGenerationIds.join("|");
-  const sessionStorageKey = useMemo(() => `superreferrals:user-session:${referrerCode}`, [referrerCode]);
+  const sessionStorageKey = useMemo(
+    () => `superreferrals:user-session:${routeAccount?.referrerCode || customer?.id || referrerCode || customerId || "default"}`,
+    [routeAccount?.referrerCode, customer?.id, referrerCode, customerId]
+  );
   const transactionChain = useMemo(
     () => getTransactionChainConfig(normalizeTransactionChainIdForEnvironment(customer?.pricing.chainId)),
     [customer?.pricing.chainId]
@@ -237,8 +259,8 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
   );
   const hasWalletAddress = Boolean(walletAddress.trim());
   const generationPayloadPreview = useMemo(
-    () => previewGenerationPayload(generationForm, connectedSubAccount?.referrerCode || referrerCode),
-    [generationForm, connectedSubAccount?.referrerCode, referrerCode]
+    () => previewGenerationPayload(generationForm, connectedSubAccount?.referrerCode || referrerCode || customer?.id || "storefront"),
+    [generationForm, connectedSubAccount?.referrerCode, referrerCode, customer?.id]
   );
 
   function updateGenerationForm(patch: RenderFormPatch) {
@@ -286,6 +308,10 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
   }
 
   function addImageWizardItem() {
+    if (maxImages && imageWizardItems.length >= maxImages) {
+      setMessage(`This storefront allows up to ${maxImages} image${maxImages === 1 ? "" : "s"} per render.`);
+      return;
+    }
     const nextImages = [...imageWizardItems, { image_url: "", title: "", image_text: "" }];
     const nextFooters = [...footerWizardItems, { url: "", title: "" }];
     setFooterWizardItems(nextFooters);
@@ -567,6 +593,9 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
     setBusy("quote");
     setMessage("");
     try {
+      if (renderConditionError) {
+        throw new Error(renderConditionError);
+      }
       const account = await ensureWalletSubAccount();
       const quoted = await requestQuote(account);
       setMessage(`${quoted.totalUsd.toFixed(2)} ${quoted.settlementCurrency || "USDC"} quote created for payment in ${quoted.paymentCurrency || paymentCurrency} on ${transactionChain.name}.`);
@@ -709,6 +738,9 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
     setMessage("");
     setRenderFlow({ status: "payment", message: "Preparing payment before starting the render." });
     try {
+      if (renderConditionError) {
+        throw new Error(renderConditionError);
+      }
       const account = await ensureWalletSubAccount();
       const activeQuote = quote || await requestQuote(account);
       const paymentTxHash = await executePaymentForRender(activeQuote, account);
@@ -810,12 +842,22 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
           <div className="eyebrow">{customer.name}</div>
           <h1>Generate a product video</h1>
           <p className="subtle">
-            Connect your wallet, choose a render configuration, pay the store price, and track your previous render tasks.
+            {customer.storefront?.description || "Connect your wallet, choose a render configuration, pay the store price, and track your previous render tasks."}
           </p>
+          <div className="storefront-landing-meta">
+            <span><Wallet size={15} /> owner {shortWallet(customer.ownerWallet)}</span>
+            {customer.storefront?.category && <span><Store size={15} /> {customer.storefront.category}</span>}
+            {customer.ensName && <span>{customer.ensName}</span>}
+          </div>
         </div>
-        <button className="btn" onClick={() => load()} title="Refresh data">
-          <RefreshCw size={16} /> Refresh
-        </button>
+        <div className="landing-hero-actions">
+          <a className="btn" href="/storefronts">
+            <Store size={16} /> Directory
+          </a>
+          <button className="btn" onClick={() => load()} title="Refresh data">
+            <RefreshCw size={16} /> Refresh
+          </button>
+        </div>
       </section>
 
       {message && <p className="notice">{message}</p>}
@@ -853,6 +895,9 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
               <CircleDollarSign size={18} />
             </div>
             <div className="list">
+              <div className="storefront-condition-tiles">
+                {conditionTiles.map((tile) => <span key={tile}>{tile}</span>)}
+              </div>
               {pricingOptions.map((item) => (
                 <PricingOption
                   item={item}
@@ -862,6 +907,7 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
                   onSelect={() => setGenerationForm({ ...generationForm, videoModel: item.videoModel, aspectRatio: item.aspectRatio })}
                 />
               ))}
+              {pricingOptions.length === 0 && <p className="subtle">This storefront has no enabled pricing options.</p>}
             </div>
           </div>
         </section>
@@ -938,10 +984,10 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
               selectedPricingDetails={selectedPricingDetails}
             />
             <div className="button-row">
-              <button className="btn" onClick={createQuote} disabled={busy === "quote" || imageCount === 0}>
+              <button className="btn" onClick={createQuote} disabled={busy === "quote" || imageCount === 0 || Boolean(renderConditionError)}>
                 <CircleDollarSign size={16} /> Quote {paymentCurrency}
               </button>
-              <button className="btn primary" onClick={runGeneration} disabled={busy === "generation" || imageCount === 0}>
+              <button className="btn primary" onClick={runGeneration} disabled={busy === "generation" || imageCount === 0 || Boolean(renderConditionError)}>
                 <Play size={16} /> Pay {paymentCurrency} & start render
               </button>
               {quote?.checkoutUrl && quote.paymentRail === "uniswap" && (
@@ -954,6 +1000,7 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
               </a>
               {autoPolling && <span className="badge ok">polling renders</span>}
             </div>
+            {renderConditionError && imageCount > 0 && <p className="notice">{renderConditionError}</p>}
             <RenderFlowNotice state={renderFlow} />
           </div>
 
@@ -966,7 +1013,13 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
               {!connectedSubAccount && <p className="subtle">Connect your wallet to view previous render tasks.</p>}
               {connectedSubAccount && userGenerations.length === 0 && <p className="subtle">No render tasks for this wallet yet.</p>}
               {userGenerations.map((generation) => (
-                <GenerationItem key={generation.id} generation={generation} busy={busy === generation.id} onSync={() => syncGeneration(generation.id)} />
+                <GenerationItem
+                  key={generation.id}
+                  generation={generation}
+                  busy={busy === generation.id}
+                  wallet={connectedSubAccount?.wallet || walletAddress}
+                  onSync={() => syncGeneration(generation.id)}
+                />
               ))}
             </div>
           </div>
@@ -1507,7 +1560,17 @@ function resolveUserPaymentRail(paymentToken: PaymentToken, settlementToken: Pay
   return paymentToken.address.toLowerCase() === settlementToken.address.toLowerCase() ? "direct" : "keeperhub";
 }
 
-function GenerationItem({ generation, busy, onSync }: { generation: Generation; busy: boolean; onSync: () => void }) {
+function GenerationItem({
+  generation,
+  busy,
+  wallet,
+  onSync
+}: {
+  generation: Generation;
+  busy: boolean;
+  wallet?: string;
+  onSync: () => void;
+}) {
   const badgeClass = generation.status === "COMPLETED" ? "badge ok" : generation.status === "FAILED" ? "badge fail" : "badge";
   return (
     <div className="item">
@@ -1533,6 +1596,17 @@ function GenerationItem({ generation, busy, onSync }: { generation: Generation; 
         {generation.inftId && <a className="btn" href={`/inft/${generation.inftId}`}><ExternalLink size={16} /> Open INFT</a>}
         {generation.feed?.published && generation.status === "COMPLETED" && <a className="btn" href="/feed"><ExternalLink size={16} /> View in feed</a>}
       </div>
+      {generation.status === "COMPLETED" && (
+        <StorefrontRatingForm
+          customerId={generation.customerId}
+          subAccountId={generation.subAccountId}
+          generationId={generation.id}
+          inftId={generation.inftId}
+          wallet={wallet}
+          operation="video_render"
+          title="Rate this storefront after your render"
+        />
+      )}
     </div>
   );
 }

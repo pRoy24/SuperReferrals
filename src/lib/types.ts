@@ -40,6 +40,22 @@ export interface CustomerPricing {
   settlementTokenAddress?: string;
 }
 
+export interface CustomerStorefrontDetails {
+  description?: string;
+  websiteUrl?: string;
+  supportEmail?: string;
+  category?: string;
+  tags?: string[];
+  conditions?: CustomerStorefrontConditions;
+}
+
+export interface CustomerStorefrontConditions {
+  enabled: boolean;
+  allowedModels?: VideoModel[];
+  allowedAspectRatios?: VideoAspectRatio[];
+  maxImages?: number;
+}
+
 export interface Customer {
   id: string;
   name: string;
@@ -48,6 +64,7 @@ export interface Customer {
   pricing: CustomerPricing;
   referrerBaseUrl: string;
   ensName?: string;
+  storefront?: CustomerStorefrontDetails;
   subscription: {
     status: "not_started" | "active" | "paused";
     streamId?: string;
@@ -322,6 +339,20 @@ export interface INFTRecord {
   updatedAt: string;
 }
 
+export interface StorefrontRating {
+  id: string;
+  customerId: string;
+  subAccountId?: string;
+  generationId?: string;
+  inftId?: string;
+  operation?: string;
+  wallet?: string;
+  score: number;
+  comment?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type ZeroGPillar = "chain" | "storage" | "da" | "compute" | "service_marketplace";
 
 export type AgentJobType =
@@ -440,12 +471,13 @@ export interface AgentJob {
 }
 
 export interface SuperReferralsStore {
-  version: 1 | 2 | 3;
+  version: 1 | 2 | 3 | 4;
   customers: Customer[];
   subAccounts: SubAccount[];
   quotes: PaymentQuote[];
   generations: Generation[];
   infts: INFTRecord[];
+  storefrontRatings: StorefrontRating[];
   feedLikes: FeedLike[];
   feedComments: FeedComment[];
   feedViews: FeedView[];

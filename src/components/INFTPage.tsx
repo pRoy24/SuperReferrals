@@ -2,6 +2,7 @@
 
 import { Ban, Bot, Cable, Clapperboard, Copy, Download, ImagePlus, Languages, Link2, MessageSquare, RefreshCw, Scissors, Send, Share2, Wallet } from "lucide-react";
 import { useState } from "react";
+import StorefrontRatingForm from "@/components/StorefrontRatingForm";
 import type { INFTRecord } from "@/lib/types";
 
 export default function INFTPage({ inft }: { inft: INFTRecord }) {
@@ -14,6 +15,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [language, setLanguage] = useState("es");
   const [outroImageUrl, setOutroImageUrl] = useState("");
   const [shareMessage, setShareMessage] = useState("");
+  const [lastVideoOperation, setLastVideoOperation] = useState("");
   const publicInftPath = `/inft/${inft.id}`;
 
   function getPublicInftUrl() {
@@ -89,6 +91,9 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       });
       const data = await parseResponse(response);
       setActionResult(JSON.stringify(data.result, null, 2));
+      if (action !== "message_peer") {
+        setLastVideoOperation(action);
+      }
     } catch (error) {
       setActionResult(error instanceof Error ? error.message : "Action failed");
     } finally {
@@ -181,6 +186,17 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
               </button>
             </div>
             {actionResult && <pre className="item mono">{actionResult}</pre>}
+            {lastVideoOperation && (
+              <StorefrontRatingForm
+                customerId={inft.customerId}
+                subAccountId={inft.subAccountId}
+                generationId={inft.generationId}
+                inftId={inft.id}
+                wallet={inft.ownerWallet}
+                operation={lastVideoOperation}
+                title="Rate this storefront after the operation"
+              />
+            )}
           </div>
         </section>
 

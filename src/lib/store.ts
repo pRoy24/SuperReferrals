@@ -9,9 +9,11 @@ import type {
   AgentProfile,
   AgentTownEvent,
   Customer,
+  CustomerStorefrontConditions,
   Generation,
   INFTRecord,
   PaymentQuote,
+  StorefrontRating,
   SubAccount,
   SuperReferralsStore
 } from "./types";
@@ -33,12 +35,13 @@ function dataPath() {
 
 export function emptyStore(): SuperReferralsStore {
   return {
-    version: 3,
+    version: 4,
     customers: [],
     subAccounts: [],
     quotes: [],
     generations: [],
     infts: [],
+    storefrontRatings: [],
     feedLikes: [],
     feedComments: [],
     feedViews: [],
@@ -53,7 +56,7 @@ export async function readStore(): Promise<SuperReferralsStore> {
     try {
       const raw = await fs.readFile(dataPath(), "utf8");
       const parsed = JSON.parse(raw) as SuperReferralsStore;
-      const store = { ...emptyStore(), ...parsed, version: parsed.version || 3 };
+      const store = { ...emptyStore(), ...parsed, version: 4 as const };
       const normalized = normalizeStoreForRuntime(store);
       if (normalized.changed) {
         await writeStore(normalized.store);
@@ -209,6 +212,7 @@ export function upsertCustomer(store: SuperReferralsStore, input: Partial<Custom
     },
     referrerBaseUrl: (input.referrerBaseUrl || existing?.referrerBaseUrl || appBaseUrl()).replace(/\/$/, ""),
     ensName: input.ensName ?? existing?.ensName,
+    storefront: normalizeStorefrontDetails(input.storefront, existing?.storefront),
     subscription: {
       status: input.subscription?.status || existing?.subscription.status || "active",
       streamId: input.subscription?.streamId || existing?.subscription.streamId,
@@ -281,6 +285,47 @@ export function addINFT(store: SuperReferralsStore, inft: INFTRecord) {
   return inft;
 }
 
+export function upsertStorefrontRating(store: SuperReferralsStore, input: {
+  customerId: string;
+  subAccountId?: string;
+  generationId?: string;
+  inftId?: string;
+  operation?: string;
+  wallet?: string;
+  score: number;
+  comment?: string;
+}) {
+  const timestamp = nowIso();
+  const normalizedWallet = input.wallet ? normalizeWallet(input.wallet) : undefined;
+  const normalizedOperation = input.operation?.trim() || undefined;
+  const existing = store.storefrontRatings.find((rating) =>
+    rating.customerId === input.customerId &&
+    (rating.wallet || "") === (normalizedWallet || "") &&
+    (rating.generationId || "") === (input.generationId || "") &&
+    (rating.inftId || "") === (input.inftId || "") &&
+    (rating.operation || "") === (normalizedOperation || "")
+  );
+  const next: StorefrontRating = {
+    id: existing?.id || createId("rating"),
+    customerId: input.customerId,
+    subAccountId: input.subAccountId,
+    generationId: input.generationId,
+    inftId: input.inftId,
+    operation: normalizedOperation,
+    wallet: normalizedWallet,
+    score: input.score,
+    comment: input.comment?.trim() || undefined,
+    createdAt: existing?.createdAt || timestamp,
+    updatedAt: timestamp
+  };
+  if (existing) {
+    Object.assign(existing, next);
+    return existing;
+  }
+  store.storefrontRatings.unshift(next);
+  return next;
+}
+
 export function upsertAgent(store: SuperReferralsStore, agent: AgentProfile) {
   const existing = store.agents.find((item) => item.id === agent.id);
   if (existing) {
@@ -308,4 +353,76 @@ export function updateAgentJob(store: SuperReferralsStore, id: string, patch: Pa
 export function addAgentTownEvent(store: SuperReferralsStore, event: AgentTownEvent) {
   store.agentTownEvents.unshift(event);
   return event;
+}
+
+function normalizeStorefrontDetails(
+  input?: Customer["storefront"],
+  existing?: Customer["storefront"]
+): Customer["storefront"] {
+  const source = input || existing;
+  if (!source) {
+    return undefined;
+  }
+  return {
+    description: cleanOptionalString(input?.description ?? existing?.description),
+    websiteUrl: cleanOptionalString(input?.websiteUrl ?? existing?.websiteUrl),
+    supportEmail: cleanOptionalString(input?.supportEmail ?? existing?.supportEmail),
+    category: cleanOptionalString(input?.category ?? existing?.category),
+    tags: normalizeStorefrontTags(input?.tags ?? existing?.tags),
+    conditions: normalizeStorefrontConditions(input?.conditions, existing?.conditions)
+  };
+}
+
+function cleanOptionalString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function normalizeStorefrontTags(value: unknown) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item).trim())
+      .filter(Boolean)
+      .slice(0, 8);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+  }
+  return undefined;
+}
+
+function normalizeStorefrontConditions(
+  input?: CustomerStorefrontConditions,
+  existing?: CustomerStorefrontConditions
+): CustomerStorefrontConditions | undefined {
+  const source = input || existing;
+  if (!source) {
+    return undefined;
+  }
+  const enabled = input?.enabled ?? existing?.enabled ?? false;
+  return {
+    enabled,
+    allowedModels: normalizeEnumList(input?.allowedModels ?? existing?.allowedModels, ["VEO3.1I2V", "SEEDANCEI2V", "KLING3.0", "RUNWAYML"]),
+    allowedAspectRatios: normalizeEnumList(input?.allowedAspectRatios ?? existing?.allowedAspectRatios, ["16:9", "9:16"]),
+    maxImages: normalizePositiveInteger(input?.maxImages ?? existing?.maxImages)
+  };
+}
+
+function normalizeEnumList<T extends string>(value: unknown, allowed: T[]) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const allowedSet = new Set<string>(allowed);
+  const normalized = value
+    .map((item) => String(item).trim())
+    .filter((item): item is T => allowedSet.has(item));
+  return Array.from(new Set(normalized));
+}
+
+function normalizePositiveInteger(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
 }

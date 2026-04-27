@@ -22,7 +22,7 @@ import {
   type PaymentToken
 } from "./payment-tokens";
 import { verifyRenderPaymentTransaction } from "./payment-verification";
-import { countImages, priceGeneration, refundAmountForFailure } from "./pricing";
+import { assertRenderConditions, countImages, priceGeneration, refundAmountForFailure } from "./pricing";
 import {
   addGeneration,
   addINFT,
@@ -180,6 +180,11 @@ export async function quotePayment(input: {
   if (!input.imageCount || input.imageCount < 1) {
     throw new Error("imageCount must be greater than zero");
   }
+  assertRenderConditions(customer, {
+    imageCount: input.imageCount,
+    videoModel: input.videoModel,
+    aspectRatio: input.aspectRatio
+  });
   const pricing = priceGeneration(customer, input.imageCount, {
     video_model: input.videoModel,
     aspect_ratio: input.aspectRatio,
@@ -415,6 +420,11 @@ export async function createGeneration(input: {
   if (imageCount === 0) {
     throw new Error("image_urls must contain at least one image");
   }
+  assertRenderConditions(customer, {
+    imageCount,
+    videoModel: input.generation.video_model,
+    aspectRatio: input.generation.aspect_ratio
+  });
   validateGenerationAssetUrls(input.generation);
   const priced = priceGeneration(customer, imageCount, input.generation);
   const normalizedInput = normalizeGenerationInput(input.generation);
