@@ -1,6 +1,6 @@
 # SuperReferrals
 
-Turn referral links into product video storefronts.
+Turn referral links into product marketing videos.
 
 SuperReferrals helps product teams and creators turn a plain referral URL into a guided campaign page with product images, product details, video generation, CTA actions, and shareable output.
 
