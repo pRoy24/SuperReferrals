@@ -22,6 +22,9 @@ import type {
 
 const STORE_FILE = "data.json";
 const DEFAULT_DATA_DIR = ".superreferrals";
+const LEGACY_DEMO_CUSTOMER_ID = "cus_demo";
+const LEGACY_DEMO_SUB_ACCOUNT_ID = "sub_demo";
+const LEGACY_DEMO_OWNER_WALLET = "0x1111111111111111111111111111111111111111";
 let storeMutationQueue: Promise<unknown> = Promise.resolve();
 
 function dataDir() {
@@ -91,9 +94,9 @@ export async function readStore(): Promise<SuperReferralsStore> {
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === "ENOENT") {
-        const seeded = seedStore();
-        await writeStore(seeded);
-        return seeded;
+        const empty = emptyStore();
+        await writeStore(empty);
+        return empty;
       }
       if (error instanceof SyntaxError && attempt < 4) {
         await delay(25 * (attempt + 1));
@@ -111,6 +114,7 @@ export async function readStore(): Promise<SuperReferralsStore> {
 function normalizeStoreForRuntime(store: SuperReferralsStore) {
   const runtimeChainId = getTransactionChainId();
   let changed = false;
+  changed = removeLegacyDemoStorefront(store) || changed;
   for (const customer of store.customers) {
     const pricing = customer.pricing || defaultPricing;
     const previousChainId = pricing.chainId;
@@ -145,6 +149,62 @@ function normalizeStoreForRuntime(store: SuperReferralsStore) {
   return { store, changed };
 }
 
+function removeLegacyDemoStorefront(store: SuperReferralsStore) {
+  const demoCustomer = store.customers.find(isLegacyDemoCustomer);
+  if (!demoCustomer) {
+    return false;
+  }
+  const demoSubAccountIds = new Set(
+    store.subAccounts
+      .filter((account) => account.customerId === demoCustomer.id || account.id === LEGACY_DEMO_SUB_ACCOUNT_ID)
+      .map((account) => account.id)
+  );
+  const demoGenerationIds = new Set(
+    store.generations
+      .filter((generation) => generation.customerId === demoCustomer.id || demoSubAccountIds.has(generation.subAccountId))
+      .map((generation) => generation.id)
+  );
+  const demoInftIds = new Set(
+    store.infts
+      .filter((inft) =>
+        inft.customerId === demoCustomer.id ||
+        demoSubAccountIds.has(inft.subAccountId) ||
+        demoGenerationIds.has(inft.generationId)
+      )
+      .map((inft) => inft.id)
+  );
+
+  store.customers = store.customers.filter((customer) => customer.id !== demoCustomer.id);
+  store.subAccounts = store.subAccounts.filter((account) => account.customerId !== demoCustomer.id && account.id !== LEGACY_DEMO_SUB_ACCOUNT_ID);
+  store.quotes = store.quotes.filter((quote) => quote.customerId !== demoCustomer.id && !demoSubAccountIds.has(quote.subAccountId || ""));
+  store.generations = store.generations.filter((generation) => !demoGenerationIds.has(generation.id));
+  store.infts = store.infts.filter((inft) => !demoInftIds.has(inft.id));
+  store.storefrontRatings = store.storefrontRatings.filter((rating) =>
+    rating.customerId !== demoCustomer.id &&
+    !demoSubAccountIds.has(rating.subAccountId || "") &&
+    !demoGenerationIds.has(rating.generationId || "") &&
+    !demoInftIds.has(rating.inftId || "")
+  );
+  store.feedLikes = store.feedLikes.filter((like) => !demoGenerationIds.has(like.generationId));
+  store.feedComments = store.feedComments.filter((comment) => !demoGenerationIds.has(comment.generationId));
+  store.feedViews = store.feedViews.filter((view) => !demoGenerationIds.has(view.generationId));
+  store.agents = store.agents.filter((agent) => agent.customerId !== demoCustomer.id);
+  store.agentJobs = store.agentJobs.filter((job) =>
+    job.customerId !== demoCustomer.id &&
+    !demoSubAccountIds.has(job.subAccountId || "") &&
+    !demoGenerationIds.has(job.generationId || "") &&
+    !demoInftIds.has(job.inftId || "")
+  );
+  return true;
+}
+
+function isLegacyDemoCustomer(customer: Customer) {
+  return (
+    customer.id === LEGACY_DEMO_CUSTOMER_ID &&
+    normalizeWallet(customer.ownerWallet) === normalizeWallet(LEGACY_DEMO_OWNER_WALLET)
+  );
+}
+
 export async function writeStore(store: SuperReferralsStore) {
   const dir = dataDir();
   await fs.mkdir(dir, { recursive: true });
@@ -167,49 +227,6 @@ export async function mutateStore<T>(mutator: (store: SuperReferralsStore) => T 
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export function seedStore(): SuperReferralsStore {
-  const timestamp = nowIso();
-  const customerId = "cus_demo";
-  const ownerWallet = normalizeWallet("0x1111111111111111111111111111111111111111");
-  const subAccountId = "sub_demo";
-  const referrerCode = makeReferrerCode(`${customerId}:${subAccountId}`);
-  const customer: Customer = {
-    id: customerId,
-    name: "Demo Customer",
-    ownerWallet,
-    pricing: defaultPricing,
-    referrerBaseUrl: appBaseUrl(),
-    ensName: "demo.eth",
-    subscription: {
-      status: "not_started",
-      creditsRemaining: 0
-    },
-    createdAt: timestamp,
-    updatedAt: timestamp
-  };
-  const subAccount: SubAccount = {
-    id: subAccountId,
-    customerId,
-    wallet: normalizeWallet("0x2222222222222222222222222222222222222222"),
-    email: "creator@example.com",
-    username: "demo-creator",
-    referrerCode,
-    externalUser: {
-      provider: "superreferrals",
-      external_user_id: subAccountId,
-      external_app_id: customerId,
-      username: "demo-creator"
-    },
-    createdAt: timestamp,
-    updatedAt: timestamp
-  };
-  return {
-    ...emptyStore(),
-    customers: [customer],
-    subAccounts: [subAccount]
-  };
 }
 
 export async function getCustomer(id?: string) {
@@ -272,6 +289,15 @@ export function publicSubAccount(account: SubAccount): SubAccount {
     ...account,
     externalApiKey: undefined
   };
+}
+
+export function isPublicStorefrontCustomer(customer: Customer) {
+  const hasAccountSession = Boolean(
+    customer.samsarAccount?.authToken ||
+    customer.samsarAccount?.apiKey ||
+    (customer.samsarAccount?.externalUserId && env("SAMSAR_API_KEY"))
+  );
+  return hasAccountSession && Number(customer.subscription.creditsRemaining || 0) > 0;
 }
 
 export function upsertCustomer(store: SuperReferralsStore, input: Partial<Customer>) {

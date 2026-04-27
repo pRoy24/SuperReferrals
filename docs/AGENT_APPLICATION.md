@@ -35,7 +35,7 @@ with:
 
 ```json
 {
-  "customerId": "cus_demo",
+  "customerId": "cus_from_checkout_or_login",
   "objective": "Plan a referrer video workflow with full 0G receipts.",
   "payload": {
     "image_urls": ["https://images.unsplash.com/photo-1542291026-7eec264c27ff"],

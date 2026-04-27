@@ -11,8 +11,8 @@ export async function POST(request: Request) {
       password: String(body.password || "")
     });
     const customer = await mutateStore((store) => upsertCustomer(store, {
-      id: body.customerId,
-      name: body.customerName,
+      id: String(body.customerId || "") || undefined,
+      name: String(body.customerName || "") || session.username || session.email.split("@")[0] || "SuperReferrals Account",
       samsarApiKeyAlias: session.apiKey ? "samsar-user-api-key" : undefined,
       samsarAccount: {
         email: session.email,

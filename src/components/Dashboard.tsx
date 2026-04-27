@@ -59,20 +59,20 @@ export default function Dashboard() {
     prompt: "Create a short launch video with a crisp CTA outro."
   }, null, 2));
   const [customerForm, setCustomerForm] = useState({
-    id: "cus_demo",
-    name: "Demo Customer",
-    ownerWallet: "0x1111111111111111111111111111111111111111",
+    id: "",
+    name: "",
+    ownerWallet: "",
     platformFeeBps: 500,
     refundOnFailureBps: 5000,
     customerMultiplier: DEFAULT_CUSTOMER_MULTIPLIER,
     creditUnitUsd: CREDIT_UNIT_USD,
-    referrerBaseUrl: "http://localhost:3000",
-    ensName: "demo.eth",
-    storefrontDescription: "Product video storefront for SuperReferrals render tasks.",
+    referrerBaseUrl: "",
+    ensName: "",
+    storefrontDescription: "",
     storefrontWebsiteUrl: "",
     storefrontSupportEmail: "",
-    storefrontCategory: "Product videos",
-    storefrontTags: "launch, product, referral",
+    storefrontCategory: "",
+    storefrontTags: "",
     conditionalsEnabled: false,
     allowedModels: conditionModelOptions,
     allowedAspectRatios: conditionAspectOptions,
@@ -336,17 +336,19 @@ export default function Dashboard() {
     setBusy("processor-credits");
     setMessage("");
     try {
+      const existingCustomerId = customer?.id || "";
+      const existingCustomerName = customer?.name || "";
       const response = await fetch("/api/processor/credits/checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           amountCents: Math.round(parsedAmountUsd * 100),
-          customerId: customer?.id || customerForm.id,
+          customerId: existingCustomerId || undefined,
           customerEmail: checkoutEmail || undefined,
           metadata: {
-            superreferralsCustomerId: customer?.id || customerForm.id,
-            superreferralsCustomerName: customer?.name || customerForm.name,
-            superreferralsOwnerWallet: customerForm.ownerWallet,
+            ...(existingCustomerId ? { superreferralsCustomerId: existingCustomerId } : {}),
+            ...(existingCustomerName ? { superreferralsCustomerName: existingCustomerName } : {}),
+            ...(customerForm.ownerWallet ? { superreferralsOwnerWallet: customerForm.ownerWallet } : {}),
             ...(checkoutEmail ? { superreferralsAccountEmail: checkoutEmail } : {})
           }
         })

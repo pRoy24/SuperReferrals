@@ -50,8 +50,17 @@ export async function reconcileProcessorCreditWebhook(payload: Record<string, un
     };
   }
 
-  if (!details.email && !details.checkoutSessionId && !details.customerId) {
-    throw new Error("Credit checkout webhook did not include an email, checkout session, or customer id.");
+  if (!details.email) {
+    throw new Error("Credit checkout webhook did not include the Stripe checkout email required to create or update a SuperReferrals account.");
+  }
+
+  const paymentRecordId = getPaymentRecordId(details);
+  if (!paymentRecordId) {
+    throw new Error("Credit checkout webhook did not include a checkout session or payment id.");
+  }
+
+  if (details.creditsPurchased <= 0 && details.remainingCredits === undefined) {
+    throw new Error("Credit checkout webhook did not include a positive paid credit amount.");
   }
 
   let createdCustomer = false;
@@ -59,18 +68,10 @@ export async function reconcileProcessorCreditWebhook(payload: Record<string, un
     const target = findTargetCustomer(store, details);
     createdCustomer = !target;
     const customerId = target?.id || details.customerId || createId("cus");
-    const existingProcessedIds = target?.samsarAccount?.processedCheckoutSessionIds || [];
-    const alreadyProcessed = Boolean(details.checkoutSessionId && existingProcessedIds.includes(details.checkoutSessionId));
-    const currentCredits = Number(target?.subscription.creditsRemaining || 0);
-    const nextCredits = details.remainingCredits ?? (
-      alreadyProcessed ? currentCredits : currentCredits + details.creditsPurchased
-    );
     const internalApiKey = env("SAMSAR_API_KEY") || undefined;
     const storedAccountApiKey = details.apiKey || target?.samsarAccount?.apiKey;
     const parentApiKey = internalApiKey || storedAccountApiKey;
-    const checkoutSessionIds = details.checkoutSessionId && !existingProcessedIds.includes(details.checkoutSessionId)
-      ? [...existingProcessedIds, details.checkoutSessionId]
-      : existingProcessedIds;
+    const currentCredits = Number(target?.subscription.creditsRemaining || 0);
     return upsertCustomer(store, {
       id: customerId,
       name: target?.name || deriveAccountName(details.email) || "SuperReferrals Account",
@@ -85,23 +86,27 @@ export async function reconcileProcessorCreditWebhook(payload: Record<string, un
         userId: details.userId || target?.samsarAccount?.userId || customerId,
         authToken: details.authToken || target?.samsarAccount?.authToken,
         apiKey: storedAccountApiKey,
-        externalProvider: target?.samsarAccount?.externalProvider || "superreferrals",
-        externalUserId: target?.samsarAccount?.externalUserId || customerId,
+        externalProvider: target?.samsarAccount?.externalProvider,
+        externalUserId: target?.samsarAccount?.externalUserId,
         checkoutSessionId: details.checkoutSessionId || target?.samsarAccount?.checkoutSessionId,
         checkoutUrl: details.checkoutUrl || target?.samsarAccount?.checkoutUrl,
         paymentStatusEndpoint: details.paymentStatusEndpoint || target?.samsarAccount?.paymentStatusEndpoint,
         externalPaymentId: details.externalPaymentId || target?.samsarAccount?.externalPaymentId,
-        processedCheckoutSessionIds: checkoutSessionIds,
+        processedCheckoutSessionIds: target?.samsarAccount?.processedCheckoutSessionIds || [],
         updatedAt: nowIso()
       },
       subscription: {
-        status: nextCredits > 0 ? "active" : "not_started",
-        creditsRemaining: nextCredits
+        status: currentCredits > 0 ? "active" : "not_started",
+        creditsRemaining: currentCredits
       }
     });
   });
 
   const linkResult = await linkCustomerExternalUser(customer, details);
+  if (!linkResult.linkedExternalUser) {
+    throw new Error(linkResult.warning || "Unable to link the SuperReferrals account after credit checkout.");
+  }
+
   return {
     processed: true,
     customer: linkResult.customer,
@@ -135,6 +140,16 @@ async function linkCustomerExternalUser(customer: Customer, details: WebhookDeta
       }
       const currentCredits = Number(current.subscription.creditsRemaining || 0);
       const refreshedCredits = Number(externalSession.creditsRemaining || 0);
+      const existingProcessedIds = current.samsarAccount?.processedCheckoutSessionIds || [];
+      const paymentRecordId = getPaymentRecordId(details);
+      const alreadyProcessed = Boolean(paymentRecordId && existingProcessedIds.includes(paymentRecordId));
+      const checkoutSessionIds = paymentRecordId && !existingProcessedIds.includes(paymentRecordId)
+        ? [...existingProcessedIds, paymentRecordId]
+        : existingProcessedIds;
+      const creditedBalance = alreadyProcessed
+        ? currentCredits
+        : currentCredits + details.creditsPurchased;
+      const nextCredits = details.remainingCredits ?? Math.max(creditedBalance, refreshedCredits);
       return upsertCustomer(store, {
         id: current.id,
         samsarApiKeyAlias: internalApiKey
@@ -145,11 +160,12 @@ async function linkCustomerExternalUser(customer: Customer, details: WebhookDeta
           apiKey: current.samsarAccount?.apiKey,
           externalProvider: externalUser.provider,
           externalUserId: String(externalUser.external_user_id || externalUser.externalUserId || current.id),
+          processedCheckoutSessionIds: checkoutSessionIds,
           updatedAt: nowIso()
         },
         subscription: {
-          status: Math.max(currentCredits, refreshedCredits) > 0 ? "active" : "not_started",
-          creditsRemaining: details.remainingCredits ?? Math.max(currentCredits, refreshedCredits)
+          status: nextCredits > 0 ? "active" : "not_started",
+          creditsRemaining: nextCredits
         }
       });
     });
@@ -289,14 +305,23 @@ function extractWebhookDetails(payload: Record<string, unknown>): WebhookDetails
 }
 
 function isSuccessfulCheckout(details: WebhookDetails) {
-  const eventStatus = `${details.eventType || ""} ${details.status || ""}`.toLowerCase();
+  const eventType = `${details.eventType || ""}`.toLowerCase();
+  const status = `${details.status || ""}`.toLowerCase();
+  const eventStatus = `${eventType} ${status}`;
   if (!eventStatus.trim()) {
-    return true;
+    return false;
   }
   if (/(fail|failed|cancel|canceled|cancelled|expired|unpaid|pending|requires|open|incomplete)/.test(eventStatus)) {
     return false;
   }
-  return /(success|succeed|succeeded|paid|complete|completed|checkout\.session\.completed|payment_intent\.succeeded)/.test(eventStatus);
+  if (/payment_intent\.succeeded/.test(eventType)) {
+    return true;
+  }
+  return /(success|succeed|succeeded|paid|complete|completed)/.test(status);
+}
+
+function getPaymentRecordId(details: WebhookDetails) {
+  return details.checkoutSessionId || details.paymentIntentId || details.externalPaymentId;
 }
 
 function extractMetadata(payload: Record<string, unknown>) {
