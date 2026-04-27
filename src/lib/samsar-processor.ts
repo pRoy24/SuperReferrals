@@ -129,6 +129,13 @@ export async function fetchSamsarProcessorCredits(authToken: string) {
   };
 }
 
+export async function fetchSamsarProcessorCreditCheckoutStatus(paymentStatusEndpoint: string) {
+  const endpoint = absoluteSamsarUrl(paymentStatusEndpoint);
+  return requestSamsarJson(endpoint, {
+    method: "GET"
+  }, "Unable to verify SuperReferrals checkout status");
+}
+
 export function buildCustomerSamsarExternalUser(customer: Customer, email?: string): SamsarJsExternalUserIdentity {
   const account = customer.samsarAccount;
   return {
@@ -282,6 +289,15 @@ async function requestSamsarJson(url: string, init: RequestInit, fallback: strin
     throw new Error(data.message || data.error || fallback);
   }
   return data as Record<string, unknown>;
+}
+
+function absoluteSamsarUrl(pathOrUrl: string) {
+  try {
+    return new URL(pathOrUrl).toString();
+  } catch {
+    const path = pathOrUrl.startsWith("/") ? pathOrUrl : `/${pathOrUrl}`;
+    return `${samsarApiRootUrl()}${path}`;
+  }
 }
 
 function normalizeCheckoutResponse(data: Record<string, unknown>, amountCents: number): SamsarProcessorCreditCheckout {

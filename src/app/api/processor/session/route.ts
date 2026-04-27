@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { processorSessionFromCustomer, setProcessorAccountSessionCookie } from "@/lib/account-session";
 import { nowIso } from "@/lib/ids";
 import { loginSamsarProcessorAccount } from "@/lib/samsar-processor";
 import { mutateStore, publicCustomer, upsertCustomer } from "@/lib/store";
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
         creditsRemaining: session.creditsRemaining
       }
     }));
-    return NextResponse.json({
+    const response = NextResponse.json({
       account: {
         email: session.email,
         username: session.username,
@@ -37,6 +38,12 @@ export async function POST(request: Request) {
       },
       customer: publicCustomer(customer)
     });
+    setProcessorAccountSessionCookie(response, processorSessionFromCustomer(customer, {
+      authToken: session.authToken,
+      apiKey: session.apiKey,
+      creditsRemaining: session.creditsRemaining
+    }));
+    return response;
   } catch (error) {
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Unable to sign in to SuperReferrals account" },

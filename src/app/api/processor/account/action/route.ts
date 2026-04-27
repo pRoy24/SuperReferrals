@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { processorSessionFromCustomer, setProcessorAccountSessionCookie } from "@/lib/account-session";
 import { env } from "@/lib/env";
 import { normalizeWallet, nowIso } from "@/lib/ids";
 import {
@@ -44,7 +45,9 @@ export async function POST(request: Request) {
           creditsRemaining
         }
       }));
-      return NextResponse.json({ customer: publicCustomer(updated), creditsRemaining });
+      const response = NextResponse.json({ customer: publicCustomer(updated), creditsRemaining });
+      setProcessorAccountSessionCookie(response, processorSessionFromCustomer(updated));
+      return response;
     }
 
     if (action === "create_login_link" || action === "create_password_link") {
@@ -74,11 +77,13 @@ export async function POST(request: Request) {
           creditsRemaining: customer.subscription.creditsRemaining ?? 0
         }
       }));
-      return NextResponse.json({
+      const response = NextResponse.json({
         customer: publicCustomer(updated),
         loginUrl: login.loginUrl,
         expiresInSeconds: login.expiresInSeconds
       });
+      setProcessorAccountSessionCookie(response, processorSessionFromCustomer(updated));
+      return response;
     }
 
     if (action === "link_wallet") {
@@ -103,7 +108,9 @@ export async function POST(request: Request) {
           creditsRemaining: customer.subscription.creditsRemaining ?? 0
         }
       }));
-      return NextResponse.json({ customer: publicCustomer(updated), walletAddress });
+      const response = NextResponse.json({ customer: publicCustomer(updated), walletAddress });
+      setProcessorAccountSessionCookie(response, processorSessionFromCustomer(updated));
+      return response;
     }
 
     throw new Error("Unsupported processor account action");

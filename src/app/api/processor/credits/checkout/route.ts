@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { pendingCheckoutCookie, setPendingCreditCheckoutCookie } from "@/lib/account-session";
 import { nowIso } from "@/lib/ids";
 import { appBaseUrl, env } from "@/lib/env";
 import {
@@ -59,7 +60,19 @@ export async function POST(request: Request) {
         }
       }));
     }
-    return NextResponse.json({ checkout });
+    const response = NextResponse.json({ checkout });
+    setPendingCreditCheckoutCookie(response, pendingCheckoutCookie({
+      checkoutSessionId: checkout.checkoutSessionId,
+      paymentIntentId: checkout.paymentIntentId,
+      externalPaymentId: checkout.externalPaymentId,
+      paymentStatusEndpoint: checkout.paymentStatusEndpoint,
+      customerId: customer?.id,
+      email: checkoutEmail || customer?.samsarAccount?.email,
+      amountCents: checkout.amountCents,
+      credits: checkout.credits,
+      checkoutUrl: checkout.url
+    }));
+    return response;
   } catch (error) {
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Unable to create processor checkout" },

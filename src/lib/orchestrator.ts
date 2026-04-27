@@ -43,6 +43,7 @@ import {
   getSamsarStatus,
   runSamsarSessionAction
 } from "./samsar";
+import { fetchSamsarProcessorCredits } from "./samsar-processor";
 import { createUniswapQuote } from "./uniswap";
 import { buildZeroGStorageGatewayUrl, persistJsonToZeroG, persistRemoteVideoToZeroG } from "./zero-g";
 import { withSerializedZeroGTransaction } from "./zero-g-chain";
@@ -60,6 +61,7 @@ import type {
   VideoAspectRatio,
   VideoModel
 } from "./types";
+import type { ProcessorAccountCookieSession } from "./account-session";
 
 const sampleImageUrlBases = new Set([
   "https://images.unsplash.com/photo-1542291026-7eec264c27ff",
@@ -70,6 +72,49 @@ const sampleImageUrlBases = new Set([
 export async function bootstrap() {
   await getAgentConsoleSnapshot();
   return publicStore(await readStore());
+}
+
+export async function restoreProcessorAccountSession(session?: ProcessorAccountCookieSession) {
+  if (!session?.email) {
+    return undefined;
+  }
+  let creditsRemaining = Number(session.creditsRemaining || 0);
+  if (session.authToken) {
+    try {
+      const credits = await fetchSamsarProcessorCredits(session.authToken);
+      creditsRemaining = credits.remainingCredits;
+    } catch {
+      // Keep the last known balance so the browser session can still restore.
+    }
+  }
+  const store = await readStore();
+  const existing = store.customers.find((customer) =>
+    customer.id === session.customerId ||
+    customer.samsarAccount?.userId === session.userId ||
+    customer.samsarAccount?.email?.toLowerCase() === session.email.toLowerCase()
+  );
+  return mutateStore((mutableStore) => upsertCustomer(mutableStore, {
+    id: existing?.id || session.customerId,
+    name: existing?.name || session.customerName || session.username || session.email.split("@")[0] || "SuperReferrals Account",
+    ownerWallet: existing?.ownerWallet || session.walletAddress,
+    samsarApiKeyAlias: session.apiKey ? "samsar-user-api-key" : existing?.samsarApiKeyAlias,
+    samsarAccount: {
+      ...(existing?.samsarAccount || {}),
+      email: session.email,
+      username: session.username || existing?.samsarAccount?.username,
+      userId: session.userId || existing?.samsarAccount?.userId,
+      authToken: session.authToken || existing?.samsarAccount?.authToken,
+      apiKey: session.apiKey || existing?.samsarAccount?.apiKey,
+      externalProvider: session.externalProvider || existing?.samsarAccount?.externalProvider,
+      externalUserId: session.externalUserId || existing?.samsarAccount?.externalUserId,
+      walletAddress: session.walletAddress || existing?.samsarAccount?.walletAddress,
+      updatedAt: nowIso()
+    },
+    subscription: {
+      status: creditsRemaining > 0 ? "active" : "not_started",
+      creditsRemaining
+    }
+  }));
 }
 
 export async function createOrUpdateCustomer(input: Partial<Customer>) {
