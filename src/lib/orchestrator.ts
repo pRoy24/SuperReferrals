@@ -3,13 +3,21 @@ import { getAgentConsoleSnapshot } from "./agent-framework";
 import { askZeroGCompute } from "./compute";
 import { buildINFTAssistantSystemPrompt } from "./assistant-prompt";
 import { deriveAgentWallet, mintINFT } from "./inft";
+import { buildGenerationFeedSettings } from "./feed";
 import { bytes32From, createId, nowIso, normalizeWallet } from "./ids";
-import { createKeeperPaymentIntent, executeKeeperRefund } from "./keeperhub";
+import {
+  confirmKeeperPaymentSettlement,
+  createKeeperPaymentIntent,
+  executeKeeperRefund,
+  getKeeperHubPaymentWorkflowId,
+  getKeeperHubPlatformWalletAddress
+} from "./keeperhub";
 import {
   amountToAtomic,
   findPaymentToken,
   getTransactionChainConfig,
   getTransactionChainId,
+  normalizeTransactionChainIdForEnvironment,
   settlementTokenForCurrency,
   type PaymentToken
 } from "./payment-tokens";
@@ -36,7 +44,7 @@ import {
   runSamsarSessionAction
 } from "./samsar";
 import { createUniswapQuote } from "./uniswap";
-import { persistJsonToZeroG, persistRemoteVideoToZeroG } from "./zero-g";
+import { buildZeroGStorageGatewayUrl, persistJsonToZeroG, persistRemoteVideoToZeroG } from "./zero-g";
 import { sendAxlMessage } from "./axl";
 import { registerZeroGUserProfile } from "./user-registry";
 import type {
@@ -51,6 +59,12 @@ import type {
   VideoAspectRatio,
   VideoModel
 } from "./types";
+
+const sampleImageUrlBases = new Set([
+  "https://images.unsplash.com/photo-1542291026-7eec264c27ff",
+  "https://images.unsplash.com/photo-1460353581641-37baddab0fa2",
+  "https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77"
+]);
 
 export async function bootstrap() {
   await getAgentConsoleSnapshot();
@@ -171,7 +185,7 @@ export async function quotePayment(input: {
     aspect_ratio: input.aspectRatio,
     duration_seconds: input.durationSeconds
   });
-  const chainId = customer.pricing.chainId || getTransactionChainId();
+  const chainId = normalizeTransactionChainIdForEnvironment(customer.pricing.chainId || getTransactionChainId());
   if (input.chainId && input.chainId !== chainId) {
     throw new Error(`Payment chain must match the customer account chain ${getTransactionChainConfig(chainId).name}.`);
   }
@@ -191,12 +205,21 @@ export async function quotePayment(input: {
   const paymentRail = requestedRail === "direct" && !sameToken ? "uniswap" : requestedRail;
   if (
     paymentRail === "keeperhub" &&
-    !env("KEEPERHUB_PAYMENT_WORKFLOW_ID") &&
+    !getKeeperHubPaymentWorkflowId(chainId) &&
     !isMockMode() &&
     !isProviderMock("KEEPERHUB") &&
     !["USDC", "USDT"].includes(paymentToken.symbol)
   ) {
     throw new Error("KEEPERHUB_PAYMENT_WORKFLOW_ID is required for non-stable token payments so KeeperHub can run the swap before settlement.");
+  }
+  if (
+    paymentRail === "keeperhub" &&
+    !sameToken &&
+    !getKeeperHubPlatformWalletAddress() &&
+    !isMockMode() &&
+    !isProviderMock("KEEPERHUB")
+  ) {
+    throw new Error(`KEEPERHUB_PLATFORM_WALLET_ADDRESS is required so KeeperHub can receive ${paymentToken.symbol} and settle ${settlementToken.symbol}.`);
   }
   const conversionQuote = !sameToken && input.swapper
     ? await createUniswapQuote({
@@ -218,7 +241,7 @@ export async function quotePayment(input: {
       amountUsd: pricing.totalUsd
     });
   const paymentRecipientAddress = paymentRail === "keeperhub" && !sameToken
-    ? normalizeWallet(env("KEEPERHUB_PLATFORM_WALLET_ADDRESS", customer.ownerWallet))
+    ? normalizeWallet(getKeeperHubPlatformWalletAddress())
     : customer.ownerWallet;
   const keeperIntent = paymentRail === "keeperhub"
     ? await createKeeperPaymentIntent({
@@ -228,8 +251,9 @@ export async function quotePayment(input: {
       paymentAmountAtomic,
       paymentRecipientAddress,
       amountUsd: pricing.totalUsd,
-      tokenAddress: paymentToken.native ? undefined : paymentToken.address,
+      tokenAddress: paymentToken.address,
       settlementTokenAddress: settlementToken.address,
+      settlementAmountAtomic,
       chainId,
       reason: `SuperReferrals quote for ${pricing.durationSeconds} second render`
     })
@@ -363,6 +387,10 @@ export async function createGeneration(input: {
     username?: string;
   };
   generation: GenerationInput;
+  feed?: {
+    published?: boolean;
+    tags?: unknown;
+  };
   payment?: Partial<GenerationPayment>;
 }) {
   const store = await readStore();
@@ -387,14 +415,16 @@ export async function createGeneration(input: {
   if (imageCount === 0) {
     throw new Error("image_urls must contain at least one image");
   }
+  validateGenerationAssetUrls(input.generation);
   const priced = priceGeneration(customer, imageCount, input.generation);
+  const normalizedInput = normalizeGenerationInput(input.generation);
   const quote = input.payment?.quoteId
     ? store.quotes.find((item) => item.id === input.payment?.quoteId)
     : undefined;
   const requestedPaymentRail = input.payment?.paymentRail || quote?.paymentRail || "keeperhub";
   const paymentRail = requestedPaymentRail;
   const paymentRoute = quote?.route;
-  const paymentChainId = customer.pricing.chainId || quote?.chainId || getTransactionChainId();
+  const paymentChainId = normalizeTransactionChainIdForEnvironment(customer.pricing.chainId || quote?.chainId || getTransactionChainId());
   const expectedSettlementToken =
     findPaymentToken(quote?.settlementTokenAddress || customer.pricing.settlementTokenAddress || "", paymentChainId) ||
     settlementTokenForCurrency(quote?.settlementCurrency || customer.pricing.currency, paymentChainId);
@@ -411,6 +441,8 @@ export async function createGeneration(input: {
       ? expectedSettlementAmountAtomic
       : amountToAtomic(priced.totalUsd, expectedPaymentToken.decimals));
   const expectedPaymentRecipient = quote?.paymentRecipientAddress || customer.ownerWallet;
+  const generationId = createId("gen");
+  const timestamp = nowIso();
   const paymentConfirmation = await resolvePaymentConfirmation({
     paymentRail,
     txHash: input.payment?.txHash,
@@ -423,8 +455,45 @@ export async function createGeneration(input: {
       amountAtomic: expectedPaymentAmountAtomic
     }
   });
-  const generationId = createId("gen");
-  const timestamp = nowIso();
+  const keeperSettlement = paymentConfirmation.status === "confirmed" && shouldRunKeeperSettlement({
+    paymentRail,
+    quote,
+    expectedPaymentToken,
+    expectedSettlementToken,
+    expectedPaymentRecipient,
+    customer
+  })
+    ? await confirmKeeperPaymentSettlement({
+      payerAddress: input.payment?.payerWallet || subAccount.wallet,
+      recipientAddress: customer.ownerWallet,
+      amount: priced.totalUsd.toFixed(2),
+      amountUsd: priced.totalUsd,
+      paymentAmountAtomic: expectedPaymentAmountAtomic,
+      paymentRecipientAddress: expectedPaymentRecipient,
+      paymentTxHash: paymentConfirmation.txHash,
+      tokenAddress: expectedPaymentToken.address,
+      settlementTokenAddress: expectedSettlementToken.address,
+      settlementAmountAtomic: expectedSettlementAmountAtomic,
+      chainId: paymentChainId,
+      quoteId: input.payment?.quoteId || quote?.id,
+      generationId,
+      reason: `Settle SuperReferrals render ${generationId}`,
+      metadata: {
+        verification: paymentConfirmation.verification,
+        referrerCode: subAccount.referrerCode,
+        customerId: customer.id,
+        subAccountId: subAccount.id
+      }
+    })
+    : undefined;
+  const keeperExecutionId = paymentConfirmation.keeperExecutionId ||
+    firstString(isRecord(keeperSettlement) ? keeperSettlement : undefined, ["executionId", "execution_id", "id", "runId"]);
+  const routeWithSettlement = keeperSettlement
+    ? {
+      ...(isRecord(paymentRoute) ? paymentRoute : { route: paymentRoute }),
+      keeperSettlement
+    }
+    : paymentRoute;
   const payment: GenerationPayment = {
     amountUsd: priced.totalUsd,
     payerWallet: input.payment?.payerWallet || subAccount.wallet,
@@ -435,8 +504,8 @@ export async function createGeneration(input: {
     paymentRail,
     chainId: paymentChainId,
     status: paymentConfirmation.status,
-    keeperExecutionId: paymentConfirmation.keeperExecutionId,
-    route: paymentRoute,
+    keeperExecutionId,
+    route: routeWithSettlement,
     verification: paymentConfirmation.verification
   };
   const generation: Generation = {
@@ -445,7 +514,8 @@ export async function createGeneration(input: {
     subAccountId: subAccount.id,
     referrerCode: subAccount.referrerCode,
     status: paymentConfirmation.status === "pending" ? "PAYMENT_PENDING" : "QUEUED",
-    input: normalizeGenerationInput(input.generation),
+    input: normalizedInput,
+    feed: buildGenerationFeedSettings(input.feed, normalizedInput.metadata),
     payment,
     createdAt: timestamp,
     updatedAt: timestamp
@@ -524,11 +594,64 @@ export async function syncGeneration(id: string) {
   if (!requestId) {
     return generation;
   }
-  const status = await getSamsarStatus(requestId, subAccount.externalUser, subAccount.externalApiKey);
+  let status: Record<string, unknown>;
+  try {
+    status = await getSamsarStatus(requestId, subAccount.externalUser, subAccount.externalApiKey);
+  } catch (error) {
+    if (generation.resultUrl) {
+      try {
+        return await finalizeGeneration(generation, customer, subAccount, generation.resultUrl);
+      } catch (finalizationError) {
+        return markGenerationFinalizationFailed(generation, generation.resultUrl, finalizationError);
+      }
+    }
+    return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
+      status: "PROCESSING",
+      errorMessage: `Unable to refresh Samsar render status: ${formatErrorText(error)}`
+    }));
+  }
   const normalizedStatus = String(status.status || "").toUpperCase();
-  if (normalizedStatus === "COMPLETED" || status.result_url || status.remoteURL) {
-    const resultUrl = String(status.result_url || status.remoteURL || await fetchLatestVideoUrl(generation.samsarSessionId || requestId));
-    return finalizeGeneration(generation, customer, subAccount, resultUrl);
+  const statusResultUrl = extractSamsarResultUrl(status) || generation.resultUrl || "";
+  if (normalizedStatus === "COMPLETED" || statusResultUrl) {
+    const internalSessionId = extractSamsarInternalSessionId(status);
+    let resultUrl = statusResultUrl;
+    if (!resultUrl) {
+      const fallbackSessionId = firstInternalSamsarSessionId(internalSessionId, generation.samsarSessionId, requestId);
+      if (!fallbackSessionId) {
+        return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
+          status: "PROCESSING",
+          errorMessage: "Samsar reported completion, but no video URL is available yet. Waiting for the final video URL."
+        }));
+      }
+      try {
+        resultUrl = await fetchLatestVideoUrl(fallbackSessionId);
+      } catch (error) {
+        return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
+          status: "PROCESSING",
+          errorMessage: `Samsar reported completion, but the final video URL could not be fetched yet: ${formatErrorText(error)}`
+        }));
+      }
+    }
+    if (!resultUrl) {
+      return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
+        status: "PROCESSING",
+        errorMessage: "Samsar reported completion, but returned an empty video URL."
+      }));
+    }
+
+    const generationForFinalize = await mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
+      samsarSessionId: internalSessionId || generation.samsarSessionId,
+      resultUrl,
+      errorMessage: undefined
+    }));
+    if (!generationForFinalize) {
+      throw new Error("generation was not found");
+    }
+    try {
+      return await finalizeGeneration(generationForFinalize, customer, subAccount, resultUrl);
+    } catch (error) {
+      return markGenerationFinalizationFailed(generationForFinalize, resultUrl, error);
+    }
   }
   if (normalizedStatus === "FAILED" || normalizedStatus === "CANCELLED") {
     return failGeneration(generation, customer, normalizedStatus, String(status.message || status.error || "Samsar generation failed"));
@@ -537,6 +660,82 @@ export async function syncGeneration(id: string) {
     status: "PROCESSING",
     errorMessage: undefined
   }));
+}
+
+function extractSamsarResultUrl(status: Record<string, unknown>) {
+  return firstUrlValue(
+    status.result_url,
+    status.resultUrl,
+    status.remoteURL,
+    status.remoteUrl,
+    status.video_url,
+    status.videoUrl,
+    status.published_video_url,
+    status.publishedVideoUrl,
+    status.result_urls,
+    status.resultUrls,
+    status.output,
+    status.result,
+    status.data
+  );
+}
+
+function extractSamsarInternalSessionId(status: Record<string, unknown>) {
+  return firstInternalSamsarSessionId(
+    status.upstream_session_id,
+    status.upstreamSessionId,
+    status.upstream_request_id,
+    status.upstreamRequestId,
+    status.internal_session_id,
+    status.internalSessionId,
+    status.video_session_id,
+    status.videoSessionId,
+    status.session_id,
+    status.sessionID
+  );
+}
+
+function firstInternalSamsarSessionId(...values: unknown[]) {
+  for (const value of values) {
+    const candidate = typeof value === "string" ? value.trim() : "";
+    if (candidate && !candidate.startsWith("extreq_")) {
+      return candidate;
+    }
+  }
+  return "";
+}
+
+function firstUrlValue(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === "string" && /^https?:\/\//i.test(value.trim())) {
+      return value.trim();
+    }
+    if (Array.isArray(value)) {
+      const nested = firstUrlValue(...value);
+      if (nested) {
+        return nested;
+      }
+    }
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      const nested = firstUrlValue(
+        record.url,
+        record.uri,
+        record.result_url,
+        record.resultUrl,
+        record.remoteURL,
+        record.remoteUrl,
+        record.video_url,
+        record.videoUrl,
+        record.output_url,
+        record.outputUrl
+      );
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+  return "";
 }
 
 export async function handleSamsarWebhook(payload: Record<string, unknown>) {
@@ -595,11 +794,14 @@ async function finalizeGeneration(
     }
   };
   const metadataArtifact = await persistJsonToZeroG(metadata);
+  const tokenMetadataUri =
+    buildZeroGStorageGatewayUrl(metadataArtifact.rootHash) ||
+    metadataArtifact.uri;
   const agentWallet = deriveAgentWallet(generation.id);
   const ownerWallet = normalizeWallet(subAccount.wallet) as `0x${string}`;
   const mint = await mintINFT({
     ownerWallet,
-    metadataUri: metadataArtifact.uri,
+    metadataUri: tokenMetadataUri,
     metadataHash: bytes32From(JSON.stringify(metadata)),
     agentWallet,
     referrerCode: subAccount.referrerCode
@@ -616,7 +818,7 @@ async function finalizeGeneration(
     videoUrl: resultUrl,
     storageRootHash: videoArtifact.rootHash,
     metadataRootHash: metadataArtifact.rootHash,
-    metadataUri: metadataArtifact.uri,
+    metadataUri: tokenMetadataUri,
     tokenId: mint.tokenId,
     contractAddress: mint.contractAddress,
     mintTxHash: mint.txHash,
@@ -643,6 +845,19 @@ async function finalizeGeneration(
       inftId: inft.id
     });
   });
+}
+
+async function markGenerationFinalizationFailed(
+  generation: Generation,
+  resultUrl: string,
+  error: unknown
+) {
+  const message = `Video render completed, but 0G persistence or INFT minting failed: ${formatErrorText(error)}. Fix the 0G configuration and click Sync to retry finalization.`;
+  return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
+    status: "FAILED",
+    resultUrl,
+    errorMessage: message
+  }));
 }
 
 async function failGeneration(
@@ -681,6 +896,16 @@ async function failGeneration(
     errorMessage,
     refund
   }));
+}
+
+function formatErrorText(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return error.trim();
+  }
+  return "Unknown error";
 }
 
 export async function askINFT(id: string, question: string) {
@@ -774,10 +999,11 @@ export async function runINFTAction(id: string, action: string, payload: Record<
 function normalizeGenerationInput(input: GenerationInput): GenerationInput {
   const hasProvidedOutro = Boolean(input.outro_image_url);
   const addOutroAnimation = input.add_outro_animation ?? Boolean(input.cta_url);
+  const aspectRatio = input.aspect_ratio || "16:9";
   return {
     ...input,
     video_model: input.video_model || "VEO3.1I2V",
-    aspect_ratio: input.aspect_ratio || "16:9",
+    aspect_ratio: aspectRatio,
     enable_subtitles: input.enable_subtitles ?? true,
     outro_image_url: input.outro_image_url,
     add_outro_animation: addOutroAnimation === true,
@@ -790,8 +1016,109 @@ function normalizeGenerationInput(input: GenerationInput): GenerationInput {
     cta_logo: hasProvidedOutro ? undefined : input.cta_logo,
     add_footer_animation: input.add_footer_animation === true,
     footer_metadata: Array.isArray(input.footer_metadata) ? input.footer_metadata : undefined,
-    image_urls: input.image_urls || []
+    image_urls: normalizeGenerationImageInputs(input.image_urls || [], aspectRatio)
   };
+}
+
+function normalizeGenerationImageInputs(imageUrls: GenerationInput["image_urls"], aspectRatio: VideoAspectRatio): GenerationInput["image_urls"] {
+  return imageUrls.map((item) => {
+    if (typeof item === "string") {
+      return isSampleImageUrl(item)
+        ? { image_url: buildAspectSizedSampleImageUrl(item, aspectRatio), skip_enhancement: true }
+        : item;
+    }
+
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return item;
+    }
+
+    const record = item as Record<string, unknown>;
+    const imageUrl = getGenerationImageUrl(record);
+    const isSample = isSampleImageUrl(imageUrl);
+    const hasExplicitSkip =
+      Object.prototype.hasOwnProperty.call(record, "skip_enhancement") ||
+      Object.prototype.hasOwnProperty.call(record, "skipEnhancement");
+
+    return {
+      ...record,
+      ...(record.image_url && !isSample ? {} : { image_url: isSample ? buildAspectSizedSampleImageUrl(imageUrl, aspectRatio) : imageUrl }),
+      ...(!hasExplicitSkip && isSample ? { skip_enhancement: true } : {})
+    };
+  });
+}
+
+function getGenerationImageUrl(item: Record<string, unknown>) {
+  return String(
+    item.image_url ||
+    item.imageUrl ||
+    item.url ||
+    item.src ||
+    item.effective_url ||
+    item.effectiveUrl ||
+    item.enhanced_url ||
+    item.enhancedUrl ||
+    ""
+  ).trim();
+}
+
+function isSampleImageUrl(rawUrl: string) {
+  try {
+    const url = new URL(rawUrl);
+    return sampleImageUrlBases.has(`${url.origin}${url.pathname}`);
+  } catch {
+    return false;
+  }
+}
+
+function buildAspectSizedSampleImageUrl(rawUrl: string, aspectRatio: VideoAspectRatio) {
+  const url = new URL(rawUrl);
+  const [width, height] = aspectRatio === "9:16" ? [1024, 1792] : [1792, 1024];
+  url.search = new URLSearchParams({
+    auto: "format",
+    fit: "crop",
+    w: String(width),
+    h: String(height),
+    q: "90"
+  }).toString();
+  return url.toString();
+}
+
+function validateGenerationAssetUrls(input: GenerationInput) {
+  for (const [index, item] of (input.image_urls || []).entries()) {
+    if (typeof item === "string") {
+      assertReachableUrlShape(item, `image_urls item ${index + 1}`);
+      continue;
+    }
+    const imageUrl = getGenerationImageUrl(item as Record<string, unknown>);
+    if (!imageUrl) {
+      throw new Error(`image_urls item ${index + 1} must include image_url`);
+    }
+    assertReachableUrlShape(imageUrl, `image_urls item ${index + 1}`);
+  }
+  if (input.outro_image_url) {
+    assertReachableUrlShape(input.outro_image_url, "outro_image_url");
+  }
+  if (input.cta_logo) {
+    assertReachableUrlShape(input.cta_logo, "cta_logo");
+  }
+  for (const [index, item] of (input.footer_metadata || []).entries()) {
+    assertReachableUrlShape(item.url, `footer_metadata item ${index + 1} url`);
+  }
+}
+
+function assertReachableUrlShape(rawUrl: string, label: string) {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error(`${label} must be a valid URL`);
+  }
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw new Error(`${label} must be an http(s) URL`);
+  }
+  if (url.hostname === "example.com" || url.hostname.endsWith(".example.com")) {
+    throw new Error(`${label} must use a real reachable URL, not an example.com placeholder`);
+  }
 }
 
 async function ensureSubAccountExternalSession(account: SubAccount) {
@@ -812,6 +1139,29 @@ async function ensureSubAccountExternalSession(account: SubAccount) {
 
 function estimateExternalCredits(priced: ReturnType<typeof priceGeneration>) {
   return Math.max(1, Math.ceil(priced.baseCreditsPerSecond * priced.durationSeconds));
+}
+
+function shouldRunKeeperSettlement({
+  paymentRail,
+  quote,
+  expectedPaymentToken,
+  expectedSettlementToken,
+  expectedPaymentRecipient,
+  customer
+}: {
+  paymentRail?: GenerationPayment["paymentRail"];
+  quote?: PaymentQuote;
+  expectedPaymentToken: PaymentToken;
+  expectedSettlementToken: PaymentToken;
+  expectedPaymentRecipient: string;
+  customer: Customer;
+}) {
+  if (paymentRail !== "keeperhub" || !quote) {
+    return false;
+  }
+  const tokenConversionRequired = expectedPaymentToken.address.toLowerCase() !== expectedSettlementToken.address.toLowerCase();
+  const paymentHeldByKeeper = normalizeWallet(expectedPaymentRecipient) !== normalizeWallet(customer.ownerWallet);
+  return tokenConversionRequired || paymentHeldByKeeper;
 }
 
 async function resolvePaymentConfirmation({
@@ -861,9 +1211,6 @@ async function resolvePaymentConfirmation({
   if (paymentRail === "keeperhub") {
     if ((isMockMode() || isProviderMock("KEEPERHUB") || routeStatus.startsWith("mock")) && allowMockRenderPayment()) {
       return { status: "mock_confirmed", keeperExecutionId };
-    }
-    if (["completed", "complete", "confirmed", "succeeded", "success", "executed"].includes(routeStatus)) {
-      return { status: "confirmed", keeperExecutionId };
     }
     if (["failed", "failure", "reverted", "cancelled", "canceled", "error"].includes(routeStatus)) {
       throw new Error("KeeperHub payment failed; render credits were not granted.");

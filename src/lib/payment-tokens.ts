@@ -3,7 +3,7 @@ export type PaymentCurrencySymbol = "USD" | "USDC" | "USDT" | "ETH" | "WETH";
 
 export interface TransactionChainConfig {
   id: number;
-  key: "mainnet" | "sepolia";
+  key: "mainnet" | "sepolia" | "base";
   name: string;
   hexChainId: `0x${string}`;
   nativeCurrency: {
@@ -50,6 +50,17 @@ export const TRANSACTION_CHAINS: TransactionChainConfig[] = [
     blockExplorerUrls: ["https://sepolia.etherscan.io"],
     uniswapChain: "sepolia",
     keeperHubNetwork: "sepolia"
+  },
+  {
+    id: 8453,
+    key: "base",
+    name: "Base",
+    hexChainId: "0x2105",
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    rpcUrls: ["https://mainnet.base.org"],
+    blockExplorerUrls: ["https://basescan.org"],
+    uniswapChain: "base",
+    keeperHubNetwork: "base"
   }
 ];
 
@@ -104,6 +115,28 @@ export const PAYMENT_TOKENS: PaymentToken[] = [
     chainId: 11155111,
     address: "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
     decimals: 18
+  },
+  {
+    symbol: "USDC",
+    name: "USD Coin",
+    chainId: 8453,
+    address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    decimals: 6
+  },
+  {
+    symbol: "ETH",
+    name: "Ether",
+    chainId: 8453,
+    address: NATIVE_TOKEN_ADDRESS,
+    decimals: 18,
+    native: true
+  },
+  {
+    symbol: "WETH",
+    name: "Wrapped Ether",
+    chainId: 8453,
+    address: "0x4200000000000000000000000000000000000006",
+    decimals: 18
   }
 ];
 
@@ -137,6 +170,10 @@ export function getTransactionChainConfig(chainId = getTransactionChainId()): Tr
     rpcUrls: rpcUrl ? [rpcUrl] : chain.rpcUrls,
     blockExplorerUrls: explorerUrl ? [explorerUrl] : chain.blockExplorerUrls
   };
+}
+
+export function normalizeTransactionChainIdForEnvironment(chainId = getTransactionChainId()) {
+  return allowMainnetTransactions() ? chainId : forceNonProductionChain(chainId);
 }
 
 export function getPaymentTokens(chainId = getTransactionChainId()) {
@@ -188,5 +225,5 @@ function allowMainnetTransactions() {
 }
 
 function forceNonProductionChain(chainId: number) {
-  return chainId === 1 ? 11155111 : chainId;
+  return chainId === 1 || chainId === 8453 ? 11155111 : chainId;
 }

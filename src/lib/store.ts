@@ -33,12 +33,15 @@ function dataPath() {
 
 export function emptyStore(): SuperReferralsStore {
   return {
-    version: 2,
+    version: 3,
     customers: [],
     subAccounts: [],
     quotes: [],
     generations: [],
     infts: [],
+    feedLikes: [],
+    feedComments: [],
+    feedViews: [],
     agents: [],
     agentJobs: [],
     agentTownEvents: []
@@ -50,7 +53,7 @@ export async function readStore(): Promise<SuperReferralsStore> {
     try {
       const raw = await fs.readFile(dataPath(), "utf8");
       const parsed = JSON.parse(raw) as SuperReferralsStore;
-      const store = { ...emptyStore(), ...parsed, version: parsed.version || 2 };
+      const store = { ...emptyStore(), ...parsed, version: parsed.version || 3 };
       const normalized = normalizeStoreForRuntime(store);
       if (normalized.changed) {
         await writeStore(normalized.store);

@@ -34,7 +34,7 @@ The generation path is:
 
 All adapters return deterministic mock results when `SUPERREFERRALS_MOCKS=true`, which keeps local development usable without keys. Individual providers can be made live by setting `<PROVIDER>_MOCKS=false`, for example `SAMSAR_MOCKS=false` with `SAMSAR_API_KEY` for live Samsar and mocked on-chain integrations.
 
-Wallet payment prompts and payment adapters default from `TRANSACTION_CHAIN_ID` plus the matching `NEXT_PUBLIC_TRANSACTION_CHAIN_ID`, but the customer account's `pricing.chainId` is the source of truth for user render payments. Dev/staging customers should be saved with Ethereum Sepolia (`11155111`) so wallet prompts, Uniswap quotes, and KeeperHub transfers stay off mainnet. Production customers should use Ethereum mainnet (`1`). Renders do not start until the server verifies a mined wallet payment transaction against the expected sender, customer recipient, chain, settlement token, and quote amount unless `ALLOW_MOCK_RENDER_PAYMENT=true` is explicitly set for local-only demos. Live non-stable token render payments can use the Uniswap swap route, then the app transfers the settlement token to the customer before creating the Samsar render.
+Wallet payment prompts and payment adapters default from `TRANSACTION_CHAIN_ID` plus the matching `NEXT_PUBLIC_TRANSACTION_CHAIN_ID`, but the customer account's `pricing.chainId` is the source of truth for user render payments. Dev/staging customers should be saved with Ethereum Sepolia (`11155111`) so wallet prompts, Uniswap quotes, and KeeperHub transfers stay off mainnet. Production customers can use Ethereum mainnet (`1`) or Base mainnet (`8453`) only when `NODE_ENV=production` and `DEPLOYMENT_ENV=production`; non-production runtime maps those production chain ids back to Sepolia. Renders do not start until the server verifies a mined wallet payment transaction against the expected sender, customer or KeeperHub payment recipient, chain, payment token, and quote amount unless `ALLOW_MOCK_RENDER_PAYMENT=true` is explicitly set for local-only demos. Live non-stable token render payments use a KeeperHub payment workflow: the quote event records the expected payment, and the payment-confirmed event is sent only after the server verifies the mined wallet transaction.
 
 0G records are controlled by `OG_CHAIN_ID` and related contract-specific overrides. Dev/staging use 0G Galileo (`16602`) for user registry, INFT, agent registry, storage, and DA. Production uses 0G mainnet (`16661`).
 
@@ -67,7 +67,8 @@ See `docs/AGENT_APPLICATION.md` for details.
 
 - 0G Storage TypeScript SDK supports `@0gfoundation/0g-ts-sdk`, `ethers`, `Indexer`, `MemData`, and Node-side uploads.
 - Ethereum Sepolia is the staging transaction network for wallet/payment/contract adapters: `TRANSACTION_CHAIN_ID=11155111`.
-- Ethereum mainnet is the production transaction network: `TRANSACTION_CHAIN_ID=1`.
+- Ethereum mainnet is the default production transaction network: `TRANSACTION_CHAIN_ID=1`.
+- Base mainnet is also supported for production payment deployments: `TRANSACTION_NETWORK=base`, `TRANSACTION_CHAIN_ID=8453`.
 - 0G Galileo testnet defaults are `OG_CHAIN_ID=16602`, `OG_RPC_URL=https://evmrpc-testnet.0g.ai`, and turbo indexer `https://indexer-storage-testnet-turbo.0g.ai`.
 - 0G mainnet defaults are `OG_CHAIN_ID=16661`, `OG_RPC_URL=https://evmrpc.0g.ai`, and turbo indexer `https://indexer-storage-turbo.0g.ai`.
 - 0G INFT docs describe ERC-7857, encrypted metadata, secure metadata transfer, and 0G Storage/Chain/Compute roles.

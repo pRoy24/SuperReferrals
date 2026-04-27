@@ -534,7 +534,7 @@ function buildKeeperAllocations(customer: Customer, agents: AgentProfile[], tota
 
 async function publishServiceMarketplaceIntent(payload: Record<string, unknown>): Promise<AgentPillarReceipt> {
   const endpoint = env("OG_SERVICE_MARKETPLACE_URL");
-  if (isProviderMock("OG_SERVICE_MARKETPLACE") || !endpoint) {
+  if (isProviderMock("OG_SERVICE_MARKETPLACE")) {
     return {
       pillar: "service_marketplace",
       status: "mocked",
@@ -545,6 +545,9 @@ async function publishServiceMarketplaceIntent(payload: Record<string, unknown>)
       data: payload,
       createdAt: nowIso()
     };
+  }
+  if (!endpoint) {
+    throw new Error("OG_SERVICE_MARKETPLACE_URL is required when OG_SERVICE_MARKETPLACE_MOCKS=false");
   }
   const response = await fetch(endpoint, {
     method: "POST",
@@ -592,7 +595,7 @@ async function anchorAgentJobOnZeroGChain({
   );
   const rpcUrl = env("AGENT_REGISTRY_RPC_URL") || configuredChain.rpcUrl;
   const chainId = configuredChain.id;
-  if (isProviderMock("AGENT_REGISTRY") || !contractAddress || !privateKey) {
+  if (isProviderMock("AGENT_REGISTRY")) {
     return {
       pillar: "chain",
       status: "mocked",
@@ -604,6 +607,9 @@ async function anchorAgentJobOnZeroGChain({
       data: { jobId, targetAgent, inputRoot, maxSpendUsd },
       createdAt: nowIso()
     };
+  }
+  if (!contractAddress || !privateKey) {
+    throw new Error("AGENT_REGISTRY_CONTRACT_ADDRESS and AGENT_REGISTRY_PRIVATE_KEY or OG_PRIVATE_KEY are required when AGENT_REGISTRY_MOCKS=false");
   }
 
   const account = privateKeyToAccount(privateKey);

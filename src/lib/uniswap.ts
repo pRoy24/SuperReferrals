@@ -23,7 +23,7 @@ export interface UniswapSwapInput {
 
 export async function createUniswapQuote(input: UniswapQuoteInput) {
   const apiKey = env("UNISWAP_API_KEY");
-  if (isProviderMock("UNISWAP") || !apiKey) {
+  if (isProviderMock("UNISWAP")) {
     return {
       requestId: createId("mock_uni_quote"),
       quote: {
@@ -35,6 +35,9 @@ export async function createUniswapQuote(input: UniswapQuoteInput) {
         warning: "Set UNISWAP_API_KEY and UNISWAP_MOCKS=false for live quotes."
       }
     };
+  }
+  if (!apiKey) {
+    throw new Error("UNISWAP_API_KEY is required when UNISWAP_MOCKS=false");
   }
 
   const response = await fetch(`${env("UNISWAP_BASE_URL", "https://trade-api.gateway.uniswap.org/v1")}/quote`, {
@@ -73,7 +76,7 @@ export async function createUniswapQuote(input: UniswapQuoteInput) {
 export async function createUniswapSwap(input: UniswapSwapInput) {
   const apiKey = env("UNISWAP_API_KEY");
   if (isProviderMock("UNISWAP") || !apiKey) {
-    throw new Error("UNISWAP_API_KEY and UNISWAP_MOCKS=false are required for wallet swap transactions.");
+    throw new Error("UNISWAP_API_KEY is required and UNISWAP_MOCKS must be false for wallet swap transactions.");
   }
 
   const body: Record<string, unknown> = {

@@ -8,7 +8,10 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "contracts:compile": "hardhat compile"
+    "contracts:compile": "hardhat compile",
+    "contracts:deploy:inft": "node scripts/deploy-inft.mjs",
+    "contracts:deploy:inft:testnet": "node scripts/deploy-inft.mjs galileo",
+    "contracts:deploy:inft:mainnet": "node scripts/deploy-inft.mjs mainnet"
   },
   "dependencies": {
     "@0gfoundation/0g-ts-sdk": "latest",

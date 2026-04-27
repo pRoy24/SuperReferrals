@@ -1,12 +1,62 @@
 # SuperReferrals
 
-SuperReferrals is a NextJS on-chain adapter for Samsar `image_list_to_video`. It lets a customer create a Samsar JS account, configure render pricing, accept wallet self-signups from users, collect on-chain payment, generate marketing videos through Samsar, persist the completed video and metadata to 0G Storage, and mint an ERC-7857-style INFT with referrer attributes.
+SuperReferrals is an ETHGlobal Open Agents hackathon project for agentic, on-chain referral video campaigns.
 
-The app now includes an Agent Town console: a mock-first multi-agent application that uses 0G Chain, Storage, DA, Compute, and Service Marketplace receipts while coordinating Samsar actions, Uniswap charge signals, KeeperHub settlement, and Gensyn AXL messages.
+Customers configure a Samsar-powered referral page, set per-second render pricing, and share the page with users. Users connect a wallet, pay on-chain, generate a personalized `image_list_to_video` ad through Samsar, and receive a public INFT page backed by 0G records and storage.
 
-The app runs immediately in deterministic mock mode. Keep `SUPERREFERRALS_MOCKS=true` and set a provider flag such as `SAMSAR_MOCKS=false` to use only that live service while the rest remain mocked. Set all provider mock flags to `false` when you want fully live Samsar, Uniswap, KeeperHub, 0G, ENS, and AXL integrations.
+The project is built to show how agents can coordinate real commerce, media generation, storage, settlement, and rollback workflows across Samsar, 0G, Uniswap, KeeperHub, and Gensyn AXL.
 
-## Run
+## What To Review
+
+- `/`: customer console for Samsar Processor credits, store setup, pricing, render history, and Agent Town.
+- `/r/:referrerCode`: public user referral page for wallet signup, payment, image-to-video generation, and prior renders.
+- `/feed`: public feed for generated referral videos.
+- `/inft/:id`: public INFT page with video playback, 0G metadata, wallet/referrer attribution, assistant actions, and AXL messaging.
+- `Agent Town`: multi-agent console that produces receipts for 0G Chain, 0G Storage, 0G DA, 0G Compute, 0G Service Marketplace, Uniswap charge signals, KeeperHub settlement, and AXL messages.
+
+## Core Flow
+
+1. A customer creates or tops up a Samsar Processor account.
+2. The customer configures a public referral page, pricing, wallet, currency, and refund policy.
+3. A user connects a wallet on the referral page and gets a wallet-backed Samsar external-user profile.
+4. The profile manifest is stored on 0G Storage and anchored in `SuperReferralsUserRegistry` on 0G Chain.
+5. The user submits image URLs, prompt, metadata, CTA URL, model, and aspect ratio.
+6. The app quotes payment, verifies a mined transaction, and grants Samsar render credits.
+7. Samsar generates the video.
+8. Completion persists video metadata to 0G Storage and mints an ERC-7857-inspired INFT through `SuperReferralsINFT`.
+9. The public INFT page exposes the video, attribution, agent metadata, and post-render actions.
+
+## Network Constraints
+
+Staging uses 0G staging/Galileo and Ethereum Sepolia.
+
+- Payment chain: Ethereum Sepolia, `TRANSACTION_CHAIN_ID=11155111`.
+- Sepolia USDC: `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`.
+- 0G chain: Galileo, `OG_CHAIN_ID=16602`.
+- 0G RPC: `https://evmrpc-testnet.0g.ai`.
+- 0G Storage indexer: `https://indexer-storage-testnet-turbo.0g.ai`.
+
+Mainnet uses 0G mainnet plus Ethereum mainnet and Base mainnet payment deployments.
+
+- Default payment chain: Ethereum mainnet, `TRANSACTION_NETWORK=mainnet`, `TRANSACTION_CHAIN_ID=1`.
+- Optional Base payment chain: `TRANSACTION_NETWORK=base`, `TRANSACTION_CHAIN_ID=8453`.
+- Base USDC: `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`.
+- 0G chain: mainnet, `OG_CHAIN_ID=16661`.
+- 0G RPC: `https://evmrpc.0g.ai`.
+- 0G Storage indexer: `https://indexer-storage-turbo.0g.ai`.
+
+Important runtime guardrails:
+
+- Non-production runtime maps Ethereum mainnet and Base mainnet transaction configs back to Sepolia unless `NODE_ENV=production` and `DEPLOYMENT_ENV=production`.
+- `pricing.chainId` on the customer account is the source of truth for render payment quotes.
+- Renders do not start until the server verifies payment sender, recipient, chain, token, and amount.
+- `ALLOW_MOCK_RENDER_PAYMENT=true` is only for local demos.
+- 0G records, INFT minting, and agent registry use the configured 0G network, not the payment network.
+- Live non-stable-token payments require Uniswap quote data and a KeeperHub payment workflow.
+
+## Local Run
+
+Install note: `package.json` currently references `samsar-js` as a local sibling package at `../samsar_one/samsar-js`. Keep that workspace present, or replace it with the published Samsar JS package before installing.
 
 ```bash
 npm install
@@ -16,84 +66,85 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-## Main Flows
+For a no-key demo, set the mock flags in `.env.local`:
 
-- Customer configures account pricing, charge currency, referrer domain, optional ENS name, and refund policy.
-- Customer page at `/` is for Samsar JS/Samsar Processor account creation through credit purchase/top-up, store setup, global pricing multiplier, and per-model USDC/sec pricing.
-- User page at `/r/:referrerCode` is for wallet signup, payment against the customer per-second pricing, render requests, and previous wallet render tasks.
-- User connects a wallet from the landing page; the app creates or reuses the wallet-backed sub-account, persists a user profile manifest to 0G Storage, and anchors the profile in `SuperReferralsUserRegistry` on 0G Chain.
-- User submits image URLs, JSON metadata, CTA URL, prompt, model, and aspect ratio for `image_list_to_video`.
-- Payment quote can be created for the customer account's configured chain and charge currency while the user pays the customer owner wallet through direct transfer or a Uniswap swap plus settlement transfer. The server verifies the mined transaction sender, recipient, chain, token, and amount before granting Samsar external-user credits and starting the render.
-- Render requests without a verified payment transaction stay pending or are rejected unless `ALLOW_MOCK_RENDER_PAYMENT=true` is explicitly set for local-only demos.
-- Generation completion triggers 0G Storage persistence, INFT metadata upload, and INFT mint.
-- Public INFT page at `/inft/:id` exposes the unique render URL, video download/share actions, assistant actions, retranslate, join, remove subtitles, update outro, send AXL peer messages, and inspect callable capabilities.
+```bash
+SUPERREFERRALS_MOCKS=true
+SAMSAR_MOCKS=true
+UNISWAP_MOCKS=true
+KEEPERHUB_MOCKS=true
+ZERO_G_MOCKS=true
+AGENT_REGISTRY_MOCKS=true
+USER_REGISTRY_MOCKS=true
+OG_SERVICE_MARKETPLACE_MOCKS=true
+INFT_MOCKS=true
+OG_COMPUTE_MOCKS=true
+AXL_MOCKS=true
+```
 
-## Role Model
+To test one live service at a time, leave global mocks on and set only that provider to live, for example:
 
-- Customer: the Samsar One/Samsar JS account owner. They buy or top up Samsar Processor credits, connect store/account details, and set a global pricing multiplier or per-model USDC/sec prices.
-- User: the wallet-backed buyer for a customer page. They pay the customer's configured price, start render tasks with their own CTA URLs/images/metadata, and can view their prior renders.
-- INFT viewer: any holder or public visitor opening a unique `/inft/:id` URL. They can watch, download, and share the rendered video while viewing its 0G, wallet, referrer, and agent metadata.
+```bash
+SUPERREFERRALS_MOCKS=true
+SAMSAR_MOCKS=false
+SAMSAR_API_KEY=replace_with_samsar_api_key
+```
 
-## Important Environment Variables
-
-- `SAMSAR_API_KEY`: parent customer/platform Samsar API key.
-- `SAMSAR_MOCKS=false`: use live Samsar while other integrations can stay mocked.
-- `TRANSACTION_CHAIN_ID` / `NEXT_PUBLIC_TRANSACTION_CHAIN_ID`: wallet prompt and payment transaction chain. Use `11155111` for dev/staging Sepolia and `1` for production mainnet.
-- `ALLOW_MOCK_RENDER_PAYMENT`: defaults to `false`; when false, render requests without a payment transaction stay `PAYMENT_PENDING`.
-- Customer `pricing.chainId`: source of truth for the user render payment chain; staging customers should be saved with Sepolia and production customers with mainnet.
-- `TRANSACTION_RPC_URL` / `NEXT_PUBLIC_TRANSACTION_RPC_URL`: RPC URL used by server-side transaction adapters and wallet network-add prompts.
-- `USER_REGISTRY_CONTRACT_ADDRESS`: deployed `SuperReferralsUserRegistry` on 0G Chain. Dev/staging use 0G Galileo (`OG_CHAIN_ID=16602`); production uses 0G mainnet (`OG_CHAIN_ID=16661`).
-- `UNISWAP_API_KEY`: quote and swap transaction integration for user pay-with-any-token and agent price signals.
-- `KEEPERHUB_API_KEY`: user render payment, partial refund, and rollback execution.
-- `KEEPERHUB_PAYMENT_WORKFLOW_ID`: optional KeeperHub workflow for pay-with-any-token swaps before settlement. Required for live non-stable token payments such as ETH/WETH.
-- `KEEPERHUB_ETH_USD_PRICE_HINT`: local/mock fallback for ETH payment quotes; live non-stable payments should use Uniswap quote data plus the KeeperHub workflow.
-- `OG_PRIVATE_KEY`, `OG_RPC_URL`, `OG_STORAGE_INDEXER_RPC`: 0G Storage upload signer.
-- `INFT_CONTRACT_ADDRESS`, `INFT_MINTER_PRIVATE_KEY`: deployed INFT contract and minter.
-- `AXL_BASE_URL`: local Gensyn AXL node, default `http://localhost:9002`.
-
-## Real Samsar, Mock Everything Else
+For staging with live Samsar, KeeperHub Sepolia payments, and 0G Galileo records:
 
 ```bash
 cp .env.staging.example .env.local
 ```
 
-Set:
+For production:
 
 ```bash
-SUPERREFERRALS_MOCKS=true
-SAMSAR_MOCKS=false
-SAMSAR_API_KEY=sk_your_samsar_key
-APP_BASE_URL=http://localhost:3000
+cp .env.production.example .env.local
 ```
 
-Leave `UNISWAP_MOCKS`, `KEEPERHUB_MOCKS`, `ZERO_G_MOCKS`, `INFT_MOCKS`, `OG_COMPUTE_MOCKS`, and `AXL_MOCKS` as `true` for local smoke tests. Set `KEEPERHUB_MOCKS=false`, `KEEPERHUB_API_KEY`, and `KEEPERHUB_PAYMENT_WORKFLOW_ID` when testing live Sepolia render payments.
+Use private RPC providers for production reliability.
 
-Known network defaults:
+## Key Environment Variables
 
-- Staging transaction network: Ethereum Sepolia, `TRANSACTION_CHAIN_ID=11155111`, USDC `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`.
-- Production transaction network: Ethereum mainnet, `TRANSACTION_CHAIN_ID=1`.
-- Dev/staging 0G Galileo for user registry, storage, INFT, and agent registry: `OG_CHAIN_ID=16602`, `OG_RPC_URL=https://evmrpc-testnet.0g.ai`, `OG_STORAGE_INDEXER_RPC=https://indexer-storage-testnet-turbo.0g.ai`.
-- Production 0G mainnet for 0G records and storage: `OG_CHAIN_ID=16661`, `OG_RPC_URL=https://evmrpc.0g.ai`, `OG_STORAGE_INDEXER_RPC=https://indexer-storage-turbo.0g.ai`.
-- AXL: `AXL_BASE_URL=http://localhost:9002` because AXL exposes a local HTTP API.
-- ENS: `ENS_CHAIN_ID=1` and an Ethereum mainnet RPC for production names. For Sepolia tests, use `ENS_CHAIN_ID=11155111` and a Sepolia RPC URL.
+- `SUPERREFERRALS_MOCKS`: global mock switch. Defaults to mocked behavior when unset.
+- `<PROVIDER>_MOCKS`: per-provider overrides such as `SAMSAR_MOCKS`, `KEEPERHUB_MOCKS`, `ZERO_G_MOCKS`, `INFT_MOCKS`, `OG_COMPUTE_MOCKS`, and `AXL_MOCKS`.
+- `SAMSAR_API_KEY`: required for live Samsar generation.
+- `TRANSACTION_NETWORK`, `TRANSACTION_CHAIN_ID`, `TRANSACTION_RPC_URL`: payment and wallet network.
+- `NEXT_PUBLIC_TRANSACTION_NETWORK`, `NEXT_PUBLIC_TRANSACTION_CHAIN_ID`, `NEXT_PUBLIC_TRANSACTION_RPC_URL`: browser wallet prompts.
+- `KEEPERHUB_API_KEY`, `KEEPERHUB_PAYMENT_WORKFLOW_ID`, `KEEPERHUB_PLATFORM_WALLET_ADDRESS`: live KeeperHub settlement.
+- `UNISWAP_API_KEY`: live Uniswap quote and swap transaction data.
+- `OG_NETWORK`, `OG_CHAIN_ID`, `OG_RPC_URL`, `OG_STORAGE_INDEXER_RPC`, `OG_PRIVATE_KEY`: 0G Chain and Storage.
+- `USER_REGISTRY_CONTRACT_ADDRESS`: deployed `SuperReferralsUserRegistry` address.
+- `INFT_CONTRACT_ADDRESS`, `INFT_MINTER_PRIVATE_KEY`: deployed INFT collection and mint signer.
+- `AXL_BASE_URL`: local Gensyn AXL node API, default `http://localhost:9002`.
 
 ## Contracts
 
-Contracts are in `contracts/`:
+Contracts live in `contracts/`.
 
-- `SuperReferralsINFT.sol`: ERC-7857-inspired INFT with encrypted metadata URI, metadata hash, usage authorization, and agent wallet metadata.
-- `SuperReferralsUserRegistry.sol`: wallet sub-account profile registry that stores the 0G profile root and referrer code for later lookup.
-- `SuperReferralsPaymentEscrow.sol`: escrowed generation payments with settlement and partial refund events.
+- `SuperReferralsUserRegistry.sol`: wallet sub-account profile roots and referrer lookup.
+- `SuperReferralsINFT.sol`: ERC-7857-inspired INFT with encrypted metadata URI, metadata hash, agent wallet, referrer code, and executor permissions.
+- `SuperReferralsAgentRegistry.sol`: agent manifests and job lifecycle receipts for 0G Chain.
+- `SuperReferralsPaymentEscrow.sol`: generation payment intents, settlement, partial refund, and cancellation flows.
 
-Compile with:
+Compile contracts:
 
 ```bash
 npm run contracts:compile
 ```
 
+Deploy one INFT collection per 0G network, then set `INFT_CONTRACT_ADDRESS`:
+
+```bash
+npm run contracts:deploy:inft:testnet
+npm run contracts:deploy:inft:mainnet
+```
+
+The deploy script uses `INFT_DEPLOYER_PRIVATE_KEY`, `INFT_MINTER_PRIVATE_KEY`, or `OG_PRIVATE_KEY` as the signer. It uses the same signer as owner unless `INFT_INITIAL_OWNER` is set.
+
 ## Docs
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for implementation notes, live integration behavior, and source references.
-
-See [SKILLS.md](SKILLS.md) for the project-specific Samsar theme, KeeperHub, and Uniswap references.
-See [docs/AGENT_APPLICATION.md](docs/AGENT_APPLICATION.md) for the refined agent framework and Agent Town architecture.
+- [Architecture](docs/ARCHITECTURE.md)
+- [Agent application](docs/AGENT_APPLICATION.md)
+- [KeeperHub workflow](docs/KEEPERHUB_WORKFLOW.md)
+- [Project skills and integration notes](SKILLS.md)

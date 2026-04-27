@@ -6,6 +6,7 @@ import {
   findPaymentToken,
   getPaymentTokens,
   getTransactionChainConfig,
+  normalizeTransactionChainIdForEnvironment,
   settlementTokenForCurrency,
   type PaymentToken,
   type TransactionChainConfig
@@ -45,6 +46,8 @@ type GenerationFormState = {
   ctaLogo: string;
   addFooterAnimation: boolean;
   footerMetadata: string;
+  publishToFeed: boolean;
+  feedTags: string;
   txHash: string;
 };
 
@@ -61,21 +64,30 @@ declare global {
   }
 }
 
+const sampleImageUrlBases = new Set([
+  "https://images.unsplash.com/photo-1542291026-7eec264c27ff",
+  "https://images.unsplash.com/photo-1460353581641-37baddab0fa2",
+  "https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77"
+]);
+
 const starterImages = [
   {
     image_url: "https://images.unsplash.com/photo-1542291026-7eec264c27ff",
     title: "Launch Shoe",
-    image_text: "Lightweight daily trainer"
+    image_text: "Lightweight daily trainer",
+    skip_enhancement: true
   },
   {
     image_url: "https://images.unsplash.com/photo-1460353581641-37baddab0fa2",
     title: "Lifestyle Bundle",
-    image_text: "Built for movement"
+    image_text: "Built for movement",
+    skip_enhancement: true
   },
   {
     image_url: "https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77",
     title: "Limited Offer",
-    image_text: "Available this week"
+    image_text: "Available this week",
+    skip_enhancement: true
   }
 ];
 
@@ -88,8 +100,6 @@ const starterFooterMetadata = JSON.stringify([
 ], null, 2);
 
 const defaultOutroFocusArea = JSON.stringify({ x: 680, y: 296, width: 432, height: 432 }, null, 2);
-
-const paymentRails: PaymentRail[] = ["keeperhub", "direct", "uniswap"];
 
 export default function UserLandingPage({ referrerCode }: { referrerCode: string }) {
   const [store, setStore] = useState<SuperReferralsStore | null>(null);
@@ -116,10 +126,11 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
     ctaLogo: "",
     addFooterAnimation: true,
     footerMetadata: starterFooterMetadata,
+    publishToFeed: true,
+    feedTags: "launch, product, referrer",
     txHash: ""
   });
-  const [paymentCurrency, setPaymentCurrency] = useState<PaymentCurrencySymbol>("USDC");
-  const [paymentRail, setPaymentRail] = useState<PaymentRail>("keeperhub");
+  const [paymentCurrency, setPaymentCurrency] = useState<PaymentCurrencySymbol>("ETH");
   const [quote, setQuote] = useState<PaymentQuote | null>(null);
   const [autoPolling, setAutoPolling] = useState(false);
   const [renderFlow, setRenderFlow] = useState<RenderFlowState>({ status: "idle", message: "" });
@@ -178,7 +189,7 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
   const pollingKey = pollingGenerationIds.join("|");
   const sessionStorageKey = useMemo(() => `superreferrals:user-session:${referrerCode}`, [referrerCode]);
   const transactionChain = useMemo(
-    () => getTransactionChainConfig(customer?.pricing.chainId),
+    () => getTransactionChainConfig(normalizeTransactionChainIdForEnvironment(customer?.pricing.chainId)),
     [customer?.pricing.chainId]
   );
   const paymentTokens = useMemo(() => getPaymentTokens(transactionChain.id), [transactionChain.id]);
@@ -187,6 +198,10 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
     findPaymentToken(customer?.pricing.settlementTokenAddress || "", transactionChain.id) ||
     settlementTokenForCurrency(customer?.pricing.currency || "USDC", transactionChain.id) ||
     selectedPaymentToken;
+  const paymentRail = useMemo(
+    () => resolveUserPaymentRail(selectedPaymentToken, settlementToken),
+    [selectedPaymentToken, settlementToken]
+  );
   const hasWalletAddress = Boolean(walletAddress.trim());
   const generationPayloadPreview = useMemo(
     () => previewGenerationPayload(generationForm, connectedSubAccount?.referrerCode || referrerCode),
@@ -209,7 +224,7 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
 
   useEffect(() => {
     setQuote(null);
-  }, [generationForm.imageUrls, generationForm.videoModel, generationForm.aspectRatio, paymentCurrency, paymentRail, transactionChain.id]);
+  }, [generationForm.imageUrls, generationForm.videoModel, generationForm.aspectRatio, paymentCurrency, transactionChain.id]);
 
   useEffect(() => {
     const firstToken = paymentTokens[0];
@@ -419,7 +434,7 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
     try {
       const account = await ensureWalletSubAccount();
       const quoted = await requestQuote(account);
-      setMessage(`${quoted.totalUsd.toFixed(2)} ${quoted.settlementCurrency || "USDC"} ${quoted.paymentRail || "keeperhub"} quote created on ${transactionChain.name}.`);
+      setMessage(`${quoted.totalUsd.toFixed(2)} ${quoted.settlementCurrency || "USDC"} quote created for payment in ${quoted.paymentCurrency || paymentCurrency} on ${transactionChain.name}.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Quote failed");
     } finally {
@@ -575,6 +590,10 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
           customerId: customer.id,
           subAccountId: account.id,
           generation: generationPayload,
+          feed: {
+            published: generationForm.publishToFeed,
+            tags: generationForm.feedTags
+          },
           payment: {
             quoteId: activeQuote.id,
             txHash: paymentTxHash,
@@ -628,9 +647,12 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
     setMessage("");
     try {
       const response = await fetch(`/api/generations/${id}/sync`, { method: "POST" });
-      await assertOk(response);
+      const data = await assertOk(response);
       await load();
-      setMessage("Render task synced.");
+      const syncedGeneration = data.generation as Generation | undefined;
+      setMessage(syncedGeneration?.status === "FAILED"
+        ? syncedGeneration.errorMessage || "Render task sync failed."
+        : "Render task synced.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Sync failed");
     } finally {
@@ -724,21 +746,24 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
                 <label>JSON payload metadata</label>
                 <textarea value={generationForm.metadata} onChange={(event) => setGenerationForm({ ...generationForm, metadata: event.target.value })} />
               </div>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={generationForm.publishToFeed}
+                  onChange={(event) => setGenerationForm({ ...generationForm, publishToFeed: event.target.checked })}
+                />
+                Publish video to feed
+              </label>
+              <TextField label="Feed tags" value={generationForm.feedTags} onChange={(feedTags) => setGenerationForm({ ...generationForm, feedTags })} />
               <div className="field full">
                 <label>Prompt</label>
                 <textarea value={generationForm.prompt} onChange={(event) => setGenerationForm({ ...generationForm, prompt: event.target.value })} />
               </div>
-              <SelectField
-                label="Pay with"
-                value={paymentCurrency}
-                options={paymentTokens.map((token) => token.symbol)}
-                onChange={(currency) => setPaymentCurrency(currency as PaymentCurrencySymbol)}
-              />
-              <SelectField
-                label="Payment rail"
-                value={paymentRail}
-                options={paymentRails}
-                onChange={(rail) => setPaymentRail(rail as PaymentRail)}
+              <PaymentMethodSelector
+                tokens={paymentTokens}
+                selectedSymbol={paymentCurrency}
+                settlementToken={settlementToken}
+                onSelect={(currency) => setPaymentCurrency(currency)}
               />
               <TextField label="CTA outro URL" value={generationForm.ctaUrl} onChange={(ctaUrl) => setGenerationForm({ ...generationForm, ctaUrl })} />
               <TextField label="CTA top text" value={generationForm.ctaTextTop} onChange={(ctaTextTop) => setGenerationForm({ ...generationForm, ctaTextTop })} />
@@ -794,21 +819,25 @@ export default function UserLandingPage({ referrerCode }: { referrerCode: string
               transactionChain={transactionChain}
               selectedPaymentToken={selectedPaymentToken}
               settlementToken={settlementToken}
+              paymentRail={paymentRail}
               estimatedDurationSeconds={estimatedDurationSeconds}
               selectedPricingDetails={selectedPricingDetails}
             />
             <div className="button-row">
               <button className="btn" onClick={createQuote} disabled={busy === "quote" || imageCount === 0}>
-                <CircleDollarSign size={16} /> Quote {estimatedDurationSeconds}s
+                <CircleDollarSign size={16} /> Quote {paymentCurrency}
               </button>
               <button className="btn primary" onClick={runGeneration} disabled={busy === "generation" || imageCount === 0}>
-                <Play size={16} /> Pay & start render
+                <Play size={16} /> Pay {paymentCurrency} & start render
               </button>
               {quote?.checkoutUrl && quote.paymentRail === "uniswap" && (
                 <a className="btn" href={quote.checkoutUrl} target="_blank" rel="noreferrer">
                   <ExternalLink size={16} /> Open Uniswap
                 </a>
               )}
+              <a className="btn" href="/feed">
+                <ExternalLink size={16} /> Open feed
+              </a>
               {autoPolling && <span className="badge ok">polling renders</span>}
             </div>
             <RenderFlowNotice state={renderFlow} />
@@ -837,8 +866,10 @@ function RenderFlowNotice({ state }: { state: RenderFlowState }) {
   if (state.status === "idle") {
     return null;
   }
+  const failedAfterStart = state.status === "failed" && Boolean(state.generationId);
+  const finalizationFailed = state.status === "failed" && state.message.includes("0G persistence");
   const statusLabel =
-    state.status === "failed" ? "Render not started" :
+    state.status === "failed" ? (finalizationFailed ? "Finalization failed" : failedAfterStart ? "Render failed" : "Render not started") :
       state.status === "completed" ? "Render finished" :
         state.status === "started" ? "Render started" :
           state.status === "starting" ? "Starting render" :
@@ -887,12 +918,51 @@ function PricingOption({
   );
 }
 
+function PaymentMethodSelector({
+  tokens,
+  selectedSymbol,
+  settlementToken,
+  onSelect
+}: {
+  tokens: PaymentToken[];
+  selectedSymbol: PaymentCurrencySymbol;
+  settlementToken: PaymentToken;
+  onSelect: (symbol: PaymentCurrencySymbol) => void;
+}) {
+  const orderedTokens = [...tokens].sort((left, right) => paymentTokenRank(left) - paymentTokenRank(right));
+  return (
+    <div className="field full">
+      <label>Payment currency</label>
+      <div className="amount-grid payment-method-grid">
+        {orderedTokens.map((token) => {
+          const active = token.symbol === selectedSymbol;
+          const rail = resolveUserPaymentRail(token, settlementToken);
+          const settlementLabel = rail === "direct" ? "direct transfer" : `${settlementToken.symbol} settlement`;
+          return (
+            <button
+              type="button"
+              className={`amount-choice ${active ? "active" : ""}`}
+              onClick={() => onSelect(token.symbol)}
+              key={`${token.chainId}:${token.address}`}
+            >
+              <span className="subtle">{token.native ? "Native token" : "ERC-20 token"}</span>
+              <strong>{token.symbol}</strong>
+              <span>{settlementLabel}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function PaymentSummary({
   imageCount,
   quote,
   transactionChain,
   selectedPaymentToken,
   settlementToken,
+  paymentRail,
   estimatedDurationSeconds,
   selectedPricingDetails
 }: {
@@ -901,6 +971,7 @@ function PaymentSummary({
   transactionChain: TransactionChainConfig;
   selectedPaymentToken: PaymentToken;
   settlementToken: PaymentToken;
+  paymentRail: PaymentRail;
   estimatedDurationSeconds: number;
   selectedPricingDetails: ReturnType<typeof resolveModelPriceDetails>;
 }) {
@@ -930,12 +1001,10 @@ function PaymentSummary({
         <span className="subtle">Settlement</span>
         <strong>{settlementToken.symbol}</strong>
       </div>
-      {quote && (
-        <div>
-          <span className="subtle">Rail</span>
-          <strong>{quote.paymentRail || "keeperhub"}</strong>
-        </div>
-      )}
+      <div>
+        <span className="subtle">Payment path</span>
+        <strong>{quote?.paymentRail || paymentRail}</strong>
+      </div>
       {quote?.paymentAmountAtomic && (
         <div>
           <span className="subtle">Pay amount</span>
@@ -950,6 +1019,20 @@ function PaymentSummary({
       )}
     </div>
   );
+}
+
+function paymentTokenRank(token: PaymentToken) {
+  const preferredOrder: Record<string, number> = {
+    ETH: 0,
+    USDC: 1,
+    WETH: 2,
+    USDT: 3
+  };
+  return preferredOrder[token.symbol] ?? 10;
+}
+
+function resolveUserPaymentRail(paymentToken: PaymentToken, settlementToken: PaymentToken): PaymentRail {
+  return paymentToken.address.toLowerCase() === settlementToken.address.toLowerCase() ? "direct" : "keeperhub";
 }
 
 function GenerationItem({ generation, busy, onSync }: { generation: Generation; busy: boolean; onSync: () => void }) {
@@ -976,6 +1059,7 @@ function GenerationItem({ generation, busy, onSync }: { generation: Generation; 
           <RefreshCw size={16} /> Sync
         </button>
         {generation.inftId && <a className="btn" href={`/inft/${generation.inftId}`}><ExternalLink size={16} /> Open INFT</a>}
+        {generation.feed?.published && generation.status === "COMPLETED" && <a className="btn" href="/feed"><ExternalLink size={16} /> View in feed</a>}
       </div>
     </div>
   );
@@ -1156,7 +1240,7 @@ async function assertWalletBalance(provider: EthereumProvider, owner: string, to
     ? BigInt(String(await provider.request({ method: "eth_getBalance", params: [owner, "latest"] })))
     : await readErc20Balance(provider, token.address, owner);
   if (balance < requiredAmount) {
-    throw new Error(`Insufficient ${token.symbol} balance for payment. Required ${formatAtomicAmount(requiredAmount, token.decimals)} ${token.symbol}, available ${formatAtomicAmount(balance, token.decimals)} ${token.symbol}. Render was not started.`);
+    throw new Error(`Insufficient ${token.symbol} balance for payment. Required ${formatAtomicAmount(requiredAmount, token.decimals)} ${token.symbol}, available ${formatAtomicAmount(balance, token.decimals)} ${token.symbol}. Choose another payment currency and create a fresh quote. Render was not started.`);
   }
 }
 
@@ -1329,7 +1413,7 @@ function parseJsonObject(raw: string) {
 }
 
 function buildGenerationPayload(form: GenerationFormState, fallbackReferrerCode: string): GenerationInput {
-  const imageInputs = parseImageInputs(form.imageUrls);
+  const imageInputs = parseImageInputs(form.imageUrls).map((item) => applySampleImageProcessingFlags(item, form.aspectRatio));
   const ctaUrl = form.ctaUrl.trim();
   if (!ctaUrl) {
     throw new Error("cta_url is required for the server-generated CTA outro image");
@@ -1365,6 +1449,47 @@ function buildGenerationPayload(form: GenerationFormState, fallbackReferrerCode:
   }
 
   return payload;
+}
+
+function applySampleImageProcessingFlags(item: string | Record<string, unknown>, aspectRatio: VideoAspectRatio): string | Record<string, unknown> {
+  if (typeof item === "string") {
+    return isSampleImageUrl(item)
+      ? { image_url: buildAspectSizedSampleImageUrl(item, aspectRatio), skip_enhancement: true }
+      : item;
+  }
+
+  const hasExplicitSkip =
+    Object.prototype.hasOwnProperty.call(item, "skip_enhancement") ||
+    Object.prototype.hasOwnProperty.call(item, "skipEnhancement");
+  const imageUrl = getImageInputUrl(item);
+
+  return {
+    ...item,
+    ...(isSampleImageUrl(imageUrl) ? { image_url: buildAspectSizedSampleImageUrl(imageUrl, aspectRatio) } : {}),
+    ...(!hasExplicitSkip && isSampleImageUrl(imageUrl) ? { skip_enhancement: true } : {})
+  };
+}
+
+function isSampleImageUrl(rawUrl: string) {
+  try {
+    const url = new URL(rawUrl);
+    return sampleImageUrlBases.has(`${url.origin}${url.pathname}`);
+  } catch {
+    return false;
+  }
+}
+
+function buildAspectSizedSampleImageUrl(rawUrl: string, aspectRatio: VideoAspectRatio) {
+  const url = new URL(rawUrl);
+  const [width, height] = aspectRatio === "9:16" ? [1024, 1792] : [1792, 1024];
+  url.search = new URLSearchParams({
+    auto: "format",
+    fit: "crop",
+    w: String(width),
+    h: String(height),
+    q: "90"
+  }).toString();
+  return url.toString();
 }
 
 function previewGenerationPayload(form: GenerationFormState, fallbackReferrerCode: string) {
@@ -1420,7 +1545,7 @@ function normalizeImageInputItem(item: unknown, index: number): string | Record<
     throw new Error(`image_urls item ${index + 1} must be a URL string or object`);
   }
   const record = item as Record<string, unknown>;
-  const imageUrl = String(record.image_url || record.url || "").trim();
+  const imageUrl = getImageInputUrl(record);
   if (!imageUrl) {
     throw new Error(`image_urls item ${index + 1} must include image_url`);
   }
@@ -1429,6 +1554,20 @@ function normalizeImageInputItem(item: unknown, index: number): string | Record<
     ...record,
     image_url: imageUrl
   };
+}
+
+function getImageInputUrl(record: Record<string, unknown>) {
+  return String(
+    record.image_url ||
+    record.imageUrl ||
+    record.url ||
+    record.src ||
+    record.effective_url ||
+    record.effectiveUrl ||
+    record.enhanced_url ||
+    record.enhancedUrl ||
+    ""
+  ).trim();
 }
 
 function assertUsableImageUrl(rawUrl: string, label: string) {

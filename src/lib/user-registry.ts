@@ -31,7 +31,7 @@ export async function registerZeroGUserProfile(input: {
   const profileId = zeroGUserProfileId(input.customerId, wallet);
   const registeredAt = new Date().toISOString();
 
-  if (isProviderMock("USER_REGISTRY") || !contractAddress || !privateKey) {
+  if (isProviderMock("USER_REGISTRY")) {
     return {
       profileId,
       chainId: chain.id,
@@ -44,6 +44,9 @@ export async function registerZeroGUserProfile(input: {
       registeredAt,
       mock: true
     };
+  }
+  if (!contractAddress || !privateKey) {
+    throw new Error("USER_REGISTRY_CONTRACT_ADDRESS and USER_REGISTRY_PRIVATE_KEY or OG_PRIVATE_KEY are required when USER_REGISTRY_MOCKS=false");
   }
 
   const account = privateKeyToAccount(privateKey);

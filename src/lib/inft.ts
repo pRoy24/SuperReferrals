@@ -41,13 +41,16 @@ export async function mintINFT({
   const chain = getINFTChain();
   const rpcUrl = chain.rpcUrls.default.http[0];
 
-  if (isProviderMock("INFT") || !contractAddress || !privateKey) {
+  if (isProviderMock("INFT")) {
     return {
       tokenId: String(BigInt(`0x${shortHash(`${ownerWallet}:${metadataUri}`)}`)),
       contractAddress: contractAddress || "0x0000000000000000000000000000000000000000",
       txHash: createId("mock_mint"),
       mock: true
     };
+  }
+  if (!contractAddress || !privateKey) {
+    throw new Error("INFT_CONTRACT_ADDRESS and INFT_MINTER_PRIVATE_KEY or OG_PRIVATE_KEY are required when INFT_MOCKS=false");
   }
 
   const account = privateKeyToAccount(privateKey);

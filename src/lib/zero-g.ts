@@ -16,12 +16,22 @@ export async function persistJsonToZeroG(value: unknown): Promise<ZeroGArtifact>
   return uploadBufferToZeroG(body, "application/json", "metadata.json");
 }
 
+export function buildZeroGStorageGatewayUrl(rootHash: string) {
+  const gatewayBase = env("OG_STORAGE_GATEWAY_URL") || env("OG_STORAGE_INDEXER_RPC");
+  if (!gatewayBase || rootHash.startsWith("mock/")) {
+    return "";
+  }
+  const url = new URL("/file", gatewayBase.replace(/\/$/, ""));
+  url.searchParams.set("root", rootHash);
+  return url.toString();
+}
+
 export async function publishDataAvailabilityCommitment(value: unknown): Promise<ZeroGArtifact> {
   const body = Buffer.from(JSON.stringify(value, null, 2));
   const rootHash = bytes32From(body);
   const daEndpoint = env("OG_DA_URL");
 
-  if (isProviderMock("ZERO_G") || !daEndpoint) {
+  if (isProviderMock("ZERO_G")) {
     return {
       rootHash,
       uri: `0g-da://mock/${sha256Hex(body).slice(0, 32)}`,
@@ -29,6 +39,9 @@ export async function publishDataAvailabilityCommitment(value: unknown): Promise
       contentType: "application/json",
       mock: true
     };
+  }
+  if (!daEndpoint) {
+    throw new Error("OG_DA_URL is required when ZERO_G_MOCKS=false");
   }
 
   const response = await fetch(daEndpoint, {
@@ -63,7 +76,7 @@ export async function uploadBufferToZeroG(
   const indexerRpc = env("OG_STORAGE_INDEXER_RPC");
   const privateKey = env("OG_PRIVATE_KEY");
 
-  if (isProviderMock("ZERO_G") || !rpcUrl || !indexerRpc || !privateKey) {
+  if (isProviderMock("ZERO_G")) {
     return {
       rootHash,
       uri: `0g://mock/${sha256Hex(buffer).slice(0, 32)}/${encodeURIComponent(fileName)}`,
@@ -71,6 +84,14 @@ export async function uploadBufferToZeroG(
       contentType,
       mock: true
     };
+  }
+  if (!rpcUrl || !indexerRpc || !privateKey) {
+    const missing = [
+      !rpcUrl ? "OG_RPC_URL" : "",
+      !indexerRpc ? "OG_STORAGE_INDEXER_RPC" : "",
+      !privateKey ? "OG_PRIVATE_KEY" : ""
+    ].filter(Boolean);
+    throw new Error(`${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} required when ZERO_G_MOCKS=false`);
   }
 
   const sdk = await import("@0gfoundation/0g-ts-sdk") as Record<string, any>;

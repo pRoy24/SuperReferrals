@@ -6,6 +6,8 @@ node_modules/
 # Environment files
 .env
 .env.*
+.env.local
+.env.*.local
 !.env.example
 !.env*.example
 
@@ -18,19 +20,26 @@ next-env.d.ts.bak
 dist/
 build/
 coverage/
+coverage.json
 *.tsbuildinfo
+*.tgz
 
 # Hardhat / Solidity generated output
 artifacts/
 cache/
 typechain/
 typechain-types/
+deployments/
+ignition/deployments/
+gas-report.txt
 
 # Local app state and development caches
 .superreferrals/
 .npm-cache/
 .turbo/
 .swc/
+.parcel-cache/
+.eslintcache
 
 # Logs
 logs/
@@ -52,6 +61,8 @@ pnpm-debug.log*
 # Hosting / tool output
 .vercel/
 .netlify/
+playwright-report/
+test-results/
 
 # OS and editor files
 .DS_Store

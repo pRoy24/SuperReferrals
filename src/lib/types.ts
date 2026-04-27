@@ -153,6 +153,12 @@ export interface GenerationInput {
   }>;
 }
 
+export interface GenerationFeedSettings {
+  published: boolean;
+  tags: string[];
+  publishedAt?: string;
+}
+
 export interface GenerationPayment {
   quoteId?: string;
   txHash?: string;
@@ -214,6 +220,7 @@ export interface Generation {
   samsarRequestId?: string;
   samsarSessionId?: string;
   resultUrl?: string;
+  feed?: GenerationFeedSettings;
   storage?: {
     video?: ZeroGArtifact;
     metadata?: ZeroGArtifact;
@@ -223,6 +230,64 @@ export interface Generation {
   errorMessage?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export type FeedSortOption = "ranked" | "newest" | "most_liked" | "most_commented" | "most_viewed";
+
+export interface FeedLike {
+  id: string;
+  generationId: string;
+  viewerId: string;
+  createdAt: string;
+}
+
+export interface FeedComment {
+  id: string;
+  generationId: string;
+  viewerId: string;
+  authorName: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FeedView {
+  id: string;
+  generationId: string;
+  viewerId: string;
+  count: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FeedMetrics {
+  likes: number;
+  comments: number;
+  views: number;
+  score: number;
+}
+
+export interface PublicFeedItem {
+  id: string;
+  generationId: string;
+  inftId?: string;
+  customerId: string;
+  customerName: string;
+  subAccountId: string;
+  authorName: string;
+  referrerCode: string;
+  title: string;
+  description: string;
+  videoUrl: string;
+  posterUrl?: string;
+  aspectRatio: VideoAspectRatio;
+  videoModel: VideoModel;
+  tags: string[];
+  metrics: FeedMetrics;
+  comments: FeedComment[];
+  likedByViewer: boolean;
+  createdAt: string;
+  publishedAt: string;
 }
 
 export interface INFTAttribute {
@@ -375,12 +440,15 @@ export interface AgentJob {
 }
 
 export interface SuperReferralsStore {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   customers: Customer[];
   subAccounts: SubAccount[];
   quotes: PaymentQuote[];
   generations: Generation[];
   infts: INFTRecord[];
+  feedLikes: FeedLike[];
+  feedComments: FeedComment[];
+  feedViews: FeedView[];
   agents: AgentProfile[];
   agentJobs: AgentJob[];
   agentTownEvents: AgentTownEvent[];

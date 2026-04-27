@@ -7,9 +7,10 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
     const generation = await syncGeneration(id);
     return NextResponse.json({ generation });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to sync generation";
     return NextResponse.json(
-      { message: error instanceof Error ? error.message : "Unable to sync generation" },
-      { status: 400 }
+      { message },
+      { status: message.toLowerCase().includes("not found") ? 404 : 500 }
     );
   }
 }
