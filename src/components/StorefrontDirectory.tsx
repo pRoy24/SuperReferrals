@@ -8,6 +8,7 @@ import {
   resolveModelPriceDetails
 } from "@/lib/pricing";
 import type { Customer, StorefrontRating, SuperReferralsStore } from "@/lib/types";
+import { isUsableEvmAddress } from "@/lib/wallet-address";
 
 export default function StorefrontDirectory() {
   const [store, setStore] = useState<SuperReferralsStore | null>(null);
@@ -28,7 +29,9 @@ export default function StorefrontDirectory() {
   }, []);
 
   const storefronts = useMemo(
-    () => store?.customers.map((customer) => buildStorefrontDirectoryItem(store, customer)) || [],
+    () => store?.customers
+      .filter(isPublicStorefrontCustomer)
+      .map((customer) => buildStorefrontDirectoryItem(store, customer)) || [],
     [store]
   );
 
@@ -178,4 +181,16 @@ function formatRating(average: number, count: number) {
     return "No ratings";
   }
   return `${average.toFixed(1)} (${count})`;
+}
+
+function isPublicStorefrontCustomer(customer: Customer) {
+  const hasAccountSession = Boolean(
+    customer.samsarAccount?.hasSession ||
+    customer.samsarAccount?.hasApiKey ||
+    customer.samsarAccount?.externalUserId
+  );
+  return Boolean(customer.storefront) &&
+    hasAccountSession &&
+    Number(customer.subscription.creditsRemaining || 0) > 0 &&
+    isUsableEvmAddress(customer.ownerWallet);
 }

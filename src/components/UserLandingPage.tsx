@@ -22,6 +22,7 @@ import {
   resolveModelPriceDetails
 } from "@/lib/pricing";
 import { getStorefrontAccessError } from "@/lib/storefront-access";
+import { isUsableEvmAddress } from "@/lib/wallet-address";
 import type {
   Customer,
   Generation,
@@ -163,7 +164,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const [metadataWizardItems, setMetadataWizardItems] = useState<MetadataWizardItem[]>(() => parseMetadataWizardItems(starterCampaignMetadata));
   const [footerWizardItems, setFooterWizardItems] = useState<FooterWizardItem[]>(() => parseFooterWizardItems(starterFooterMetadata));
   const [outroFocusAreaWizard, setOutroFocusAreaWizard] = useState<OutroFocusAreaWizard>(() => parseOutroFocusAreaWizard(defaultOutroFocusArea));
-  const [paymentCurrency, setPaymentCurrency] = useState<PaymentCurrencySymbol>("ETH");
+  const [paymentCurrency, setPaymentCurrency] = useState<PaymentCurrencySymbol>("USDC");
   const [quote, setQuote] = useState<PaymentQuote | null>(null);
   const [autoPolling, setAutoPolling] = useState(false);
   const [renderFlow, setRenderFlow] = useState<RenderFlowState>({ status: "idle", message: "" });
@@ -632,6 +633,9 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     const sameToken = paymentToken.address.toLowerCase() === activeSettlementToken.address.toLowerCase();
     const paymentAmountAtomic = activeQuote.paymentAmountAtomic || activeQuote.settlementAmountAtomic;
     const paymentRecipient = activeQuote.paymentRecipientAddress || customer.ownerWallet;
+    if (!isUsableEvmAddress(paymentRecipient)) {
+      throw new Error("Quote did not include a valid non-zero payment recipient. Ask the storefront owner to link an owner wallet or configure KeeperHub settlement.");
+    }
 
     if (activeQuote.paymentRail === "uniswap" && !sameToken) {
       updateRenderFlow({ status: "payment", message: "Requesting Uniswap swap transaction from the wallet." });
@@ -834,6 +838,10 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
 
   if (!customer) {
     return <main className="public-main"><div className="notice">Customer store was not found.</div></main>;
+  }
+
+  if (!isUsableEvmAddress(customer.ownerWallet)) {
+    return <main className="public-main"><div className="notice">This storefront is not ready for payments because the owner wallet is missing.</div></main>;
   }
 
   return (
@@ -1550,8 +1558,8 @@ function PaymentSummary({
 
 function paymentTokenRank(token: PaymentToken) {
   const preferredOrder: Record<string, number> = {
-    ETH: 0,
-    USDC: 1,
+    USDC: 0,
+    ETH: 1,
     WETH: 2,
     USDT: 3
   };
@@ -1753,6 +1761,9 @@ async function requestTokenTransfer({
   label: string;
   chainName: string;
 }) {
+  if (!isUsableEvmAddress(recipient)) {
+    throw new Error(`${label} recipient is missing, invalid, or the zero address. No wallet transaction was submitted.`);
+  }
   await assertWalletBalance(provider, from, token, amountAtomic);
   const tx = token.native
     ? {

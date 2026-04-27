@@ -6,6 +6,7 @@ import { createId, makeReferrerCode, nowIso, normalizeWallet } from "./ids";
 import { findPaymentToken, getTransactionChainId, settlementTokenForCurrency } from "./payment-tokens";
 import { defaultModelPricingConfigurations, defaultPricing } from "./pricing";
 import { normalizeWalletList } from "./storefront-access";
+import { isUsableEvmAddress } from "./wallet-address";
 import type {
   AgentJob,
   AgentProfile,
@@ -297,7 +298,10 @@ export function isPublicStorefrontCustomer(customer: Customer) {
     customer.samsarAccount?.apiKey ||
     (customer.samsarAccount?.externalUserId && env("SAMSAR_API_KEY"))
   );
-  return hasAccountSession && Number(customer.subscription.creditsRemaining || 0) > 0;
+  return Boolean(customer.storefront) &&
+    hasAccountSession &&
+    Number(customer.subscription.creditsRemaining || 0) > 0 &&
+    isUsableEvmAddress(customer.ownerWallet);
 }
 
 export function upsertCustomer(store: SuperReferralsStore, input: Partial<Customer>) {

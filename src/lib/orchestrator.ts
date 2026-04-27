@@ -45,6 +45,7 @@ import {
 } from "./samsar";
 import { fetchSamsarProcessorCredits } from "./samsar-processor";
 import { createUniswapQuote } from "./uniswap";
+import { assertUsableEvmAddress } from "./wallet-address";
 import { buildZeroGStorageGatewayUrl, persistJsonToZeroG, persistRemoteVideoToZeroG } from "./zero-g";
 import { withSerializedZeroGTransaction } from "./zero-g-chain";
 import { sendAxlMessage } from "./axl";
@@ -252,6 +253,7 @@ export async function quotePayment(input: {
   if (input.chainId && input.chainId !== chainId) {
     throw new Error(`Payment chain must match the customer account chain ${getTransactionChainConfig(chainId).name}.`);
   }
+  const customerOwnerWallet = assertUsableEvmAddress(customer.ownerWallet, "Customer owner wallet");
   const settlementToken =
     findPaymentToken(customer.pricing.settlementTokenAddress || "", chainId) ||
     findPaymentToken(input.tokenOut || "", chainId) ||
@@ -284,6 +286,9 @@ export async function quotePayment(input: {
   ) {
     throw new Error(`KEEPERHUB_PLATFORM_WALLET_ADDRESS is required so KeeperHub can receive ${paymentToken.symbol} and settle ${settlementToken.symbol}.`);
   }
+  const keeperPaymentRecipient = paymentRail === "keeperhub" && !sameToken
+    ? assertUsableEvmAddress(getKeeperHubPlatformWalletAddress(), "KEEPERHUB_PLATFORM_WALLET_ADDRESS")
+    : "";
   const conversionQuote = !sameToken && input.swapper
     ? await createUniswapQuote({
       type: "EXACT_OUTPUT",
@@ -304,12 +309,12 @@ export async function quotePayment(input: {
       amountUsd: pricing.totalUsd
     });
   const paymentRecipientAddress = paymentRail === "keeperhub" && !sameToken
-    ? normalizeWallet(getKeeperHubPlatformWalletAddress())
-    : customer.ownerWallet;
+    ? keeperPaymentRecipient
+    : customerOwnerWallet;
   const keeperIntent = paymentRail === "keeperhub"
     ? await createKeeperPaymentIntent({
       payerAddress: input.swapper || "",
-      recipientAddress: customer.ownerWallet,
+      recipientAddress: customerOwnerWallet,
       amount: pricing.totalUsd.toFixed(2),
       paymentAmountAtomic,
       paymentRecipientAddress,
@@ -514,7 +519,11 @@ export async function createGeneration(input: {
     (expectedPaymentToken.address.toLowerCase() === expectedSettlementToken.address.toLowerCase()
       ? expectedSettlementAmountAtomic
       : amountToAtomic(priced.totalUsd, expectedPaymentToken.decimals));
-  const expectedPaymentRecipient = quote?.paymentRecipientAddress || customer.ownerWallet;
+  const customerOwnerWallet = assertUsableEvmAddress(customer.ownerWallet, "Customer owner wallet");
+  const expectedPaymentRecipient = assertUsableEvmAddress(
+    quote?.paymentRecipientAddress || customerOwnerWallet,
+    "Payment recipient wallet"
+  );
   const generationId = createId("gen");
   const timestamp = nowIso();
   const paymentConfirmation = await resolvePaymentConfirmation({
@@ -539,7 +548,7 @@ export async function createGeneration(input: {
   })
     ? await confirmKeeperPaymentSettlement({
       payerAddress: input.payment?.payerWallet || subAccount.wallet,
-      recipientAddress: customer.ownerWallet,
+      recipientAddress: customerOwnerWallet,
       amount: priced.totalUsd.toFixed(2),
       amountUsd: priced.totalUsd,
       paymentAmountAtomic: expectedPaymentAmountAtomic,
