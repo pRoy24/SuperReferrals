@@ -1,7 +1,7 @@
 "use client";
 
 import { Bot, CircleDollarSign, Code2, ExternalLink, ListChecks, Play, Plus, RefreshCw, ShieldCheck, Store, Trash2, Wallet } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
 import {
   requestWalletAccounts,
@@ -142,6 +142,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const [walletAddress, setWalletAddress] = useState("");
   const [walletProviders, setWalletProviders] = useState<BrowserWalletProvider[]>([]);
   const [activeWalletProvider, setActiveWalletProvider] = useState<BrowserWalletProvider | null>(null);
+  const hydratedWalletSessionKey = useRef("");
   const [profileForm, setProfileForm] = useState({
     email: "",
     username: ""
@@ -424,6 +425,10 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   }, [activeWalletProvider?.id, walletProviders]);
 
   useEffect(() => {
+    if (hydratedWalletSessionKey.current === sessionStorageKey) {
+      return;
+    }
+    hydratedWalletSessionKey.current = sessionStorageKey;
     const rawSession = window.localStorage.getItem(sessionStorageKey);
     if (!rawSession) {
       const provider = activeWalletProvider?.provider || walletProviders[0]?.provider || window.ethereum;
@@ -453,7 +458,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     } catch {
       window.localStorage.removeItem(sessionStorageKey);
     }
-  }, [sessionStorageKey, activeWalletProvider?.id, walletProviders]);
+  }, [sessionStorageKey, activeWalletProvider?.provider, walletProviders]);
 
   useEffect(() => {
     if (!walletAddress.trim()) {
@@ -1058,10 +1063,10 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
               selectedPricingDetails={selectedPricingDetails}
             />
             <div className="button-row">
-              <button className="btn" onClick={createQuote} disabled={busy === "quote" || imageCount === 0 || Boolean(renderGateError)}>
+              <button className="btn" onClick={createQuote} disabled={busy === "quote" || imageCount === 0}>
                 <CircleDollarSign size={16} /> Quote {paymentCurrency}
               </button>
-              <button className="btn primary" onClick={runGeneration} disabled={busy === "generation" || imageCount === 0 || Boolean(renderGateError)}>
+              <button className="btn primary" onClick={runGeneration} disabled={busy === "generation" || imageCount === 0}>
                 <Play size={16} /> Pay {paymentCurrency} & start render
               </button>
               {quote?.checkoutUrl && quote.paymentRail === "uniswap" && (
