@@ -2,6 +2,7 @@
 
 import { Bot, CircleDollarSign, Code2, ExternalLink, ListChecks, Play, Plus, RefreshCw, ShieldCheck, Store, Trash2, Wallet } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { UserStoreCreatorSkeleton } from "@/components/FormLoadingSkeletons";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
 import {
   requestWalletAccounts,
@@ -230,10 +231,10 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const renderAccessError = getStorefrontAccessError(customer, store, {
     wallet: walletAddress || connectedSubAccount?.wallet
   });
-  const paymentSetupError = customer && !isUsableEvmAddress(customer.ownerWallet)
-    ? "This storefront is waiting for an owner wallet before payments can start."
+  const paymentSetupNotice = customer && !isUsableEvmAddress(customer.ownerWallet)
+    ? "Merchant payout wallet is not connected. Payment quotes will use the configured platform settlement wallet when available."
     : "";
-  const renderGateError = renderConditionError || renderAccessError || paymentSetupError;
+  const renderGateError = renderConditionError || renderAccessError;
   const selectedPricingDetails = resolveModelPriceDetails(customer, selectedPricing);
   const estimatedDurationSeconds = estimateDurationSeconds(imageCount, selectedPricing);
   const userGenerations = connectedSubAccount
@@ -644,9 +645,6 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       if (renderAccessError) {
         throw new Error(renderAccessError);
       }
-      if (paymentSetupError) {
-        throw new Error(paymentSetupError);
-      }
       const account = await ensureWalletSubAccount();
       const quoted = await requestQuote(account);
       setMessage(`${quoted.totalUsd.toFixed(2)} ${quoted.settlementCurrency || "USDC"} quote created for payment in ${quoted.paymentCurrency || paymentCurrency} on ${transactionChain.name}.`);
@@ -686,7 +684,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     const paymentAmountAtomic = activeQuote.paymentAmountAtomic || activeQuote.settlementAmountAtomic;
     const paymentRecipient = activeQuote.paymentRecipientAddress || customer.ownerWallet;
     if (!isUsableEvmAddress(paymentRecipient)) {
-      throw new Error("Quote did not include a valid non-zero payment recipient. Ask the storefront owner to link an owner wallet or configure KeeperHub settlement.");
+      throw new Error("Quote did not include a valid non-zero payment recipient. Connect a merchant payout wallet or configure the platform settlement wallet.");
     }
 
     if (activeQuote.paymentRail === "uniswap" && !sameToken) {
@@ -709,7 +707,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
         provider: walletProvider.provider,
         from: account.wallet,
         token: activeSettlementToken,
-        recipient: customer.ownerWallet,
+        recipient: paymentRecipient,
         amountAtomic: activeQuote.settlementAmountAtomic,
         label: "Settlement transfer",
         chainName: transactionChain.name
@@ -767,7 +765,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       provider: walletProvider.provider,
       from: account.wallet,
       token: activeSettlementToken,
-      recipient: customer.ownerWallet,
+      recipient: paymentRecipient,
       amountAtomic: activeQuote.settlementAmountAtomic,
       label: "Payment transfer",
       chainName: transactionChain.name
@@ -798,9 +796,6 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       }
       if (renderAccessError) {
         throw new Error(renderAccessError);
-      }
-      if (paymentSetupError) {
-        throw new Error(paymentSetupError);
       }
       const account = await ensureWalletSubAccount();
       const activeQuote = quote || await requestQuote(account);
@@ -888,7 +883,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   }
 
   if (!store) {
-    return <main className="public-main">Loading customer store...</main>;
+    return <UserStoreCreatorSkeleton />;
   }
 
   if (!customer) {
@@ -905,7 +900,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
             {customer.storefront?.description || "Connect your wallet, choose a render configuration, pay the store price, and track your previous render tasks."}
           </p>
           <div className="storefront-landing-meta">
-            <span><Wallet size={15} /> owner {isUsableEvmAddress(customer.ownerWallet) ? shortWallet(customer.ownerWallet) : "not connected"}</span>
+            <span><Wallet size={15} /> payout {isUsableEvmAddress(customer.ownerWallet) ? shortWallet(customer.ownerWallet) : "platform settlement if configured"}</span>
             {customer.storefront?.category && <span><Store size={15} /> {customer.storefront.category}</span>}
             {customer.ensName && <span>{customer.ensName}</span>}
           </div>
@@ -921,6 +916,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       </section>
 
       {message && <p className="notice">{message}</p>}
+      {paymentSetupNotice && <p className="notice">{paymentSetupNotice}</p>}
 
       <div className="grid public-grid">
         <section className="stack">

@@ -264,7 +264,7 @@ export async function quotePayment(input: {
   if (input.chainId && input.chainId !== chainId) {
     throw new Error(`Payment chain must match the customer account chain ${getTransactionChainConfig(chainId).name}.`);
   }
-  const customerOwnerWallet = assertUsableEvmAddress(customer.ownerWallet, "Customer owner wallet");
+  const customerSettlementWallet = resolveRenderPaymentRecipientWallet(customer);
   const settlementToken =
     findPaymentToken(customer.pricing.settlementTokenAddress || "", chainId) ||
     findPaymentToken(input.tokenOut || "", chainId) ||
@@ -321,11 +321,11 @@ export async function quotePayment(input: {
     });
   const paymentRecipientAddress = paymentRail === "keeperhub" && !sameToken
     ? keeperPaymentRecipient
-    : customerOwnerWallet;
+    : customerSettlementWallet;
   const keeperIntent = paymentRail === "keeperhub"
     ? await createKeeperPaymentIntent({
       payerAddress: input.swapper || "",
-      recipientAddress: customerOwnerWallet,
+      recipientAddress: customerSettlementWallet,
       amount: pricing.totalUsd.toFixed(2),
       paymentAmountAtomic,
       paymentRecipientAddress,
@@ -530,9 +530,9 @@ export async function createGeneration(input: {
     (expectedPaymentToken.address.toLowerCase() === expectedSettlementToken.address.toLowerCase()
       ? expectedSettlementAmountAtomic
       : amountToAtomic(priced.totalUsd, expectedPaymentToken.decimals));
-  const customerOwnerWallet = assertUsableEvmAddress(customer.ownerWallet, "Customer owner wallet");
+  const customerSettlementWallet = resolveRenderPaymentRecipientWallet(customer);
   const expectedPaymentRecipient = assertUsableEvmAddress(
-    quote?.paymentRecipientAddress || customerOwnerWallet,
+    quote?.paymentRecipientAddress || customerSettlementWallet,
     "Payment recipient wallet"
   );
   const generationId = createId("gen");
@@ -559,7 +559,7 @@ export async function createGeneration(input: {
   })
     ? await confirmKeeperPaymentSettlement({
       payerAddress: input.payment?.payerWallet || subAccount.wallet,
-      recipientAddress: customerOwnerWallet,
+      recipientAddress: customerSettlementWallet,
       amount: priced.totalUsd.toFixed(2),
       amountUsd: priced.totalUsd,
       paymentAmountAtomic: expectedPaymentAmountAtomic,
@@ -1303,6 +1303,17 @@ function assertCustomerProcessorReady(customer: Customer) {
   }
 }
 
+function resolveRenderPaymentRecipientWallet(customer: Customer) {
+  if (isUsableEvmAddress(customer.ownerWallet)) {
+    return assertUsableEvmAddress(customer.ownerWallet, "Customer owner wallet");
+  }
+  const platformWallet = getKeeperHubPlatformWalletAddress();
+  if (isUsableEvmAddress(platformWallet)) {
+    return assertUsableEvmAddress(platformWallet, "KEEPERHUB_PLATFORM_WALLET_ADDRESS");
+  }
+  throw new Error("Payment recipient wallet is not configured. Connect a merchant payout wallet or set KEEPERHUB_PLATFORM_WALLET_ADDRESS before accepting render payments.");
+}
+
 function shouldRunKeeperSettlement({
   paymentRail,
   quote,
@@ -1322,7 +1333,8 @@ function shouldRunKeeperSettlement({
     return false;
   }
   const tokenConversionRequired = expectedPaymentToken.address.toLowerCase() !== expectedSettlementToken.address.toLowerCase();
-  const paymentHeldByKeeper = normalizeWallet(expectedPaymentRecipient) !== normalizeWallet(customer.ownerWallet);
+  const settlementRecipientWallet = resolveRenderPaymentRecipientWallet(customer);
+  const paymentHeldByKeeper = normalizeWallet(expectedPaymentRecipient) !== normalizeWallet(settlementRecipientWallet);
   return tokenConversionRequired || paymentHeldByKeeper;
 }
 

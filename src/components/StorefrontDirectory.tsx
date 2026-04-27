@@ -91,8 +91,8 @@ export default function StorefrontDirectory() {
             <div className="storefront-owner">
               <Wallet size={16} />
               <span>
-                <strong>Owner wallet</strong>
-                <code>{isUsableEvmAddress(item.customer.ownerWallet) ? item.customer.ownerWallet : "Not connected"}</code>
+                <strong>Payout path</strong>
+                <code>{isUsableEvmAddress(item.customer.ownerWallet) ? item.customer.ownerWallet : "Platform settlement if configured"}</code>
               </span>
             </div>
 

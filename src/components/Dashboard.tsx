@@ -19,6 +19,7 @@ import {
   Zap
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { CustomerStoreCreatorSkeleton } from "@/components/FormLoadingSkeletons";
 import { requestWalletAccounts, subscribeToBrowserWalletProviders, type BrowserWalletProvider } from "@/lib/browser-wallets";
 import { getPaymentTokens, getTransactionChainConfig, settlementTokenForCurrency } from "@/lib/payment-tokens";
 import {
@@ -456,7 +457,7 @@ export default function Dashboard() {
   }
 
   if (!store) {
-    return <main className="main loading-main">Loading SuperReferrals customer console...</main>;
+    return <CustomerStoreCreatorSkeleton />;
   }
 
   return (
