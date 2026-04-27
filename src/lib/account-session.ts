@@ -13,6 +13,7 @@ const CHECKOUT_MAX_AGE_SECONDS = 60 * 60 * 24;
 export type ProcessorAccountCookieSession = {
   customerId: string;
   customerName?: string;
+  ownerWallet?: string;
   email: string;
   username?: string;
   userId?: string;
@@ -21,6 +22,10 @@ export type ProcessorAccountCookieSession = {
   externalProvider?: string;
   externalUserId?: string;
   walletAddress?: string;
+  pricing?: Customer["pricing"];
+  referrerBaseUrl?: string;
+  ensName?: string;
+  storefront?: Customer["storefront"];
   creditsRemaining?: number;
   updatedAt?: string;
   expiresAt: string;
@@ -51,6 +56,7 @@ export function processorSessionFromCustomer(
   return {
     customerId: customer.id,
     customerName: customer.name,
+    ownerWallet: patch.ownerWallet || customer.ownerWallet,
     email,
     username: patch.username || customer.samsarAccount?.username,
     userId: patch.userId || customer.samsarAccount?.userId,
@@ -59,6 +65,10 @@ export function processorSessionFromCustomer(
     externalProvider: patch.externalProvider || customer.samsarAccount?.externalProvider,
     externalUserId: patch.externalUserId || customer.samsarAccount?.externalUserId,
     walletAddress: patch.walletAddress || customer.samsarAccount?.walletAddress,
+    pricing: patch.pricing || customer.pricing,
+    referrerBaseUrl: patch.referrerBaseUrl || customer.referrerBaseUrl,
+    ensName: patch.ensName ?? customer.ensName,
+    storefront: patch.storefront || customer.storefront,
     creditsRemaining: patch.creditsRemaining ?? customer.subscription.creditsRemaining,
     updatedAt: nowIso(),
     expiresAt: new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000).toISOString()

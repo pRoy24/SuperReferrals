@@ -30,6 +30,7 @@ import {
   getModelPricingConfigurations,
   resolveModelPriceDetails
 } from "@/lib/pricing";
+import { isUsableEvmAddress } from "@/lib/wallet-address";
 import type { ModelPricingConfiguration, PaymentCurrencySymbol, SuperReferralsStore, VideoAspectRatio, VideoModel } from "@/lib/types";
 
 const processorCreditAmounts = [10, 25, 50, 100];
@@ -106,10 +107,15 @@ export default function Dashboard() {
     if (!store) return;
     const customer = store.customers[0];
     if (!customer) return;
+    const ownerWallet = isUsableEvmAddress(customer.ownerWallet)
+      ? customer.ownerWallet
+      : isUsableEvmAddress(customer.samsarAccount?.walletAddress)
+      ? customer.samsarAccount?.walletAddress || ""
+      : "";
     setCustomerForm({
       id: customer.id,
       name: customer.name,
-      ownerWallet: customer.ownerWallet,
+      ownerWallet,
       platformFeeBps: customer.pricing.platformFeeBps,
       refundOnFailureBps: customer.pricing.refundOnFailureBps,
       customerMultiplier: getCustomerMultiplier(customer),
@@ -192,6 +198,10 @@ export default function Dashboard() {
   async function saveCustomer() {
     if (!hasCreditedProcessorAccount) {
       setMessage("Purchase credits or sign in before saving your SuperReferrals storefront.");
+      return;
+    }
+    if (!isUsableEvmAddress(customerForm.ownerWallet)) {
+      setMessage("Connect a store owner e-wallet before saving your SuperReferrals storefront.");
       return;
     }
     setBusy("customer");
@@ -619,7 +629,7 @@ export default function Dashboard() {
               <div className="setup-wallet-strip">
                 <div className="field">
                   <label>Store owner e-wallet</label>
-                  <div className="readonly-value mono">{customerForm.ownerWallet || "No wallet connected"}</div>
+                  <div className="readonly-value mono">{isUsableEvmAddress(customerForm.ownerWallet) ? customerForm.ownerWallet : "No wallet connected"}</div>
                 </div>
                 <div className="wallet-provider-grid">
                   {(walletProviders.length > 0 ? walletProviders : []).map((walletProvider) => (

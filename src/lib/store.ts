@@ -293,14 +293,7 @@ export function publicSubAccount(account: SubAccount): SubAccount {
 }
 
 export function isPublicStorefrontCustomer(customer: Customer) {
-  const hasAccountSession = Boolean(
-    customer.samsarAccount?.authToken ||
-    customer.samsarAccount?.apiKey ||
-    (customer.samsarAccount?.externalUserId && env("SAMSAR_API_KEY"))
-  );
   return Boolean(customer.storefront) &&
-    hasAccountSession &&
-    Number(customer.subscription.creditsRemaining || 0) > 0 &&
     isUsableEvmAddress(customer.ownerWallet);
 }
 
@@ -308,10 +301,16 @@ export function upsertCustomer(store: SuperReferralsStore, input: Partial<Custom
   const timestamp = nowIso();
   const id = input.id || createId("cus");
   const existing = store.customers.find((customer) => customer.id === id);
+  const ownerWallet = firstUsableWallet(
+    input.ownerWallet,
+    existing?.ownerWallet,
+    input.samsarAccount?.walletAddress,
+    existing?.samsarAccount?.walletAddress
+  );
   const next: Customer = {
     id,
     name: input.name?.trim() || existing?.name || "Customer",
-    ownerWallet: normalizeWallet(input.ownerWallet || existing?.ownerWallet),
+    ownerWallet: normalizeWallet(ownerWallet),
     samsarApiKeyAlias: input.samsarApiKeyAlias || existing?.samsarApiKeyAlias,
     samsarAccount: {
       ...(existing?.samsarAccount || {}),
@@ -565,4 +564,8 @@ function normalizePositiveInteger(value: unknown) {
 
 function normalizeWalletAccessMode(value: unknown) {
   return value === "whitelist" ? "whitelist" : "open";
+}
+
+function firstUsableWallet(...values: Array<string | undefined | null>) {
+  return values.find((value) => isUsableEvmAddress(value));
 }

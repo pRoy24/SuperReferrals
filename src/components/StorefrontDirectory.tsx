@@ -184,13 +184,6 @@ function formatRating(average: number, count: number) {
 }
 
 function isPublicStorefrontCustomer(customer: Customer) {
-  const hasAccountSession = Boolean(
-    customer.samsarAccount?.hasSession ||
-    customer.samsarAccount?.hasApiKey ||
-    customer.samsarAccount?.externalUserId
-  );
   return Boolean(customer.storefront) &&
-    hasAccountSession &&
-    Number(customer.subscription.creditsRemaining || 0) > 0 &&
     isUsableEvmAddress(customer.ownerWallet);
 }

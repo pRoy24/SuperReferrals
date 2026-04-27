@@ -45,7 +45,7 @@ import {
 } from "./samsar";
 import { fetchSamsarProcessorCredits } from "./samsar-processor";
 import { createUniswapQuote } from "./uniswap";
-import { assertUsableEvmAddress } from "./wallet-address";
+import { assertUsableEvmAddress, isUsableEvmAddress } from "./wallet-address";
 import { buildZeroGStorageGatewayUrl, persistJsonToZeroG, persistRemoteVideoToZeroG } from "./zero-g";
 import { withSerializedZeroGTransaction } from "./zero-g-chain";
 import { sendAxlMessage } from "./axl";
@@ -94,10 +94,11 @@ export async function restoreProcessorAccountSession(session?: ProcessorAccountC
     customer.samsarAccount?.userId === session.userId ||
     customer.samsarAccount?.email?.toLowerCase() === session.email.toLowerCase()
   );
+  const existingOwnerWallet = isUsableEvmAddress(existing?.ownerWallet) ? existing?.ownerWallet : undefined;
   return mutateStore((mutableStore) => upsertCustomer(mutableStore, {
     id: existing?.id || session.customerId,
     name: existing?.name || session.customerName || session.username || session.email.split("@")[0] || "SuperReferrals Account",
-    ownerWallet: existing?.ownerWallet || session.walletAddress,
+    ownerWallet: existingOwnerWallet || session.ownerWallet || session.walletAddress,
     samsarApiKeyAlias: session.apiKey ? "samsar-user-api-key" : existing?.samsarApiKeyAlias,
     samsarAccount: {
       ...(existing?.samsarAccount || {}),
@@ -111,6 +112,10 @@ export async function restoreProcessorAccountSession(session?: ProcessorAccountC
       walletAddress: session.walletAddress || existing?.samsarAccount?.walletAddress,
       updatedAt: nowIso()
     },
+    pricing: existing?.pricing || session.pricing,
+    referrerBaseUrl: existing?.referrerBaseUrl || session.referrerBaseUrl,
+    ensName: existing?.ensName ?? session.ensName,
+    storefront: existing?.storefront || session.storefront,
     subscription: {
       status: creditsRemaining > 0 ? "active" : "not_started",
       creditsRemaining
@@ -127,6 +132,12 @@ export async function createOrUpdateCustomer(input: Partial<Customer>) {
     throw new Error("Create a SuperReferrals account through Stripe checkout or sign in to an existing credited account before setting up a storefront.");
   }
   assertCustomerProcessorReady(existingCustomer);
+  if (input.storefront) {
+    input.ownerWallet = assertUsableEvmAddress(
+      input.ownerWallet || existingCustomer.ownerWallet || existingCustomer.samsarAccount?.walletAddress,
+      "Store owner wallet"
+    );
+  }
   return mutateStore((store) => upsertCustomer(store, {
     ...input,
     id: existingCustomer.id,
