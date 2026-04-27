@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { appBaseUrl, env } from "./env";
 import { createId, makeReferrerCode, nowIso, normalizeWallet } from "./ids";
@@ -20,18 +21,32 @@ import type {
 } from "./types";
 
 const STORE_FILE = "data.json";
+const DEFAULT_DATA_DIR = ".superreferrals";
 let storeMutationQueue: Promise<unknown> = Promise.resolve();
 
 function dataDir() {
-  const configured = env("SUPERREFERRALS_DATA_DIR");
-  if (configured && path.isAbsolute(configured)) {
-    return configured;
+  const configured = env("SUPERREFERRALS_DATA_DIR", DEFAULT_DATA_DIR);
+  if (isVercelRuntime() && !isTmpPath(configured)) {
+    const tempRelativeDir = path.isAbsolute(configured) ? path.basename(configured) : configured;
+    return path.join(os.tmpdir(), tempRelativeDir);
   }
-  return path.join(process.cwd(), ".superreferrals");
+  return path.isAbsolute(configured)
+    ? configured
+    : path.join(/*turbopackIgnore: true*/ process.cwd(), configured);
 }
 
 function dataPath() {
   return path.join(dataDir(), STORE_FILE);
+}
+
+function isVercelRuntime() {
+  return Boolean(process.env.VERCEL || process.env.VERCEL_ENV || process.env.NOW_REGION);
+}
+
+function isTmpPath(filePath: string) {
+  const resolved = path.resolve(filePath);
+  const tmpDir = path.resolve(os.tmpdir());
+  return resolved === tmpDir || resolved.startsWith(`${tmpDir}${path.sep}`);
 }
 
 export function emptyStore(): SuperReferralsStore {

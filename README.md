@@ -165,6 +165,8 @@ By default staging maps to Vercel `preview` for branch `develop`, and production
 
 Vercel env changes apply to new deployments only; redeploy or push after syncing if the running deployment needs the new values. See the [Vercel env CLI docs](https://vercel.com/docs/cli/env) and [environment variable docs](https://vercel.com/docs/environment-variables).
 
+On Vercel, set `SUPERREFERRALS_DATA_DIR=/tmp/superreferrals`. The deployed bundle directory is not a writable data directory, and `/tmp` storage is ephemeral, so a production app that must retain customers, ratings, generations, or feed state across cold starts needs a durable database or object store behind `src/lib/store.ts`.
+
 For staging previews, Vercel needs a Git event it can deploy. Push a new commit to `develop` or open a PR from `develop`; a local branch or a branch pointer that matches an already deployed `main` commit may not create a new Preview Deployment by itself.
 
 ## Key Environment Variables
