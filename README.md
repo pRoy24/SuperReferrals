@@ -72,7 +72,7 @@ Important runtime guardrails:
 - Renders do not start until the server verifies payment sender, recipient, chain, token, and amount.
 - `ALLOW_MOCK_RENDER_PAYMENT=true` is only for local demos.
 - 0G records, INFT minting, and agent registry use the configured 0G network, not the payment network.
-- Live non-stable-token payments require Uniswap quote data and a KeeperHub payment workflow.
+- Live ETH-to-USDC render payments require KeeperHub platform wallet and payment workflow configuration; the app quotes a buffered ETH amount and KeeperHub settles the storefront's USDC amount to the merchant payout wallet.
 
 ## Local Run
 

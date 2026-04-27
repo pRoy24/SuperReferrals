@@ -317,7 +317,7 @@ export async function quotePayment(input: {
   const keeperPaymentRecipient = paymentRail === "keeperhub" && !sameToken
     ? assertUsableEvmAddress(getKeeperHubPlatformWalletAddress(), "KEEPERHUB_PLATFORM_WALLET_ADDRESS")
     : "";
-  const conversionQuote = !sameToken && input.swapper
+  const conversionQuote = paymentRail === "uniswap" && !sameToken && input.swapper
     ? await createUniswapQuote({
       type: "EXACT_OUTPUT",
       amount: settlementAmountAtomic,
@@ -334,7 +334,8 @@ export async function quotePayment(input: {
     : resolvePaymentAmountAtomic({
       conversionQuote,
       paymentToken,
-      amountUsd: pricing.totalUsd
+      amountUsd: pricing.totalUsd,
+      allowPriceHintFallback: paymentRail === "keeperhub"
     });
   const paymentRecipientAddress = paymentRail === "keeperhub" && !sameToken
     ? keeperPaymentRecipient
@@ -430,17 +431,19 @@ function withKeeperConversionMetadata(
 function resolvePaymentAmountAtomic({
   conversionQuote,
   paymentToken,
-  amountUsd
+  amountUsd,
+  allowPriceHintFallback = false
 }: {
   conversionQuote?: unknown;
   paymentToken: PaymentToken;
   amountUsd: number;
+  allowPriceHintFallback?: boolean;
 }) {
   const quotedAmount = atomicAmountFromConversionQuote(conversionQuote);
   if (quotedAmount) {
     return quotedAmount;
   }
-  if (!isProviderMock("UNISWAP") && !isMockMode()) {
+  if (!allowPriceHintFallback && !isProviderMock("UNISWAP") && !isMockMode()) {
     throw new Error(`Unable to determine ${paymentToken.symbol} payment amount from Uniswap quote.`);
   }
   return fallbackPaymentAmountAtomic(paymentToken, amountUsd);

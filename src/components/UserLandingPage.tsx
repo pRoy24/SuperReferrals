@@ -606,10 +606,23 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     return data.account as SubAccount;
   }
 
-  async function requestQuote(account: SubAccount) {
+  function paymentTokenForCurrency(currency: PaymentCurrencySymbol) {
+    return selectablePaymentTokens.find((token) => token.symbol === currency) || selectedPaymentToken;
+  }
+
+  function quoteMatchesPaymentToken(activeQuote: PaymentQuote | null, paymentToken: PaymentToken) {
+    return Boolean(
+      activeQuote &&
+      activeQuote.chainId === transactionChain.id &&
+      activeQuote.paymentTokenAddress?.toLowerCase() === paymentToken.address.toLowerCase()
+    );
+  }
+
+  async function requestQuote(account: SubAccount, paymentTokenOverride = selectedPaymentToken) {
     if (!customer) {
       throw new Error("Customer store is not available");
     }
+    const requestedPaymentRail = resolveUserPaymentRail(paymentTokenOverride, settlementToken);
     const response = await fetch("/api/payments/quote", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -620,11 +633,11 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
         durationSeconds: estimatedDurationSeconds,
         videoModel: generationForm.videoModel,
         aspectRatio: generationForm.aspectRatio,
-        tokenIn: selectedPaymentToken.address,
+        tokenIn: paymentTokenOverride.address,
         tokenOut: settlementToken.address,
-        paymentCurrency: selectedPaymentToken.symbol,
+        paymentCurrency: paymentTokenOverride.symbol,
         settlementCurrency: settlementToken.symbol,
-        paymentRail,
+        paymentRail: requestedPaymentRail,
         swapper: account.wallet,
         chainId: transactionChain.id
       })
@@ -645,9 +658,11 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       if (renderAccessError) {
         throw new Error(renderAccessError);
       }
+      const paymentToken = paymentTokenForCurrency(paymentCurrency);
+      setPaymentCurrency(paymentToken.symbol);
       const account = await ensureWalletSubAccount();
-      const quoted = await requestQuote(account);
-      setMessage(`${quoted.totalUsd.toFixed(2)} ${quoted.settlementCurrency || "USDC"} quote created for payment in ${quoted.paymentCurrency || paymentCurrency} on ${transactionChain.name}.`);
+      const quoted = await requestQuote(account, paymentToken);
+      setMessage(`${quoted.totalUsd.toFixed(2)} ${quoted.settlementCurrency || "USDC"} quote created for payment in ${quoted.paymentCurrency || paymentToken.symbol} on ${transactionChain.name}.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Quote failed");
     } finally {
@@ -785,7 +800,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     return transferTxHash;
   }
 
-  async function runGeneration() {
+  async function runGeneration(currency = paymentCurrency) {
     if (!customer) return;
     setBusy("generation");
     setMessage("");
@@ -797,8 +812,12 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       if (renderAccessError) {
         throw new Error(renderAccessError);
       }
+      const paymentToken = paymentTokenForCurrency(currency);
+      setPaymentCurrency(paymentToken.symbol);
       const account = await ensureWalletSubAccount();
-      const activeQuote = quote || await requestQuote(account);
+      const activeQuote = quoteMatchesPaymentToken(quote, paymentToken)
+        ? quote as PaymentQuote
+        : await requestQuote(account, paymentToken);
       const paymentTxHash = await executePaymentForRender(activeQuote, account);
       updateRenderFlow({
         status: "starting",
@@ -1053,9 +1072,17 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
               <button className="btn" onClick={createQuote} disabled={busy === "quote" || imageCount === 0}>
                 <CircleDollarSign size={16} /> Quote {paymentCurrency}
               </button>
-              <button className="btn primary" onClick={runGeneration} disabled={busy === "generation" || imageCount === 0}>
-                <Play size={16} /> Pay {paymentCurrency} & start render
-              </button>
+              {selectablePaymentTokens.map((token) => (
+                <button
+                  className={`btn ${token.symbol === paymentCurrency ? "primary" : ""}`}
+                  disabled={busy === "generation" || imageCount === 0}
+                  key={`pay-${token.chainId}-${token.address}`}
+                  onClick={() => runGeneration(token.symbol)}
+                  type="button"
+                >
+                  <Play size={16} /> Pay {token.symbol} & start render
+                </button>
+              ))}
               {quote?.checkoutUrl && quote.paymentRail === "uniswap" && (
                 <a className="btn" href={quote.checkoutUrl} target="_blank" rel="noreferrer">
                   <ExternalLink size={16} /> Open Uniswap
@@ -1891,7 +1918,10 @@ async function assertWalletBalance(provider: EthereumProvider, owner: string, to
     ? BigInt(String(await provider.request({ method: "eth_getBalance", params: [owner, "latest"] })))
     : await readErc20Balance(provider, token.address, owner);
   if (balance < requiredAmount) {
-    throw new Error(`Insufficient ${token.symbol} balance for payment. Required ${formatAtomicAmount(requiredAmount, token.decimals)} ${token.symbol}, available ${formatAtomicAmount(balance, token.decimals)} ${token.symbol}. Choose another payment currency and create a fresh quote. Render was not started.`);
+    const recovery = token.symbol === "USDC"
+      ? "Use Pay ETH & start render to create a fresh KeeperHub ETH settlement quote."
+      : "Use another payment currency and start again to create a fresh quote.";
+    throw new Error(`Insufficient ${token.symbol} balance for payment. Required ${formatAtomicAmount(requiredAmount, token.decimals)} ${token.symbol}, available ${formatAtomicAmount(balance, token.decimals)} ${token.symbol}. ${recovery} Render was not started.`);
   }
 }
 
