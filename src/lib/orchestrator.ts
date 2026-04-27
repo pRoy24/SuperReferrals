@@ -39,8 +39,10 @@ import {
 } from "./store";
 import {
   createExternalImageListVideo,
+  ensureExternalUserSession,
   fetchLatestVideoUrl,
   getSamsarStatus,
+  grantExternalUserCredits,
   runSamsarSessionAction
 } from "./samsar";
 import { fetchSamsarProcessorCredits } from "./samsar-processor";
@@ -657,7 +659,38 @@ export async function createGeneration(input: {
   }
 
   try {
+    assertPaidRenderProviderCanFulfill(paymentConfirmation.status);
+    const renderSubAccount = await ensurePaidRenderExternalUserSession(subAccount, samsarApiKey);
+    const samsarCreditGrant = await grantExternalUserCredits({
+      externalUser: renderSubAccount.externalUser,
+      externalApiKey: renderSubAccount.externalApiKey,
+      apiKey: samsarApiKey,
+      credits: renderCreditsForPricedGeneration(priced),
+      metadata: {
+        generationId,
+        customerId: customer.id,
+        subAccountId: renderSubAccount.id,
+        quoteId: payment.quoteId,
+        txHash: payment.txHash,
+        paymentRail: payment.paymentRail,
+        paymentTokenSymbol: payment.tokenSymbol,
+        settlementTokenSymbol: payment.settlementTokenSymbol,
+        amountUsd: payment.amountUsd,
+        durationSeconds: priced.durationSeconds,
+        videoModel: generation.input.video_model,
+        aspectRatio: generation.input.aspect_ratio
+      }
+    });
+    const paymentWithCreditGrant = {
+      ...payment,
+      samsarCreditGrant
+    };
+    await mutateStore((mutableStore) => updateGeneration(mutableStore, generationId, {
+      payment: paymentWithCreditGrant
+    }));
     const response = await createExternalImageListVideo({
+      externalUser: renderSubAccount.externalUser,
+      externalApiKey: renderSubAccount.externalApiKey,
       input: generation.input,
       apiKey: samsarApiKey,
       generationId
@@ -666,10 +699,7 @@ export async function createGeneration(input: {
       status: "PROCESSING",
       samsarRequestId: response.requestId,
       samsarSessionId: response.sessionId,
-      payment: {
-        ...payment,
-        status: payment.status
-      }
+      payment: paymentWithCreditGrant
     }));
   } catch (error) {
     await mutateStore((mutableStore) => updateGeneration(mutableStore, generationId, {
@@ -678,6 +708,69 @@ export async function createGeneration(input: {
     }));
     throw error;
   }
+}
+
+function assertPaidRenderProviderCanFulfill(paymentStatus: GenerationPayment["status"]) {
+  if (paymentStatus === "mock_confirmed" || !isProviderMock("SAMSAR")) {
+    return;
+  }
+  throw new Error("SAMSAR_MOCKS must be false before accepting real render payments. The paid render was not submitted to Samsar.");
+}
+
+async function ensurePaidRenderExternalUserSession(subAccount: SubAccount, samsarApiKey?: string) {
+  if (hasUsableStoredExternalApiKey(subAccount.externalApiKey)) {
+    return subAccount;
+  }
+  const session = await ensureExternalUserSession(subAccount.externalUser, samsarApiKey);
+  const externalApiKey = session.externalApiKey || subAccount.externalApiKey;
+  if (!externalApiKey) {
+    throw new Error("Samsar external user session did not return an API key for this wallet.");
+  }
+  const updatedSubAccount = await mutateStore((mutableStore) => {
+    const current = mutableStore.subAccounts.find((item) => item.id === subAccount.id);
+    if (!current) {
+      throw new Error("Wallet user record was not found while preparing render authentication.");
+    }
+    current.externalApiKey = externalApiKey;
+    current.updatedAt = nowIso();
+    return current;
+  });
+  if (!updatedSubAccount) {
+    throw new Error("Wallet user record was not found while preparing render authentication.");
+  }
+  return updatedSubAccount;
+}
+
+function hasUsableStoredExternalApiKey(externalApiKey?: string) {
+  if (!externalApiKey) {
+    return false;
+  }
+  return isProviderMock("SAMSAR") || !externalApiKey.startsWith("mock_");
+}
+
+function renderCreditsForPricedGeneration(priced: ReturnType<typeof priceGeneration>) {
+  const modelCredits = Number(priced.durationSeconds) * Number(priced.baseCreditsPerSecond);
+  if (Number.isFinite(modelCredits) && modelCredits > 0) {
+    return Math.ceil(modelCredits);
+  }
+  const creditUnitUsd = Number(priced.creditUnitUsd);
+  if (Number.isFinite(creditUnitUsd) && creditUnitUsd > 0) {
+    return Math.ceil(Number(priced.amountUsd || 0) / creditUnitUsd);
+  }
+  return 1;
+}
+
+function paidRenderStatusContext(generation: Generation, subAccount: SubAccount): {
+  externalUser?: SubAccount["externalUser"];
+  externalApiKey?: string;
+} {
+  if (!generation.payment?.samsarCreditGrant && !hasUsableStoredExternalApiKey(subAccount.externalApiKey)) {
+    return {};
+  }
+  return {
+    externalUser: subAccount.externalUser,
+    externalApiKey: subAccount.externalApiKey
+  };
 }
 
 export async function syncGeneration(id: string) {
@@ -706,8 +799,14 @@ export async function syncGeneration(id: string) {
     return generation;
   }
   let status: Record<string, unknown>;
+  const statusContext = paidRenderStatusContext(generation, subAccount);
   try {
-    status = await getSamsarStatus(requestId, undefined, undefined, samsarApiKey);
+    status = await getSamsarStatus(
+      requestId,
+      statusContext.externalUser,
+      statusContext.externalApiKey,
+      samsarApiKey
+    );
   } catch (error) {
     if (generation.resultUrl) {
       try {

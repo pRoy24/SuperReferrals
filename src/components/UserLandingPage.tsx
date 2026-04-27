@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, CircleDollarSign, Code2, ExternalLink, ListChecks, Play, Plus, RefreshCw, Store, Trash2, Undo2, Wallet } from "lucide-react";
+import { Bot, ChevronDown, CircleDollarSign, Code2, ExternalLink, ListChecks, Play, Plus, RefreshCw, Store, Trash2, Undo2, Wallet } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { UserStoreCreatorSkeleton } from "@/components/FormLoadingSkeletons";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
@@ -1637,33 +1637,42 @@ function PaymentActionControl({
   onPay: () => void;
 }) {
   const orderedTokens = [...tokens].sort((left, right) => paymentTokenRank(left) - paymentTokenRank(right));
+  const selectedToken = orderedTokens.find((token) => token.symbol === selectedSymbol) || orderedTokens[0];
+  const currencyTooltip = selectedToken
+    ? paymentCurrencyTooltip(selectedToken, settlementToken)
+    : "Choose payment currency";
   return (
-    <div className="payment-action-control">
-      <label>
-        <span>Payment currency</span>
+    <div className="payment-action-control" title={currencyTooltip}>
+      <button className="btn primary payment-action-main" disabled={disabled} onClick={onPay} type="button">
+        <Play size={16} /> {busy ? "Starting..." : `Pay ${selectedSymbol} & start render`}
+      </button>
+      <span className="payment-action-currency">
         <select
+          aria-label="Payment currency"
+          className="payment-action-currency-select"
+          title={currencyTooltip}
           value={selectedSymbol}
           onChange={(event) => onSelect(event.target.value as PaymentCurrencySymbol)}
           disabled={busy}
         >
           {orderedTokens.map((token) => (
             <option value={token.symbol} key={`${token.chainId}:${token.address}`}>
-              {paymentCurrencyOptionLabel(token, settlementToken)}
+              {token.symbol}
             </option>
           ))}
         </select>
-      </label>
-      <button className="btn primary" disabled={disabled} onClick={onPay} type="button">
-        <Play size={16} /> {busy ? "Starting..." : `Pay ${selectedSymbol} & start render`}
-      </button>
+        <ChevronDown className="payment-action-currency-icon" size={18} aria-hidden="true" />
+      </span>
     </div>
   );
 }
 
-function paymentCurrencyOptionLabel(token: PaymentToken, settlementToken: PaymentToken) {
+function paymentCurrencyTooltip(token: PaymentToken, settlementToken: PaymentToken) {
   const rail = resolveUserPaymentRail(token, settlementToken);
-  const settlementLabel = rail === "direct" ? "direct" : `via KeeperHub to ${settlementToken.symbol}`;
-  return `${token.symbol} (${settlementLabel})`;
+  if (rail === "direct") {
+    return `Pay ${token.symbol} directly to the merchant settlement wallet.`;
+  }
+  return `Pay ${token.symbol}; KeeperHub settles ${settlementToken.symbol} to the merchant.`;
 }
 
 function PaymentSummary({

@@ -101,7 +101,10 @@ export async function grantExternalUserCredits({
     headers: safeExternalApiKey ? { "x-external-user-api-key": safeExternalApiKey } : undefined,
     body: JSON.stringify({
       external_user: externalUser,
-      credits: normalizedCredits,
+      input: {
+        credits: normalizedCredits,
+        metadata
+      },
       metadata
     })
   });
