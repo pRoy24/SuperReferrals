@@ -2,7 +2,6 @@
 
 import {
   ExternalLink,
-  Eye,
   Heart,
   MessageCircle,
   Monitor,
@@ -15,9 +14,10 @@ import {
   Smartphone,
   Tags,
   Volume2,
-  VolumeX
+  VolumeX,
+  X
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type FormEvent, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type MutableRefObject, type PointerEvent } from "react";
 import type { FeedSortOption, PublicFeedItem } from "@/lib/types";
 
 type FeedViewMode = "mobile" | "desktop";
@@ -52,12 +52,16 @@ export default function FeedPage() {
   const [loading, setLoading] = useState(true);
   const [activeIndex, setActiveIndex] = useState(0);
   const [muted, setMuted] = useState(true);
+  const [volume, setVolume] = useState(0.66);
   const [playing, setPlaying] = useState(true);
+  const [controlsVisible, setControlsVisible] = useState(false);
+  const [commentItemId, setCommentItemId] = useState<string | null>(null);
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const mobileCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const viewedItems = useRef(new Set<string>());
 
   const activeItem = items[activeIndex] || items[0];
+  const commentItem = commentItemId ? items.find((item) => item.id === commentItemId) : undefined;
 
   useEffect(() => {
     setViewerId(getOrCreateViewerId());
@@ -88,13 +92,14 @@ export default function FeedPage() {
         continue;
       }
       video.muted = muted;
+      video.volume = volume;
       if (id === current && playing) {
         video.play().catch(() => undefined);
       } else {
         video.pause();
       }
     }
-  }, [activeItem?.id, muted, playing, items, viewMode]);
+  }, [activeItem?.id, muted, playing, volume, items, viewMode]);
 
   useEffect(() => {
     if (viewMode !== "desktop" || items.length < 2 || !playing) {
@@ -216,7 +221,40 @@ export default function FeedPage() {
     setItems((current) => current.map((item) => item.id === nextItem.id ? nextItem : item));
   }
 
-  const feedClass = `feed-shell ${viewMode === "mobile" ? "is-mobile" : "is-desktop"}`;
+  function selectItem(index: number, behavior: ScrollBehavior = "smooth") {
+    if (items.length === 0) {
+      return;
+    }
+    const nextIndex = (index + items.length) % items.length;
+    setActiveIndex(nextIndex);
+    const nextItem = items[nextIndex];
+    if (viewMode === "mobile" && nextItem) {
+      window.requestAnimationFrame(() => {
+        mobileCardRefs.current[nextItem.id]?.scrollIntoView({ behavior, block: "start" });
+      });
+    }
+  }
+
+  function changeVolume(nextValue: number) {
+    const normalized = Math.max(0, Math.min(1, nextValue));
+    setVolume(normalized);
+    setMuted(normalized === 0);
+  }
+
+  function toggleControls(event: PointerEvent<HTMLElement>) {
+    const target = event.target as HTMLElement;
+    if (target.closest("button, a, input, textarea, select, form, .feed-comment-drawer")) {
+      return;
+    }
+    setControlsVisible((value) => !value);
+  }
+
+  function openComments(item: PublicFeedItem) {
+    setCommentItemId(item.id);
+    setControlsVisible(true);
+  }
+
+  const feedClass = `feed-shell ${viewMode === "mobile" ? "is-mobile" : "is-desktop"} ${controlsVisible ? "controls-visible" : ""}`;
 
   return (
     <main className={feedClass}>
@@ -279,59 +317,75 @@ export default function FeedPage() {
         <section className="mobile-video-feed">
           {items.map((item, index) => (
             <article
-              className="mobile-feed-card"
+              className={`mobile-feed-card ${index === activeIndex ? "active" : ""}`}
               data-feed-id={item.id}
               key={item.id}
+              onPointerDown={toggleControls}
               ref={(node) => {
                 mobileCardRefs.current[item.id] = node;
               }}
             >
-              <FeedVideo item={item} active={index === activeIndex} muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => setActiveIndex((index + 1) % items.length)} />
+              <FeedVideo item={item} active={index === activeIndex} muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => selectItem(index + 1)} />
               <MobileOverlay
                 item={item}
-                authorName={authorName}
-                commentDraft={commentDrafts[item.id] || ""}
-                onAuthorName={setAuthorName}
-                onCommentDraft={(value) => setCommentDrafts((current) => ({ ...current, [item.id]: value }))}
-                onComment={(event) => addComment(event, item)}
+                activeIndex={activeIndex}
+                items={items}
+                muted={muted}
+                playing={playing}
+                volume={volume}
+                controlsVisible={controlsVisible && index === activeIndex}
+                onSelectItem={selectItem}
+                onToggleMute={() => setMuted((value) => !value)}
+                onTogglePlay={() => setPlaying((value) => !value)}
+                onVolume={changeVolume}
+                onComments={() => openComments(item)}
                 onLike={() => toggleLike(item)}
               />
             </article>
           ))}
+          {commentItem && (
+            <CommentDrawer
+              item={commentItem}
+              authorName={authorName}
+              commentDraft={commentDrafts[commentItem.id] || ""}
+              onAuthorName={setAuthorName}
+              onCommentDraft={(value) => setCommentDrafts((current) => ({ ...current, [commentItem.id]: value }))}
+              onComment={(event) => addComment(event, commentItem)}
+              onClose={() => setCommentItemId(null)}
+            />
+          )}
         </section>
       ) : (
         <section className="desktop-feed-layout">
-          <div className="desktop-player-stage">
-            <FeedVideo item={activeItem} active muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => setActiveIndex((activeIndex + 1) % items.length)} />
-            <div className="desktop-player-caption">
-              <FeedMeta item={activeItem} />
-              <MetricBar item={activeItem} onLike={() => toggleLike(activeItem)} />
-            </div>
+          <div className="desktop-player-stage" onPointerDown={toggleControls}>
+            <FeedVideo key={activeItem.id} item={activeItem} active muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => selectItem(activeIndex + 1)} />
+            <DesktopMinimalControls
+              item={activeItem}
+              activeIndex={activeIndex}
+              items={items}
+              muted={muted}
+              playing={playing}
+              volume={volume}
+              onSelectItem={selectItem}
+              onToggleMute={() => setMuted((value) => !value)}
+              onTogglePlay={() => setPlaying((value) => !value)}
+              onVolume={changeVolume}
+              onComments={() => openComments(activeItem)}
+              onLike={() => toggleLike(activeItem)}
+            />
           </div>
 
-          <aside className="desktop-feed-panel">
-            <CommentPanel
-              item={activeItem}
+          {commentItem && (
+            <CommentDrawer
+              item={commentItem}
               authorName={authorName}
-              commentDraft={commentDrafts[activeItem.id] || ""}
+              commentDraft={commentDrafts[commentItem.id] || ""}
               onAuthorName={setAuthorName}
-              onCommentDraft={(value) => setCommentDrafts((current) => ({ ...current, [activeItem.id]: value }))}
-              onComment={(event) => addComment(event, activeItem)}
+              onCommentDraft={(value) => setCommentDrafts((current) => ({ ...current, [commentItem.id]: value }))}
+              onComment={(event) => addComment(event, commentItem)}
+              onClose={() => setCommentItemId(null)}
             />
-            <div className="desktop-video-rail">
-              {items.map((item, index) => (
-                <button className={`rail-item ${index === activeIndex ? "active" : ""}`} key={item.id} onClick={() => setActiveIndex(index)}>
-                  <span className="rail-thumb">
-                    <video src={item.videoUrl} muted playsInline preload="metadata" poster={item.posterUrl} />
-                  </span>
-                  <span>
-                    <strong>{item.title}</strong>
-                    <small>{item.metrics.score.toFixed(1)} score · {formatMetric(item.metrics.views)} views</small>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </aside>
+          )}
         </section>
       )}
     </main>
@@ -373,57 +427,137 @@ function FeedVideo({
 
 function MobileOverlay({
   item,
-  authorName,
-  commentDraft,
-  onAuthorName,
-  onCommentDraft,
-  onComment,
+  activeIndex,
+  items,
+  muted,
+  playing,
+  volume,
+  controlsVisible,
+  onSelectItem,
+  onToggleMute,
+  onTogglePlay,
+  onVolume,
+  onComments,
   onLike
 }: {
   item: PublicFeedItem;
-  authorName: string;
-  commentDraft: string;
-  onAuthorName: (value: string) => void;
-  onCommentDraft: (value: string) => void;
-  onComment: (event: FormEvent) => void;
+  activeIndex: number;
+  items: PublicFeedItem[];
+  muted: boolean;
+  playing: boolean;
+  volume: number;
+  controlsVisible: boolean;
+  onSelectItem: (index: number) => void;
+  onToggleMute: () => void;
+  onTogglePlay: () => void;
+  onVolume: (value: number) => void;
+  onComments: () => void;
   onLike: () => void;
 }) {
   return (
-    <div className="mobile-feed-overlay">
-      <div className="mobile-feed-meta">
-        <FeedMeta item={item} />
+    <div className={`mobile-feed-overlay ${controlsVisible ? "visible" : ""}`}>
+      <div className="mobile-feed-meta" onPointerDown={(event) => event.stopPropagation()}>
+        <FeedMiniMeta item={item} />
       </div>
-      <div className="mobile-action-rail">
-        <button className={`round-action ${item.likedByViewer ? "active" : ""}`} onClick={onLike} title={item.likedByViewer ? "Unlike" : "Like"}>
-          <Heart size={21} fill={item.likedByViewer ? "currentColor" : "none"} />
-          <span>{formatMetric(item.metrics.likes)}</span>
+      <div className="mobile-action-rail" onPointerDown={(event) => event.stopPropagation()}>
+        <button className="round-action" onClick={onTogglePlay} title={playing ? "Pause" : "Play"}>
+          {playing ? <Pause size={20} /> : <Play size={20} />}
         </button>
-        <span className="round-action static" title="Comments">
-          <MessageCircle size={21} />
-          <span>{formatMetric(item.metrics.comments)}</span>
-        </span>
-        <span className="round-action static" title="Views">
-          <Eye size={21} />
-          <span>{formatMetric(item.metrics.views)}</span>
-        </span>
+        <button className="round-action" onClick={onToggleMute} title={muted ? "Unmute" : "Mute"}>
+          {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+        </button>
+        <label className="mobile-volume" title="Volume">
+          <input
+            aria-label="Volume"
+            max="100"
+            min="0"
+            onChange={(event) => onVolume(Number(event.target.value) / 100)}
+            type="range"
+            value={muted ? 0 : Math.round(volume * 100)}
+          />
+        </label>
+        <button className={`round-action ${item.likedByViewer ? "active" : ""}`} onClick={onLike} title={item.likedByViewer ? "Unlike" : "Like"}>
+          <Heart size={20} fill={item.likedByViewer ? "currentColor" : "none"} />
+        </button>
+        <button className="round-action" onClick={onComments} title="Comments">
+          <MessageCircle size={20} />
+        </button>
         {item.inftId && (
           <a className="round-action" href={`/inft/${item.inftId}`} title="Open INFT">
             <ExternalLink size={20} />
           </a>
         )}
       </div>
-      <form className="mobile-comment-form" onSubmit={onComment}>
-        <input value={authorName} onChange={(event) => onAuthorName(event.target.value)} placeholder="Name" />
-        <input value={commentDraft} onChange={(event) => onCommentDraft(event.target.value)} placeholder="Comment" />
-        <button type="submit" title="Post comment">
-          <Send size={16} />
-        </button>
-      </form>
+      <FeedTimeline items={items} activeIndex={activeIndex} onSelectItem={onSelectItem} />
     </div>
   );
 }
 
-function FeedMeta({ item }: { item: PublicFeedItem }) {
+function DesktopMinimalControls({
+  item,
+  activeIndex,
+  items,
+  muted,
+  playing,
+  volume,
+  onSelectItem,
+  onToggleMute,
+  onTogglePlay,
+  onVolume,
+  onComments,
+  onLike
+}: {
+  item: PublicFeedItem;
+  activeIndex: number;
+  items: PublicFeedItem[];
+  muted: boolean;
+  playing: boolean;
+  volume: number;
+  onSelectItem: (index: number) => void;
+  onToggleMute: () => void;
+  onTogglePlay: () => void;
+  onVolume: (value: number) => void;
+  onComments: () => void;
+  onLike: () => void;
+}) {
+  return (
+    <div className="feed-minimal-ui" onPointerDown={(event) => event.stopPropagation()}>
+      <FeedMiniMeta item={item} />
+      <div className="feed-bottom-controls">
+        <button className="glass-icon" onClick={onTogglePlay} title={playing ? "Pause" : "Play"}>
+          {playing ? <Pause size={18} /> : <Play size={18} />}
+        </button>
+        <button className="glass-icon" onClick={onToggleMute} title={muted ? "Unmute" : "Mute"}>
+          {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+        </button>
+        <label className="desktop-volume" title="Volume">
+          <input
+            aria-label="Volume"
+            max="100"
+            min="0"
+            onChange={(event) => onVolume(Number(event.target.value) / 100)}
+            type="range"
+            value={muted ? 0 : Math.round(volume * 100)}
+          />
+        </label>
+        <button className={`glass-icon ${item.likedByViewer ? "active" : ""}`} onClick={onLike} title={item.likedByViewer ? "Unlike" : "Like"}>
+          <Heart size={18} fill={item.likedByViewer ? "currentColor" : "none"} />
+        </button>
+        <button className="glass-icon" onClick={onComments} title="Comments">
+          <MessageCircle size={18} />
+        </button>
+        {item.inftId && (
+          <a className="glass-icon" href={`/inft/${item.inftId}`} title="Open INFT">
+            <ExternalLink size={18} />
+          </a>
+        )}
+      </div>
+      <FeedTimeline items={items} activeIndex={activeIndex} onSelectItem={onSelectItem} />
+    </div>
+  );
+}
+
+function FeedMiniMeta({ item }: { item: PublicFeedItem }) {
   return (
     <div className="feed-meta">
       <div className="feed-author">@{item.authorName}</div>
@@ -436,16 +570,60 @@ function FeedMeta({ item }: { item: PublicFeedItem }) {
   );
 }
 
-function MetricBar({ item, onLike }: { item: PublicFeedItem; onLike: () => void }) {
+function FeedTimeline({
+  items,
+  activeIndex,
+  onSelectItem
+}: {
+  items: PublicFeedItem[];
+  activeIndex: number;
+  onSelectItem: (index: number) => void;
+}) {
   return (
-    <div className="feed-metrics">
-      <button className={`metric-button ${item.likedByViewer ? "active" : ""}`} onClick={onLike}>
-        <Heart size={16} fill={item.likedByViewer ? "currentColor" : "none"} /> {formatMetric(item.metrics.likes)}
-      </button>
-      <span><MessageCircle size={16} /> {formatMetric(item.metrics.comments)}</span>
-      <span><Eye size={16} /> {formatMetric(item.metrics.views)}</span>
-      <span>{item.metrics.score.toFixed(1)} score</span>
+    <div className="feed-timeline" aria-label="Feed position">
+      {items.map((item, index) => (
+        <button
+          aria-label={`Open ${item.title}`}
+          className={index === activeIndex ? "active" : ""}
+          key={item.id}
+          onClick={() => onSelectItem(index)}
+          title={item.title}
+          type="button"
+        />
+      ))}
     </div>
+  );
+}
+
+function CommentDrawer({
+  item,
+  authorName,
+  commentDraft,
+  onAuthorName,
+  onCommentDraft,
+  onComment,
+  onClose
+}: {
+  item: PublicFeedItem;
+  authorName: string;
+  commentDraft: string;
+  onAuthorName: (value: string) => void;
+  onCommentDraft: (value: string) => void;
+  onComment: (event: FormEvent) => void;
+  onClose: () => void;
+}) {
+  return (
+    <aside className="feed-comment-drawer open" onPointerDown={(event) => event.stopPropagation()}>
+      <CommentPanel
+        item={item}
+        authorName={authorName}
+        commentDraft={commentDraft}
+        onAuthorName={onAuthorName}
+        onCommentDraft={onCommentDraft}
+        onComment={onComment}
+        onClose={onClose}
+      />
+    </aside>
   );
 }
 
@@ -455,7 +633,8 @@ function CommentPanel({
   commentDraft,
   onAuthorName,
   onCommentDraft,
-  onComment
+  onComment,
+  onClose
 }: {
   item: PublicFeedItem;
   authorName: string;
@@ -463,13 +642,19 @@ function CommentPanel({
   onAuthorName: (value: string) => void;
   onCommentDraft: (value: string) => void;
   onComment: (event: FormEvent) => void;
+  onClose: () => void;
 }) {
   const comments = useMemo(() => item.comments.slice().reverse(), [item.comments]);
   return (
     <section className="comment-panel">
       <div className="panel-header">
         <h2>Comments</h2>
-        <span className="badge">{formatMetric(item.metrics.comments)}</span>
+        <div className="panel-actions">
+          <span className="badge">{formatMetric(item.metrics.comments)}</span>
+          <button className="icon-toggle compact" onClick={onClose} title="Close comments" type="button">
+            <X size={16} />
+          </button>
+        </div>
       </div>
       <div className="comment-list">
         {comments.length === 0 && <p className="subtle">No comments yet.</p>}

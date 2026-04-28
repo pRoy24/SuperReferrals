@@ -1328,7 +1328,9 @@ export async function runINFTAction(id: string, action: string, payload: Record<
 
 function normalizeGenerationInput(input: GenerationInput): GenerationInput {
   const hasProvidedOutro = Boolean(input.outro_image_url);
-  const addOutroAnimation = input.add_outro_animation ?? Boolean(input.cta_url);
+  const generatesOutroFromUrl = !hasProvidedOutro && (input.generate_outro_image === true || Boolean(input.cta_url));
+  const addOutroAnimation = input.add_outro_animation ?? generatesOutroFromUrl;
+  const addOutroFocusArea = input.add_outro_focus_area ?? generatesOutroFromUrl;
   const aspectRatio = input.aspect_ratio || "16:9";
   const normalizedInput: GenerationInput = {
     ...input,
@@ -1337,7 +1339,7 @@ function normalizeGenerationInput(input: GenerationInput): GenerationInput {
     enable_subtitles: input.enable_subtitles ?? true,
     outro_image_url: input.outro_image_url,
     add_outro_animation: addOutroAnimation === true,
-    add_outro_focus_area: input.add_outro_focus_area === true,
+    add_outro_focus_area: addOutroFocusArea === true,
     outro_focust_area: input.outro_focust_area,
     generate_outro_image: hasProvidedOutro ? false : input.generate_outro_image ?? Boolean(input.cta_url),
     cta_url: hasProvidedOutro ? undefined : input.cta_url,

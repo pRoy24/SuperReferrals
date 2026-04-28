@@ -1336,6 +1336,7 @@ function SimpleRenderForm({
   const [uploadError, setUploadError] = useState("");
   const [draggedImageIndex, setDraggedImageIndex] = useState<number | null>(null);
   const [dragOverImageIndex, setDragOverImageIndex] = useState<number | null>(null);
+  const usesServerGeneratedOutro = Boolean(form.ctaUrl.trim());
 
   async function uploadImageFile(index: number, item: ImageWizardItem, file: File) {
     if (uploadingImageIndex !== null) {
@@ -1571,26 +1572,36 @@ function SimpleRenderForm({
       </label>
       <TextField label="Feed tags" value={form.feedTags} onChange={(feedTags) => onPatch({ feedTags })} />
 
-      <TextField label="CTA outro URL" value={form.ctaUrl} onChange={(ctaUrl) => onPatch({ ctaUrl })} />
+      <WizardSection
+        title="Server-side outro image from URL"
+        badge={usesServerGeneratedOutro ? "enabled" : "URL required"}
+      >
+        <div className="form-grid">
+          <TextField label="CTA outro URL" value={form.ctaUrl} onChange={(ctaUrl) => onPatch({ ctaUrl })} />
+          {usesServerGeneratedOutro && (
+            <>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={form.addOutroAnimation}
+                  onChange={(event) => onPatch({ addOutroAnimation: event.target.checked })}
+                />
+                Animate server-generated outro
+              </label>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={form.addOutroFocusArea}
+                  onChange={(event) => onPatch({ addOutroFocusArea: event.target.checked })}
+                />
+                Animate outro image focus area
+              </label>
+            </>
+          )}
+        </div>
+      </WizardSection>
 
-      <label className="toggle-row">
-        <input
-          type="checkbox"
-          checked={form.addOutroAnimation}
-          onChange={(event) => onPatch({ addOutroAnimation: event.target.checked })}
-        />
-        Server-generated outro animation
-      </label>
-      <label className="toggle-row">
-        <input
-          type="checkbox"
-          checked={form.addOutroFocusArea}
-          onChange={(event) => onPatch({ addOutroFocusArea: event.target.checked })}
-        />
-        Server-generated outro focus area
-      </label>
-
-      {form.addOutroFocusArea && (
+      {usesServerGeneratedOutro && form.addOutroFocusArea && (
         <WizardSection title="Outro focus area">
           <div className="focus-area-grid">
             {(["x", "y", "width", "height"] as Array<keyof OutroFocusAreaWizard>).map((field) => (
@@ -1813,7 +1824,7 @@ function AdvancedRenderForm({
           checked={form.addOutroAnimation}
           onChange={(event) => onPatch({ addOutroAnimation: event.target.checked })}
         />
-        Server-generated outro animation
+        Animate server-generated outro
       </label>
       <label className="toggle-row">
         <input
@@ -1821,7 +1832,7 @@ function AdvancedRenderForm({
           checked={form.addOutroFocusArea}
           onChange={(event) => onPatch({ addOutroFocusArea: event.target.checked })}
         />
-        Server-generated outro focus area
+        Animate outro image focus area
       </label>
       <div className="field full">
         <label>Outro focus area JSON</label>
@@ -2666,6 +2677,7 @@ function parseJsonObject(raw: string) {
 function buildGenerationPayload(form: GenerationFormState): GenerationInput {
   const imageInputs = parseImageInputs(form.imageUrls).map((item) => applySampleImageProcessingFlags(item, form.aspectRatio));
   const ctaUrl = form.ctaUrl.trim();
+  const addOutroFocusArea = form.addOutroFocusArea !== false;
   if (!ctaUrl) {
     throw new Error("cta_url is required for the server-generated CTA outro image");
   }
@@ -2681,10 +2693,10 @@ function buildGenerationPayload(form: GenerationFormState): GenerationInput {
     generate_outro_image: true,
     cta_url: ctaUrl,
     add_outro_animation: form.addOutroAnimation,
-    add_outro_focus_area: form.addOutroFocusArea
+    add_outro_focus_area: addOutroFocusArea
   };
 
-  if (form.addOutroFocusArea) {
+  if (addOutroFocusArea) {
     payload.outro_focust_area = parseOutroFocusArea(form.outroFocusArea);
   }
   return payload;
