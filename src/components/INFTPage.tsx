@@ -1,7 +1,7 @@
 "use client";
 
-import { Cable, Clapperboard, Copy, Download, ImagePlus, Languages, Link2, RefreshCw, Scissors, Send, Share2, Wallet } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Cable, ChevronDown, Clapperboard, Copy, Download, ExternalLink, ImagePlus, Languages, Link2, RefreshCw, Scissors, Send, Share2, Wallet } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
 import {
   requestWalletAccounts,
@@ -99,19 +99,31 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     [customer?.pricing.chainId]
   );
   const paymentTokens = useMemo(() => getPaymentTokens(transactionChain.id), [transactionChain.id]);
-  const selectablePaymentTokens = useMemo(() => {
-    const ethOrUsdc = paymentTokens.filter((token) => token.symbol === "USDC" || token.symbol === "ETH");
-    return ethOrUsdc.length ? ethOrUsdc : paymentTokens;
-  }, [paymentTokens]);
+  const selectablePaymentTokens = useMemo(
+    () => [...paymentTokens].sort((left, right) => paymentTokenRank(left) - paymentTokenRank(right)),
+    [paymentTokens]
+  );
   const selectedPaymentToken = selectablePaymentTokens.find((token) => token.symbol === paymentCurrency) || selectablePaymentTokens[0];
   const settlementToken =
     findPaymentToken(customer?.pricing.settlementTokenAddress || "", transactionChain.id) ||
     settlementTokenForCurrency(customer?.pricing.currency || "USDC", transactionChain.id) ||
     selectedPaymentToken;
+  const paymentRail = useMemo(
+    () => selectedPaymentToken && settlementToken ? resolveUserPaymentRail(selectedPaymentToken, settlementToken) : "direct",
+    [selectedPaymentToken, settlementToken]
+  );
   const actionRenderPending = Boolean(actionPoll && !terminalActionStatuses.has(actionPoll.status.toUpperCase()));
   const actionFlowPending = ["payment", "confirming", "starting", "started"].includes(actionPaymentFlow.status);
   const videoOperationPending = actionRenderPending || actionFlowPending;
   const videoActionDisabled = Boolean(busy) || videoOperationPending;
+
+  useEffect(() => {
+    const firstToken = selectablePaymentTokens[0];
+    if (firstToken && !selectablePaymentTokens.some((token) => token.symbol === paymentCurrency)) {
+      setPaymentCurrency(firstToken.symbol);
+      setActionQuote(null);
+    }
+  }, [paymentCurrency, selectablePaymentTokens]);
 
   useEffect(() => {
     if (!actionPoll?.requestId || terminalActionStatuses.has(actionPoll.status.toUpperCase())) {
@@ -325,8 +337,13 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       activeQuote.inftId === activeInft.id &&
       activeQuote.operation === action &&
       activeQuote.chainId === transactionChain.id &&
-      activeQuote.paymentTokenAddress?.toLowerCase() === paymentToken.address.toLowerCase()
+      activeQuote.paymentTokenAddress?.toLowerCase() === paymentToken.address.toLowerCase() &&
+      activeQuote.settlementTokenAddress?.toLowerCase() === settlementToken?.address.toLowerCase()
     );
+  }
+
+  function paymentTokenForCurrency(currency: PaymentCurrencySymbol) {
+    return selectablePaymentTokens.find((token) => token.symbol === currency) || selectedPaymentToken;
   }
 
   async function requestActionQuote(action: INFTPaidAction, paymentToken: PaymentToken) {
@@ -380,8 +397,49 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     if (!isUsableEvmAddress(paymentRecipient)) {
       throw new Error("Quote did not include a valid payment recipient.");
     }
+
+    if (activeQuote.paymentRail === "uniswap" && !sameToken) {
+      setActionPaymentFlow({ status: "payment", message: "Requesting Uniswap swap transaction from the wallet." });
+      const swapTxHash = await requestUniswapSwap(walletProvider.provider, activeQuote, walletAddress, transactionChain.name);
+      setActionPaymentFlow({
+        status: "confirming",
+        message: `Swap ${shortHash(swapTxHash)} submitted. Waiting for settlement tokens before transfer.`,
+        txHash: swapTxHash
+      });
+      const swapReceipt = await waitForWalletReceipt(walletProvider.provider, swapTxHash, 120000);
+      if (!swapReceipt) {
+        throw new Error("Timed out waiting for the swap transaction to mine.");
+      }
+      if (!isSuccessfulReceipt(swapReceipt)) {
+        throw new Error("Swap transaction reverted; INFT operation was not started.");
+      }
+      setActionPaymentFlow({ status: "payment", message: "Swap mined. Requesting settlement transfer.", txHash: swapTxHash });
+      const settlementTxHash = await requestTokenTransfer({
+        provider: walletProvider.provider,
+        from: walletAddress,
+        token: activeSettlementToken,
+        recipient: paymentRecipient,
+        amountAtomic: activeQuote.settlementAmountAtomic,
+        label: "Settlement transfer",
+        chainName: transactionChain.name
+      });
+      setActionPaymentFlow({
+        status: "confirming",
+        message: `Settlement transfer ${shortHash(settlementTxHash)} submitted. Waiting for confirmation.`,
+        txHash: settlementTxHash
+      });
+      const settlementReceipt = await waitForWalletReceipt(walletProvider.provider, settlementTxHash, 120000);
+      if (!settlementReceipt) {
+        throw new Error("Timed out waiting for the settlement transfer to mine.");
+      }
+      if (!isSuccessfulReceipt(settlementReceipt)) {
+        throw new Error("Settlement transfer reverted; INFT operation was not started.");
+      }
+      return settlementTxHash;
+    }
+
     if (!sameToken && activeQuote.paymentRail !== "keeperhub") {
-      throw new Error("Selected payment token differs from the settlement token. Choose ETH keeper settlement or pay directly with USDC.");
+      throw new Error("Selected payment token differs from the settlement token. Choose a KeeperHub token or pay directly with the settlement token.");
     }
 
     const transferToken = sameToken ? activeSettlementToken : paymentToken;
@@ -389,7 +447,9 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     const label = sameToken ? "Payment transfer" : "KeeperHub payment";
     setActionPaymentFlow({
       status: "payment",
-      message: `Requesting ${transferToken.symbol} payment for ${formatActionLabel(activeQuote.operation || "operation")}.`
+      message: sameToken
+        ? `Requesting ${transferToken.symbol} payment for ${formatActionLabel(activeQuote.operation || "operation")}.`
+        : `Requesting ${transferToken.symbol} payment for KeeperHub ${activeSettlementToken.symbol} settlement.`
     });
     const txHash = await requestTokenTransfer({
       provider: walletProvider.provider,
@@ -431,9 +491,14 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       if (!selectedPaymentToken) {
         throw new Error("No supported payment token is available.");
       }
-      const activeQuote = quoteMatchesAction(actionQuote, action, selectedPaymentToken)
+      const paymentToken = paymentTokenForCurrency(paymentCurrency);
+      if (!paymentToken) {
+        throw new Error("No supported payment token is available.");
+      }
+      setPaymentCurrency(paymentToken.symbol);
+      const activeQuote = quoteMatchesAction(actionQuote, action, paymentToken)
         ? actionQuote as PaymentQuote
-        : await requestActionQuote(action, selectedPaymentToken);
+        : await requestActionQuote(action, paymentToken);
       const txHash = await executePaymentForAction(activeQuote);
       setActionPaymentFlow({
         status: "starting",
@@ -455,7 +520,13 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
               tokenAddress: activeQuote.paymentTokenAddress,
               tokenSymbol: activeQuote.paymentCurrency,
               paymentRail: activeQuote.paymentRail,
-              chainId: activeQuote.chainId
+              paymentAmountAtomic: activeQuote.paymentAmountAtomic,
+              paymentRecipientAddress: activeQuote.paymentRecipientAddress,
+              settlementTokenAddress: activeQuote.settlementTokenAddress,
+              settlementCurrency: activeQuote.settlementCurrency,
+              settlementAmountAtomic: activeQuote.settlementAmountAtomic,
+              chainId: activeQuote.chainId,
+              route: activeQuote.route
             }
           }
         })
@@ -582,16 +653,16 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                 }}
                 full
               />
-              <SelectField
-                label="Pay with"
-                value={paymentCurrency}
-                options={selectablePaymentTokens.map((token) => ({ value: token.symbol, label: token.symbol }))}
-                onChange={(value) => {
-                  setPaymentCurrency(value as PaymentCurrencySymbol);
-                  setActionQuote(null);
-                }}
-              />
             </div>
+            {selectedPaymentToken && settlementToken && (
+              <INFTActionPaymentSummary
+                quote={actionQuote}
+                transactionChain={transactionChain}
+                selectedPaymentToken={selectedPaymentToken}
+                settlementToken={settlementToken}
+                paymentRail={paymentRail}
+              />
+            )}
             <div className="button-row">
               <button className="btn" onClick={() => connectWallet()} disabled={busy === "wallet"}>
                 <Wallet size={16} /> Connect wallet
@@ -601,23 +672,76 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                   {actionQuote.totalUsd.toFixed(2)} {actionQuote.settlementCurrency || "USDC"} quote · pay {formatQuotePaymentAmount(actionQuote, selectedPaymentToken)}
                 </span>
               )}
+              {actionQuote?.checkoutUrl && actionQuote.paymentRail === "uniswap" && (
+                <a className="btn" href={actionQuote.checkoutUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink size={16} /> Open Uniswap
+                </a>
+              )}
             </div>
             {actionPaymentFlow.message && <p className="notice">{actionPaymentFlow.message}</p>}
             <div className="button-row">
-              <button className="btn" onClick={() => runPaidAction("translate", { language })} disabled={videoActionDisabled}>
-                <Languages size={16} /> Retranslate {formatActionPrice(customer, "translate")}
-              </button>
-              <button className="btn" onClick={() => runPaidAction("join", { session_id: joinSession, blend_scenes: true })} disabled={videoActionDisabled || !joinSession}>
-                <Clapperboard size={16} /> Join {formatActionPrice(customer, "join")}
-              </button>
-              <button className="btn" onClick={() => runPaidAction("remove_subtitles")} disabled={videoActionDisabled}>
-                <Scissors size={16} /> Remove subtitles {formatActionPrice(customer, "remove_subtitles")}
-              </button>
-              <button className="btn" onClick={() => runPaidAction("add_outro", { outro_image_url: outroImageUrl, add_outro_animation: true })} disabled={videoActionDisabled || !outroImageUrl}>
-                <ImagePlus size={16} /> Add outro {formatActionPrice(customer, "add_outro")}
-              </button>
+              {selectedPaymentToken && settlementToken && (
+                <>
+                  <INFTActionPayControl
+                    icon={<Languages size={16} />}
+                    label={`Retranslate ${formatActionPrice(customer, "translate")}`}
+                    tokens={selectablePaymentTokens}
+                    selectedSymbol={paymentCurrency}
+                    settlementToken={settlementToken}
+                    disabled={videoActionDisabled}
+                    busy={busy === "translate"}
+                    onSelect={(symbol) => {
+                      setPaymentCurrency(symbol);
+                      setActionQuote(null);
+                    }}
+                    onPay={() => runPaidAction("translate", { language })}
+                  />
+                  <INFTActionPayControl
+                    icon={<Clapperboard size={16} />}
+                    label={`Join ${formatActionPrice(customer, "join")}`}
+                    tokens={selectablePaymentTokens}
+                    selectedSymbol={paymentCurrency}
+                    settlementToken={settlementToken}
+                    disabled={videoActionDisabled || !joinSession}
+                    busy={busy === "join"}
+                    onSelect={(symbol) => {
+                      setPaymentCurrency(symbol);
+                      setActionQuote(null);
+                    }}
+                    onPay={() => runPaidAction("join", { session_id: joinSession, blend_scenes: true })}
+                  />
+                  <INFTActionPayControl
+                    icon={<Scissors size={16} />}
+                    label={`Remove subtitles ${formatActionPrice(customer, "remove_subtitles")}`}
+                    tokens={selectablePaymentTokens}
+                    selectedSymbol={paymentCurrency}
+                    settlementToken={settlementToken}
+                    disabled={videoActionDisabled}
+                    busy={busy === "remove_subtitles"}
+                    onSelect={(symbol) => {
+                      setPaymentCurrency(symbol);
+                      setActionQuote(null);
+                    }}
+                    onPay={() => runPaidAction("remove_subtitles")}
+                  />
+                  <INFTActionPayControl
+                    icon={<ImagePlus size={16} />}
+                    label={`Add outro ${formatActionPrice(customer, "add_outro")}`}
+                    tokens={selectablePaymentTokens}
+                    selectedSymbol={paymentCurrency}
+                    settlementToken={settlementToken}
+                    disabled={videoActionDisabled || !outroImageUrl}
+                    busy={busy === "add_outro"}
+                    onSelect={(symbol) => {
+                      setPaymentCurrency(symbol);
+                      setActionQuote(null);
+                    }}
+                    onPay={() => runPaidAction("add_outro", { outro_image_url: outroImageUrl, add_outro_animation: true })}
+                  />
+                </>
+              )}
               <button className="btn" onClick={() => setShowUpdateOutro((visible) => !visible)} disabled={videoActionDisabled}>
-                <ImagePlus size={16} /> Update outro {formatActionPrice(customer, "update_outro")}
+                <ImagePlus size={16} /> Update outro options
               </button>
               <button className="btn" onClick={() => runAction("message_peer", { peerId, message: "Can we compose a cross-referrer outro trade?" })} disabled={busy === "message_peer"}>
                 <Send size={16} /> AXL message
@@ -673,13 +797,23 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                   </>
                 )}
                 <div className="button-row">
-                  <button
-                    className="btn primary"
-                    onClick={updateOutro}
-                    disabled={videoActionDisabled || !updateOutroRequiredValue}
-                  >
-                    <ImagePlus size={16} /> Update outro {formatActionPrice(customer, "update_outro")}
-                  </button>
+                  {selectedPaymentToken && settlementToken && (
+                    <INFTActionPayControl
+                      icon={<ImagePlus size={16} />}
+                      label={`Update outro ${formatActionPrice(customer, "update_outro")}`}
+                      tokens={selectablePaymentTokens}
+                      selectedSymbol={paymentCurrency}
+                      settlementToken={settlementToken}
+                      disabled={videoActionDisabled || !updateOutroRequiredValue}
+                      busy={busy === "update_outro"}
+                      primary
+                      onSelect={(symbol) => {
+                        setPaymentCurrency(symbol);
+                        setActionQuote(null);
+                      }}
+                      onPay={updateOutro}
+                    />
+                  )}
                   <button className="btn" onClick={() => setShowUpdateOutro(false)} disabled={videoActionDisabled}>
                     Close
                   </button>
@@ -863,6 +997,107 @@ function SelectField({
   );
 }
 
+function INFTActionPayControl({
+  icon,
+  label,
+  tokens,
+  selectedSymbol,
+  settlementToken,
+  disabled,
+  busy,
+  primary = false,
+  onSelect,
+  onPay
+}: {
+  icon: ReactNode;
+  label: string;
+  tokens: PaymentToken[];
+  selectedSymbol: PaymentCurrencySymbol;
+  settlementToken: PaymentToken;
+  disabled: boolean;
+  busy: boolean;
+  primary?: boolean;
+  onSelect: (symbol: PaymentCurrencySymbol) => void;
+  onPay: () => void;
+}) {
+  const orderedTokens = [...tokens].sort((left, right) => paymentTokenRank(left) - paymentTokenRank(right));
+  const selectedToken = orderedTokens.find((token) => token.symbol === selectedSymbol) || orderedTokens[0];
+  const currencyTooltip = selectedToken
+    ? paymentCurrencyTooltip(selectedToken, settlementToken)
+    : "Choose payment currency";
+  return (
+    <div className="payment-action-control" title={currencyTooltip}>
+      <button className={`btn payment-action-main ${primary ? "primary" : ""}`} disabled={disabled} onClick={onPay} type="button">
+        {icon} {busy ? "Working..." : `Pay ${selectedSymbol} & ${label}`}
+      </button>
+      <span className="payment-action-currency">
+        <select
+          aria-label="Payment currency"
+          className="payment-action-currency-select"
+          title={currencyTooltip}
+          value={selectedSymbol}
+          onChange={(event) => onSelect(event.target.value as PaymentCurrencySymbol)}
+          disabled={busy}
+        >
+          {orderedTokens.map((token) => (
+            <option value={token.symbol} key={`${token.chainId}:${token.address}`}>
+              {token.symbol}
+            </option>
+          ))}
+        </select>
+        <ChevronDown className="payment-action-currency-icon" size={18} aria-hidden="true" />
+      </span>
+    </div>
+  );
+}
+
+function INFTActionPaymentSummary({
+  quote,
+  transactionChain,
+  selectedPaymentToken,
+  settlementToken,
+  paymentRail
+}: {
+  quote: PaymentQuote | null;
+  transactionChain: TransactionChainConfig;
+  selectedPaymentToken: PaymentToken;
+  settlementToken: PaymentToken;
+  paymentRail: PaymentRail;
+}) {
+  return (
+    <div className="payment-summary">
+      <div>
+        <span className="subtle">Paying</span>
+        <strong>{selectedPaymentToken.symbol}</strong>
+      </div>
+      <div>
+        <span className="subtle">Network</span>
+        <strong>{transactionChain.name}</strong>
+      </div>
+      <div>
+        <span className="subtle">Settlement</span>
+        <strong>{settlementToken.symbol}</strong>
+      </div>
+      <div>
+        <span className="subtle">Payment path</span>
+        <strong>{quote?.paymentRail || paymentRail}</strong>
+      </div>
+      {quote?.paymentAmountAtomic && (
+        <div>
+          <span className="subtle">Pay amount</span>
+          <strong>{formatAtomicAmount(BigInt(quote.paymentAmountAtomic), selectedPaymentToken.decimals)} {quote.paymentCurrency || selectedPaymentToken.symbol}</strong>
+        </div>
+      )}
+      {quote && (
+        <div className="payment-total">
+          <span className="subtle">Quote</span>
+          <strong>{quote.totalUsd.toFixed(2)} {quote.settlementCurrency || settlementToken.symbol}</strong>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function resolveUserPaymentRail(paymentToken: PaymentToken, settlementToken: PaymentToken): PaymentRail {
   return paymentToken.address.toLowerCase() === settlementToken.address.toLowerCase() ? "direct" : "keeperhub";
 }
@@ -870,7 +1105,7 @@ function resolveUserPaymentRail(paymentToken: PaymentToken, settlementToken: Pay
 function formatActionPrice(customer: Customer | null, action: INFTPaidAction) {
   const basePrice = customer?.pricing.inftActionPricesUsd?.[action] ?? defaultINFTActionPricesUsd[action];
   const platformFee = (basePrice * Number(customer?.pricing.platformFeeBps || 0)) / 10_000;
-  return `${(Math.round((basePrice + platformFee) * 100) / 100).toFixed(2)} USDC`;
+  return `${(Math.round((basePrice + platformFee) * 100) / 100).toFixed(2)} USD`;
 }
 
 function formatActionLabel(action: string) {
@@ -884,6 +1119,71 @@ function formatQuotePaymentAmount(quote: PaymentQuote, paymentToken?: PaymentTok
     return quote.paymentCurrency || "selected token";
   }
   return `${formatAtomicAmount(BigInt(quote.paymentAmountAtomic), paymentToken.decimals)} ${quote.paymentCurrency || paymentToken.symbol}`;
+}
+
+function paymentCurrencyTooltip(token: PaymentToken, settlementToken: PaymentToken) {
+  const rail = resolveUserPaymentRail(token, settlementToken);
+  if (rail === "direct") {
+    return `Pay ${token.symbol} directly to the merchant settlement wallet.`;
+  }
+  return `Pay ${token.symbol}; KeeperHub settles ${settlementToken.symbol} to the merchant.`;
+}
+
+function paymentTokenRank(token: PaymentToken) {
+  const preferredOrder: Record<string, number> = {
+    USDC: 0,
+    ETH: 1,
+    WETH: 2,
+    USDT: 3
+  };
+  return preferredOrder[token.symbol] ?? 10;
+}
+
+async function requestUniswapSwap(provider: EthereumProvider, quote: PaymentQuote, wallet: string, chainName: string) {
+  const route = quote.route && typeof quote.route === "object" ? quote.route as Record<string, unknown> : {};
+  const swapQuote = route.quote;
+  if (!swapQuote || typeof swapQuote !== "object") {
+    throw new Error("Live Uniswap quote data is required for swap payment. Create a fresh action quote or choose a KeeperHub payment currency.");
+  }
+  const permitData = route.permitData;
+  const signature = permitData
+    ? String(await provider.request({
+      method: "eth_signTypedData_v4",
+      params: [wallet, JSON.stringify(permitData)]
+    }))
+    : undefined;
+  const response = await fetch("/api/payments/uniswap-swap", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      quote: swapQuote,
+      permitData,
+      signature
+    })
+  });
+  const data = await parseResponse(response);
+  const swapResponse = data.swap && typeof data.swap === "object" ? data.swap as Record<string, unknown> : {};
+  const tx = swapResponse.swap && typeof swapResponse.swap === "object" ? swapResponse.swap as Record<string, unknown> : {};
+  if (!tx.to || !tx.data) {
+    throw new Error("Uniswap swap response did not include a transaction.");
+  }
+  const transaction = compactTransaction({
+    from: wallet,
+    to: String(tx.to),
+    data: String(tx.data),
+    value: toRpcQuantity(tx.value)
+  });
+  const recovery = "Choose a KeeperHub payment currency or pay directly with the settlement token.";
+  const gas = await estimateWalletGas(provider, transaction, {
+    label: "Uniswap swap",
+    chainName,
+    recovery
+  });
+  return sendWalletTransaction(provider, { ...transaction, gas }, {
+    label: "Uniswap swap",
+    chainName,
+    recovery
+  });
 }
 
 async function requestTokenTransfer({
@@ -927,7 +1227,7 @@ async function requestTokenTransfer({
 async function sendWalletTransaction(
   provider: EthereumProvider,
   transaction: Record<string, unknown>,
-  context: { label: string; chainName: string }
+  context: { label: string; chainName: string; recovery?: string }
 ) {
   try {
     return String(await provider.request({
@@ -938,7 +1238,33 @@ async function sendWalletTransaction(
     if (walletErrorCode(error) === 4001) {
       throw new Error(`${context.label} was rejected in the wallet.`);
     }
-    throw new Error(`${context.label} failed on ${context.chainName}: ${formatErrorMessage(error, "wallet transaction failed")}`);
+    const recovery = context.recovery ? ` ${context.recovery}` : "";
+    throw new Error(`${context.label} failed on ${context.chainName}: ${formatErrorMessage(error, "wallet transaction failed")}.${recovery}`);
+  }
+}
+
+async function estimateWalletGas(
+  provider: EthereumProvider,
+  transaction: Record<string, unknown>,
+  context: { label: string; chainName: string; recovery?: string }
+) {
+  try {
+    const gas = BigInt(String(await provider.request({
+      method: "eth_estimateGas",
+      params: [compactTransaction(transaction)]
+    })));
+    const paddedGas = (gas * 12n) / 10n + 1n;
+    const maxReasonableSwapGas = 4_000_000n;
+    if (paddedGas > maxReasonableSwapGas) {
+      throw new Error(`${context.label} estimated an unusually high gas limit (${paddedGas.toString()}) on ${context.chainName}. No transaction was submitted. ${context.recovery || ""}`.trim());
+    }
+    return toRpcQuantity(paddedGas);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("unusually high gas limit")) {
+      throw error;
+    }
+    const recovery = context.recovery ? ` ${context.recovery}` : "";
+    throw new Error(`${context.label} gas estimate failed on ${context.chainName}: ${formatErrorMessage(error, "wallet gas estimate failed")}.${recovery}`);
   }
 }
 
@@ -948,7 +1274,10 @@ async function assertWalletBalance(provider: EthereumProvider, owner: string, to
     ? BigInt(String(await provider.request({ method: "eth_getBalance", params: [owner, "latest"] })))
     : await readErc20Balance(provider, token.address, owner);
   if (balance < requiredAmount) {
-    throw new Error(`Insufficient ${token.symbol} balance. Required ${formatAtomicAmount(requiredAmount, token.decimals)} ${token.symbol}, available ${formatAtomicAmount(balance, token.decimals)} ${token.symbol}.`);
+    const recovery = token.symbol === "USDC"
+      ? "Select ETH or another supported token in the payment currency control to create a KeeperHub settlement quote."
+      : "Use another payment currency and start again to create a fresh quote.";
+    throw new Error(`Insufficient ${token.symbol} balance. Required ${formatAtomicAmount(requiredAmount, token.decimals)} ${token.symbol}, available ${formatAtomicAmount(balance, token.decimals)} ${token.symbol}. ${recovery}`);
   }
 }
 
