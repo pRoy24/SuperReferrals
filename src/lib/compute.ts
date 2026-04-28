@@ -1,3 +1,5 @@
+import { createRequire } from "node:module";
+import { JsonRpcProvider, Wallet } from "ethers";
 import { env, isProviderMock } from "./env";
 import { getZeroGChainConfig } from "./zero-g-chain";
 
@@ -33,9 +35,10 @@ type ZeroGComputeBroker = {
   };
 };
 
-const dynamicImport = new Function("specifier", "return import(specifier)") as (
-  specifier: string
-) => Promise<Record<string, any>>;
+const require = createRequire(import.meta.url);
+const { createZGComputeNetworkBroker } = require("@0glabs/0g-serving-broker") as {
+  createZGComputeNetworkBroker(wallet: Wallet): Promise<ZeroGComputeBroker>;
+};
 
 const computeBrokers = new Map<ZeroGComputeNetwork, Promise<ZeroGComputeBroker>>();
 
@@ -134,13 +137,9 @@ async function createZeroGComputeBroker(network: ZeroGComputeNetwork): Promise<Z
     throw new Error("OG_PRIVATE_KEY is required for live 0G Compute requests.");
   }
   const chain = getZeroGChainConfig(network === "mainnet" ? 16661 : 16602);
-  const [{ createZGComputeNetworkBroker }, ethers] = await Promise.all([
-    dynamicImport("@0glabs/0g-serving-broker"),
-    dynamicImport("ethers")
-  ]);
-  const provider = new ethers.JsonRpcProvider(chain.rpcUrl);
-  const wallet = new ethers.Wallet(privateKey, provider);
-  return createZGComputeNetworkBroker(wallet) as Promise<ZeroGComputeBroker>;
+  const provider = new JsonRpcProvider(chain.rpcUrl);
+  const wallet = new Wallet(privateKey, provider);
+  return createZGComputeNetworkBroker(wallet);
 }
 
 async function selectZeroGComputeService(broker: ZeroGComputeBroker, config: ZeroGComputeConfig) {
