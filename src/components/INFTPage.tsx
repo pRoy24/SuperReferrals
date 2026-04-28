@@ -59,6 +59,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [shareMessage, setShareMessage] = useState("");
   const [lastVideoOperation, setLastVideoOperation] = useState("");
   const [actionPoll, setActionPoll] = useState<ActionPollState | null>(null);
+  const [createdInft, setCreatedInft] = useState<INFTRecord | null>(null);
   const [store, setStore] = useState<SuperReferralsStore | null>(null);
   const [walletAddress, setWalletAddress] = useState(activeInft.ownerWallet || "");
   const [walletProviders, setWalletProviders] = useState<BrowserWalletProvider[]>([]);
@@ -71,6 +72,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
 
   useEffect(() => {
     setActiveInft(inft);
+    setCreatedInft(null);
   }, [inft]);
 
   async function loadStore() {
@@ -106,8 +108,10 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     findPaymentToken(customer?.pricing.settlementTokenAddress || "", transactionChain.id) ||
     settlementTokenForCurrency(customer?.pricing.currency || "USDC", transactionChain.id) ||
     selectedPaymentToken;
-  const actionRenderPending = Boolean(actionPoll?.requestId && !terminalActionStatuses.has(actionPoll.status.toUpperCase()));
-  const videoActionDisabled = Boolean(busy) || actionRenderPending;
+  const actionRenderPending = Boolean(actionPoll && !terminalActionStatuses.has(actionPoll.status.toUpperCase()));
+  const actionFlowPending = ["payment", "confirming", "starting", "started"].includes(actionPaymentFlow.status);
+  const videoOperationPending = actionRenderPending || actionFlowPending;
+  const videoActionDisabled = Boolean(busy) || videoOperationPending;
 
   useEffect(() => {
     if (!actionPoll?.requestId || terminalActionStatuses.has(actionPoll.status.toUpperCase())) {
@@ -138,7 +142,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
         if (!cancelled) {
           setActionResult(JSON.stringify(result, null, 2));
           if (finalizedInft) {
-            setActiveInft(finalizedInft);
+            setCreatedInft(finalizedInft);
           }
           setActionPoll((current) => {
             if (!current || current.requestId !== pollRequestId) {
@@ -156,7 +160,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
               status: finalizationError ? "failed" : "completed",
               message: finalizationError ||
                 (nextResultUrl
-                ? `${formatActionLabel(pollAction)} completed and the INFT video was updated.`
+                ? `${formatActionLabel(pollAction)} completed and a new INFT was created.`
                 : `${formatActionLabel(pollAction)} completed.`)
             });
             await loadStore().catch(() => undefined);
@@ -279,11 +283,14 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   }
 
   async function runAction(action: string, payload: Record<string, unknown> = {}) {
-    if (actionRenderPending && action !== "message_peer") {
+    if (videoOperationPending && action !== "message_peer") {
       setActionResult("Wait for the current video operation to finish before starting another one.");
       return;
     }
     setBusy(action);
+    if (action !== "message_peer") {
+      setCreatedInft(null);
+    }
     try {
       const response = await fetch(`/api/infts/${activeInft.id}/actions`, {
         method: "POST",
@@ -409,7 +416,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   }
 
   async function runPaidAction(action: INFTPaidAction, payload: Record<string, unknown> = {}) {
-    if (actionRenderPending) {
+    if (videoOperationPending) {
       setActionPaymentFlow({
         status: "started",
         message: "Wait for the current video operation to finish before starting another one."
@@ -418,6 +425,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     }
     setBusy(action);
     setActionPoll(null);
+    setCreatedInft(null);
     setActionPaymentFlow({ status: "payment", message: "Preparing payment quote." });
     try {
       if (!selectedPaymentToken) {
@@ -691,6 +699,23 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                   </a>
                 )}
                 {actionPoll.errorMessage && <p className="subtle">{actionPoll.errorMessage}</p>}
+              </div>
+            )}
+            {createdInft && (
+              <div className="item">
+                <div className="item-title">
+                  <span className="subtle">New INFT</span>
+                  <strong>{createdInft.tokenId ? `token #${createdInft.tokenId}` : createdInft.id}</strong>
+                </div>
+                <p className="subtle">{createdInft.title}</p>
+                <div className="button-row">
+                  <a className="btn primary" href={`/inft/${createdInft.id}`}>
+                    <Link2 size={16} /> Open new INFT
+                  </a>
+                  <a className="btn" href={createdInft.videoUrl} target="_blank" rel="noreferrer">
+                    <Download size={16} /> Open video
+                  </a>
+                </div>
               </div>
             )}
             {actionResult && <pre className="item mono">{actionResult}</pre>}

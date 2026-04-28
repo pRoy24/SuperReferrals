@@ -2,7 +2,7 @@ import { appBaseUrl, env, isMockMode, isProviderMock } from "./env";
 import { getAgentConsoleSnapshot } from "./agent-framework";
 import { askZeroGCompute } from "./compute";
 import { buildINFTAssistantSystemPrompt } from "./assistant-prompt";
-import { deriveAgentWallet, mintINFT, updateINFTMetadata } from "./inft";
+import { deriveAgentWallet, mintINFT } from "./inft";
 import { buildGenerationFeedSettings } from "./feed";
 import { bytes32From, createId, nowIso, normalizeWallet } from "./ids";
 import {
@@ -25,6 +25,7 @@ import { verifyRenderPaymentTransaction } from "./payment-verification";
 import {
   assertRenderConditions,
   countImages,
+  defaultINFTActionPricesUsd,
   normalizeINFTPaidAction,
   priceGeneration,
   priceINFTAction,
@@ -1017,7 +1018,10 @@ function firstUrlValue(...values: unknown[]): string {
 export async function handleSamsarWebhook(payload: Record<string, unknown>) {
   const requestId = extractSamsarWebhookRequestId(payload);
   if (!requestId) {
-    throw new Error("Webhook payload did not include a request id");
+    return {
+      ignored: true,
+      reason: "missing_request_id"
+    };
   }
   const normalizedRequestId = normalizeSamsarVideoSessionId(requestId);
   const store = await readStore();
@@ -1062,7 +1066,7 @@ function extractSamsarWebhookRequestId(payload: Record<string, unknown>): string
   if (direct) {
     return direct;
   }
-  for (const key of ["data", "result", "input", "session", "request", "payload", "event"]) {
+  for (const key of ["data", "result", "input", "session", "request", "payload", "event", "video", "output"]) {
     const nested = payload[key];
     if (isRecord(nested)) {
       const nestedRequestId = extractSamsarWebhookRequestId(nested);
@@ -1483,7 +1487,7 @@ export async function runINFTAction(id: string, action: string, payload: Record<
         status,
         subAccount
       }).catch((error) => ({
-        errorMessage: `Video completed but INFT metadata update failed: ${formatErrorText(error)}`
+        errorMessage: `Video completed but new INFT creation failed: ${formatErrorText(error)}`
       }))
       : undefined;
     return {
@@ -1655,45 +1659,92 @@ async function finalizeINFTActionResult({
 }) {
   return withSerializedZeroGTransaction(`inft-action-finalize:${inft.id}:${requestId}`, async () => {
     const latestStore = await readStore();
+    const normalizedRequestId = normalizeSamsarVideoSessionId(requestId);
     const latestGeneration = latestStore.generations.find((item) => item.id === generation.id) || generation;
     const latestInft = latestStore.infts.find((item) => item.id === inft.id) || inft;
-    if (latestInft.videoUrl === resultUrl && latestGeneration.resultUrl === resultUrl) {
+    const existingGeneration = latestStore.generations.find((item) =>
+      item.id !== latestGeneration.id &&
+      generationMatchesActionRequest(item, requestId, normalizedRequestId)
+    );
+    const existingInft = existingGeneration
+      ? latestStore.infts.find((item) => item.id === existingGeneration.inftId || item.generationId === existingGeneration.id)
+      : undefined;
+    if (existingGeneration && existingInft) {
       return {
-        mode: "already_finalized",
-        inft: latestInft,
-        generation: latestGeneration
+        mode: "already_created",
+        action: action || "video_session_edit",
+        inft: existingInft,
+        generation: existingGeneration
       };
     }
 
     const actionSessionId = firstInternalSamsarSessionId(
       extractSamsarInternalSessionId(status),
-      requestId,
-      latestGeneration.samsarSessionId
+      requestId
     );
     const videoArtifact = await persistRemoteVideoToZeroG(resultUrl);
-    const metadataTitle = latestInft.title || resolveINFTTitle(latestGeneration, subAccount);
+    const timestamp = nowIso();
+    const derivativeGenerationId = createId("gen");
+    const actionName = action || "video_session_edit";
+    const metadataTitle = buildDerivativeINFTTitle(latestInft, actionName);
+    const sourceMetadata = isRecord(latestGeneration.input.metadata) ? latestGeneration.input.metadata : {};
+    const derivativeInput: GenerationInput = {
+      ...latestGeneration.input,
+      metadata: {
+        ...sourceMetadata,
+        sourceInftId: latestInft.id,
+        sourceGenerationId: latestGeneration.id,
+        sourceTokenId: latestInft.tokenId,
+        sourceVideoUrl: latestInft.videoUrl,
+        derivedFromAction: actionName,
+        samsarActionRequestId: requestId,
+        samsarActionSessionId: actionSessionId || requestId
+      }
+    };
+    const derivativeGeneration: Generation = {
+      id: derivativeGenerationId,
+      customerId: latestGeneration.customerId,
+      subAccountId: latestGeneration.subAccountId,
+      referrerCode: latestGeneration.referrerCode,
+      status: "COMPLETED",
+      input: derivativeInput,
+      payment: buildDerivativeActionPayment(latestGeneration.payment, customer, actionName),
+      samsarRequestId: requestId,
+      samsarSessionId: actionSessionId || requestId,
+      resultUrl,
+      inftId: derivativeGenerationId,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    const attributes = [
+      ...buildINFTAttributes(derivativeGeneration, customer, subAccount),
+      { trait_type: "source_inft_id", value: latestInft.id },
+      { trait_type: "source_generation_id", value: latestGeneration.id },
+      { trait_type: "video_action", value: actionName }
+    ] satisfies INFTAttribute[];
     const metadata = {
       name: metadataTitle,
-      description: latestInft.description || String(latestGeneration.input.prompt || "Generated marketing video"),
+      description: latestInft.description || String(derivativeGeneration.input.prompt || "Generated marketing video"),
       animation_url: resultUrl,
-      external_url: `${appBaseUrl()}/inft/${latestInft.id}`,
-      image: firstImageUrl(latestGeneration.input),
-      attributes: latestInft.attributes,
+      external_url: `${appBaseUrl()}/inft/${derivativeGenerationId}`,
+      image: firstImageUrl(derivativeGeneration.input),
+      attributes,
       superreferrals: {
-        generationId: latestGeneration.id,
+        generationId: derivativeGenerationId,
         customerId: customer.id,
         subAccountId: subAccount.id,
         title: metadataTitle,
         samsarRequestId: requestId,
-        samsarSessionId: actionSessionId || latestGeneration.samsarSessionId,
+        samsarSessionId: actionSessionId || requestId,
         sourceInftId: latestInft.id,
         sourceGenerationId: latestGeneration.id,
-        action: action || "video_session_edit",
+        sourceTokenId: latestInft.tokenId,
+        action: actionName,
         referrerCode: subAccount.referrerCode,
         referrerUrl: `${customer.referrerBaseUrl}/r/${subAccount.referrerCode}`,
         ownerWallet: subAccount.wallet,
         userProfile: subAccount.blockchainRegistration,
-        metadata: latestGeneration.input.metadata || {}
+        metadata: derivativeInput.metadata || {}
       },
       storage: {
         video: videoArtifact
@@ -1703,48 +1754,102 @@ async function finalizeINFTActionResult({
     const tokenMetadataUri =
       buildZeroGStorageGatewayUrl(metadataArtifact.rootHash) ||
       metadataArtifact.uri;
-    const metadataHash = bytes32From(JSON.stringify(metadata));
-    const chainUpdate = latestInft.tokenId
-      ? await updateINFTMetadata({
-        tokenId: latestInft.tokenId,
-        metadataUri: tokenMetadataUri,
-        metadataHash
-      })
-      : undefined;
-    const timestamp = nowIso();
-    const updatedInft: INFTRecord = {
-      ...latestInft,
+    const agentWallet = deriveAgentWallet(derivativeGenerationId);
+    const ownerWallet = normalizeWallet(subAccount.wallet) as `0x${string}`;
+    const mint = await mintINFT({
+      ownerWallet,
+      metadataUri: tokenMetadataUri,
+      metadataHash: bytes32From(JSON.stringify(metadata)),
+      agentWallet,
+      referrerCode: subAccount.referrerCode
+    });
+    const derivativeInft: INFTRecord = {
+      id: derivativeGenerationId,
+      generationId: derivativeGenerationId,
+      customerId: customer.id,
+      subAccountId: subAccount.id,
+      ownerWallet,
+      title: metadataTitle,
+      description: latestInft.description || String(derivativeGeneration.input.prompt || "Generated marketing video"),
       videoUrl: resultUrl,
       storageRootHash: videoArtifact.rootHash,
       metadataRootHash: metadataArtifact.rootHash,
       metadataUri: tokenMetadataUri,
-      mintTxHash: chainUpdate?.txHash || latestInft.mintTxHash,
+      tokenId: mint.tokenId,
+      contractAddress: mint.contractAddress,
+      mintTxHash: mint.txHash,
+      agentWalletAddress: agentWallet,
+      referrer: {
+        code: subAccount.referrerCode,
+        url: `${customer.referrerBaseUrl}/r/${subAccount.referrerCode}`,
+        ensName: customer.ensName
+      },
+      attributes,
+      createdAt: timestamp,
       updatedAt: timestamp
     };
-    const updatedGeneration = await mutateStore((mutableStore) => {
-      addINFT(mutableStore, updatedInft);
-      return updateGeneration(mutableStore, latestGeneration.id, {
-        status: "COMPLETED",
-        resultUrl,
-        samsarRequestId: requestId || latestGeneration.samsarRequestId,
-        samsarSessionId: actionSessionId || latestGeneration.samsarSessionId,
-        storage: {
-          video: videoArtifact,
-          metadata: metadataArtifact
-        },
-        inftId: latestInft.id,
-        errorMessage: undefined
-      });
+    const derivativeGenerationWithStorage: Generation = {
+      ...derivativeGeneration,
+      storage: {
+        video: videoArtifact,
+        metadata: metadataArtifact
+      }
+    };
+    const saved = await mutateStore((mutableStore) => {
+      const savedGeneration = addGeneration(mutableStore, derivativeGenerationWithStorage);
+      const savedInft = addINFT(mutableStore, derivativeInft);
+      return {
+        generation: savedGeneration,
+        inft: savedInft
+      };
     });
 
     return {
-      mode: latestInft.tokenId ? "updated_in_place" : "updated_local_record",
-      action: action || "video_session_edit",
-      chainTxHash: chainUpdate?.txHash,
-      inft: updatedInft,
-      generation: updatedGeneration
+      mode: "created_derivative_inft",
+      action: actionName,
+      chainTxHash: mint.txHash,
+      inft: saved.inft,
+      generation: saved.generation
     };
   });
+}
+
+function generationMatchesActionRequest(generation: Generation, requestId: string, normalizedRequestId: string) {
+  return [generation.samsarRequestId, generation.samsarSessionId].some((value) => {
+    if (!value) {
+      return false;
+    }
+    return value === requestId || Boolean(normalizedRequestId && normalizeSamsarVideoSessionId(value) === normalizedRequestId);
+  });
+}
+
+function buildDerivativeINFTTitle(inft: INFTRecord, action: string) {
+  const suffix = formatActionTitle(action);
+  return `${inft.title || "SuperReferrals Video"} - ${suffix}`;
+}
+
+function formatActionTitle(action: string) {
+  return action
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function buildDerivativeActionPayment(
+  sourcePayment: GenerationPayment,
+  customer: Customer,
+  action: string
+): GenerationPayment {
+  const paidAction = normalizeINFTPaidAction(action);
+  const actionAmountUsd = paidAction
+    ? customer.pricing.inftActionPricesUsd?.[paidAction] ?? defaultINFTActionPricesUsd[paidAction]
+    : undefined;
+  return {
+    ...sourcePayment,
+    amountUsd: Number.isFinite(actionAmountUsd) && Number(actionAmountUsd) > 0
+      ? Number(actionAmountUsd)
+      : sourcePayment.amountUsd,
+    status: sourcePayment.status === "mock_confirmed" ? "mock_confirmed" : "confirmed"
+  };
 }
 
 function paymentPayloadFromINFTAction(payload: Record<string, unknown>) {
