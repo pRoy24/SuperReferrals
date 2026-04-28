@@ -166,6 +166,10 @@ export function normalizeSamsarVideoSessionId(value: unknown) {
   return candidate.startsWith("extreq_") ? candidate.slice("extreq_".length) : candidate;
 }
 
+export function normalizeSamsarActionSessionId(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 export async function getSamsarStatus(
   requestId: string,
   externalUser?: ExternalUserIdentity,
@@ -356,7 +360,7 @@ function samsarClientActionResult(response: SamsarClientResult): Record<string, 
 function normalizeSamsarSessionActionPayload(payload: Record<string, unknown>) {
   const normalized = { ...payload };
   for (const key of ["videoSessionId", "video_session_id", "sessionId", "session_id", "sessionID"]) {
-    const sessionId = normalizeSamsarVideoSessionId(normalized[key]);
+    const sessionId = normalizeSamsarActionSessionId(normalized[key]);
     if (sessionId) {
       normalized[key] = sessionId;
     }
@@ -365,7 +369,7 @@ function normalizeSamsarSessionActionPayload(payload: Record<string, unknown>) {
   const sessionIds = normalized.session_ids || normalized.sessionIds;
   if (Array.isArray(sessionIds)) {
     const normalizedSessionIds = sessionIds
-      .map((sessionId) => normalizeSamsarVideoSessionId(sessionId))
+      .map((sessionId) => normalizeSamsarActionSessionId(sessionId))
       .filter(Boolean);
     if (normalized.session_ids) {
       normalized.session_ids = normalizedSessionIds;

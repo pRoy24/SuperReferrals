@@ -50,6 +50,7 @@ import {
   createExternalImageListVideo,
   fetchLatestVideoUrl,
   getSamsarStatus,
+  normalizeSamsarActionSessionId,
   normalizeSamsarVideoSessionId,
   publishSamsarSessionPublication,
   runSamsarSessionAction
@@ -1501,7 +1502,7 @@ export async function runINFTAction(id: string, action: string, payload: Record<
   }
 
   if (action === "update_outro") {
-    const videoSessionId = resolveGenerationVideoSessionId(generation);
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation);
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
@@ -1545,7 +1546,7 @@ export async function runINFTAction(id: string, action: string, payload: Record<
   }
 
   if (action === "add_outro") {
-    const videoSessionId = resolveGenerationVideoSessionId(generation);
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation);
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
@@ -1558,20 +1559,20 @@ export async function runINFTAction(id: string, action: string, payload: Record<
       customer,
       action: "add_outro",
       actionInput: {
-      videoSessionId,
-      outro_image_url: outroImageUrl,
-      add_outro_animation: typeof payload.add_outro_animation === "boolean"
-        ? payload.add_outro_animation
-        : payload.addOutroAnimation !== false,
-      add_outro_focus_area: payload.addOutroFocusArea === true || payload.add_outro_focus_area === true,
-      outro_focust_area: payload.outroFocusArea || payload.outro_focus_area || payload.outroFocustArea || payload.outro_focust_area
+        videoSessionId,
+        outro_image_url: outroImageUrl,
+        add_outro_animation: typeof payload.add_outro_animation === "boolean"
+          ? payload.add_outro_animation
+          : payload.addOutroAnimation !== false,
+        add_outro_focus_area: payload.addOutroFocusArea === true || payload.add_outro_focus_area === true,
+        outro_focust_area: payload.outroFocusArea || payload.outro_focus_area || payload.outroFocustArea || payload.outro_focust_area
       },
       paymentPayload: paymentPayloadFromINFTAction(payload)
     });
   }
 
   if (action === "cancel_render") {
-    const videoSessionId = resolveGenerationVideoSessionId(generation);
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation);
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
@@ -1582,7 +1583,7 @@ export async function runINFTAction(id: string, action: string, payload: Record<
   }
 
   if (action === "translate") {
-    const videoSessionId = resolveGenerationVideoSessionId(generation);
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation);
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
@@ -1591,36 +1592,36 @@ export async function runINFTAction(id: string, action: string, payload: Record<
       customer,
       action: "translate",
       actionInput: {
-      videoSessionId,
-      language: payload.language || "es"
+        videoSessionId,
+        language: payload.language || "es"
       },
       paymentPayload: paymentPayloadFromINFTAction(payload)
     });
   }
 
   if (action === "join") {
-    const videoSessionId = resolveGenerationVideoSessionId(generation);
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation);
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
     const sessionIds = [
       videoSessionId,
-      normalizeSamsarVideoSessionId(payload.sessionId || payload.session_id)
+      normalizeSamsarActionSessionId(payload.sessionId || payload.session_id)
     ].filter(Boolean);
     return runPaidINFTSamsarAction({
       inft,
       customer,
       action: "join",
       actionInput: {
-      session_ids: sessionIds,
-      blend_scenes: payload.blendScenes === true || payload.blend_scenes === true
+        session_ids: sessionIds,
+        blend_scenes: payload.blendScenes === true || payload.blend_scenes === true
       },
       paymentPayload: paymentPayloadFromINFTAction(payload)
     });
   }
 
   if (action === "remove_subtitles") {
-    const videoSessionId = resolveGenerationVideoSessionId(generation);
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation);
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
@@ -2047,6 +2048,11 @@ function actionCreditsRemaining(result: Record<string, unknown>) {
 
 function resolveGenerationVideoSessionId(generation: Pick<Generation, "samsarRequestId" | "samsarSessionId">) {
   return firstInternalSamsarSessionId(generation.samsarSessionId, generation.samsarRequestId);
+}
+
+function resolveGenerationVideoActionSessionId(generation: Pick<Generation, "samsarRequestId" | "samsarSessionId">) {
+  return normalizeSamsarActionSessionId(generation.samsarSessionId) ||
+    normalizeSamsarActionSessionId(generation.samsarRequestId);
 }
 
 function resolveINFTTitle(generation: Generation, subAccount: SubAccount) {
