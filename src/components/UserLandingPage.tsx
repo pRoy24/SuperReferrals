@@ -1,7 +1,7 @@
 "use client";
 
-import { Bot, ChevronDown, CircleDollarSign, Code2, ExternalLink, ListChecks, Play, Plus, RefreshCw, Store, Trash2, Undo2, Wallet } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ArrowDown, ArrowUp, Bot, ChevronDown, CircleDollarSign, Code2, ExternalLink, GripVertical, ListChecks, Play, Plus, RefreshCw, Store, Trash2, Undo2, Upload, Wallet } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from "react";
 import { UserStoreCreatorSkeleton } from "@/components/FormLoadingSkeletons";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
 import {
@@ -417,6 +417,22 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
 
   function removeImageWizardItem(index: number) {
     const nextImages = imageWizardItems.filter((_, itemIndex) => itemIndex !== index);
+    commitImageWizardItems(nextImages);
+  }
+
+  function moveImageWizardItem(fromIndex: number, toIndex: number) {
+    if (
+      fromIndex === toIndex ||
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= imageWizardItems.length ||
+      toIndex >= imageWizardItems.length
+    ) {
+      return;
+    }
+    const nextImages = [...imageWizardItems];
+    const [movedImage] = nextImages.splice(fromIndex, 1);
+    nextImages.splice(toIndex, 0, movedImage);
     commitImageWizardItems(nextImages);
   }
 
@@ -1204,6 +1220,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
                 onImageChange={updateImageWizardItem}
                 onImageAdd={addImageWizardItem}
                 onImageRemove={removeImageWizardItem}
+                onImageMove={moveImageWizardItem}
                 onMetadataChange={updateMetadataWizardItem}
                 onMetadataAdd={addMetadataWizardItem}
                 onMetadataRemove={removeMetadataWizardItem}
@@ -1294,6 +1311,7 @@ function SimpleRenderForm({
   onImageChange,
   onImageAdd,
   onImageRemove,
+  onImageMove,
   onMetadataChange,
   onMetadataAdd,
   onMetadataRemove,
@@ -1308,11 +1326,105 @@ function SimpleRenderForm({
   onImageChange: (index: number, patch: Partial<ImageWizardItem>) => void;
   onImageAdd: () => void;
   onImageRemove: (index: number) => void;
+  onImageMove: (fromIndex: number, toIndex: number) => void;
   onMetadataChange: (index: number, patch: Partial<MetadataWizardItem>) => void;
   onMetadataAdd: () => void;
   onMetadataRemove: (index: number) => void;
   onFocusAreaChange: (field: keyof OutroFocusAreaWizard, value: string) => void;
 }) {
+  const [uploadingImageIndex, setUploadingImageIndex] = useState<number | null>(null);
+  const [uploadError, setUploadError] = useState("");
+  const [draggedImageIndex, setDraggedImageIndex] = useState<number | null>(null);
+  const [dragOverImageIndex, setDragOverImageIndex] = useState<number | null>(null);
+
+  async function uploadImageFile(index: number, item: ImageWizardItem, file: File) {
+    if (uploadingImageIndex !== null) {
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      setUploadError("Upload an image file.");
+      return;
+    }
+    setUploadingImageIndex(index);
+    setUploadError("");
+    try {
+      const formData = new FormData();
+      formData.set("image", file);
+      const response = await fetch("/api/uploads/images", {
+        method: "POST",
+        body: formData
+      });
+      const data = await assertOk(response);
+      const upload = data.upload as { url?: string; fileName?: string };
+      if (!upload?.url) {
+        throw new Error("Upload did not return an image URL.");
+      }
+      onImageChange(index, {
+        image_url: upload.url,
+        ...(item.title.trim() ? {} : { title: titleFromFileName(upload.fileName || file.name) })
+      });
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Image upload failed.");
+    } finally {
+      setUploadingImageIndex(null);
+    }
+  }
+
+  function handleUploadInput(index: number, item: ImageWizardItem, event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (file) {
+      uploadImageFile(index, item, file).catch(() => undefined);
+    }
+  }
+
+  function handleUploadDrop(index: number, item: ImageWizardItem, event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (uploadingImageIndex !== null) {
+      return;
+    }
+    const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/"));
+    if (file) {
+      uploadImageFile(index, item, file).catch(() => undefined);
+      return;
+    }
+    setUploadError("Drop a JPEG, PNG, or WebP image.");
+  }
+
+  function handleImageDragStart(event: DragEvent<HTMLButtonElement>, index: number) {
+    if (uploadingImageIndex !== null) {
+      event.preventDefault();
+      return;
+    }
+    setDraggedImageIndex(index);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("application/x-superreferrals-image-index", String(index));
+    event.dataTransfer.setData("text/plain", String(index));
+  }
+
+  function handleImageDragOver(event: DragEvent<HTMLDivElement>, index: number) {
+    if (uploadingImageIndex !== null || isFileDragEvent(event) || draggedImageIndex === null) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDragOverImageIndex(index);
+  }
+
+  function handleImageDrop(event: DragEvent<HTMLDivElement>, index: number) {
+    if (uploadingImageIndex !== null || isFileDragEvent(event)) {
+      return;
+    }
+    event.preventDefault();
+    const fromIndex = parseDraggedImageIndex(event, draggedImageIndex);
+    setDraggedImageIndex(null);
+    setDragOverImageIndex(null);
+    if (fromIndex !== null) {
+      onImageMove(fromIndex, index);
+    }
+  }
+
   return (
     <div className="form-grid render-wizard-grid">
       <WizardSection
@@ -1321,23 +1433,72 @@ function SimpleRenderForm({
         actionLabel="Add image"
         onAction={onImageAdd}
       >
+        {uploadError && <p className="notice compact">{uploadError}</p>}
         <div className="wizard-list">
           {imageWizardItems.map((item, index) => (
-            <div className="wizard-entry" key={`image-${index}`}>
+            <div
+              className={`wizard-entry ${dragOverImageIndex === index ? "drag-over" : ""}`}
+              key={`image-${index}`}
+              onDragLeave={() => setDragOverImageIndex((current) => current === index ? null : current)}
+              onDragOver={(event) => handleImageDragOver(event, index)}
+              onDrop={(event) => handleImageDrop(event, index)}
+            >
               <div className="wizard-entry-title">
                 <strong>Image {index + 1}</strong>
-                <button type="button" className="icon-btn danger" onClick={() => onImageRemove(index)} title="Remove image">
-                  <Trash2 size={16} />
-                </button>
+                <div className="wizard-entry-title-actions">
+                  <button
+                    type="button"
+                    className="icon-btn drag-handle"
+                    draggable={uploadingImageIndex === null}
+                    onDragStart={(event) => handleImageDragStart(event, index)}
+                    onDragEnd={() => {
+                      setDraggedImageIndex(null);
+                      setDragOverImageIndex(null);
+                    }}
+                    title="Drag to reorder"
+                    disabled={uploadingImageIndex !== null}
+                  >
+                    <GripVertical size={16} />
+                  </button>
+                  <button type="button" className="icon-btn" onClick={() => onImageMove(index, index - 1)} disabled={uploadingImageIndex !== null || index === 0} title="Move image up">
+                    <ArrowUp size={16} />
+                  </button>
+                  <button type="button" className="icon-btn" onClick={() => onImageMove(index, index + 1)} disabled={uploadingImageIndex !== null || index === imageWizardItems.length - 1} title="Move image down">
+                    <ArrowDown size={16} />
+                  </button>
+                  <button type="button" className="icon-btn danger" onClick={() => onImageRemove(index)} disabled={uploadingImageIndex !== null} title="Remove image">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </div>
               <div className="wizard-image-grid">
-                <div className="field full">
-                  <label>Image URL</label>
-                  <input
-                    value={item.image_url}
-                    onChange={(event) => onImageChange(index, { image_url: event.target.value })}
-                    placeholder="https://..."
-                  />
+                <div className="image-source-grid full">
+                  <div className="field">
+                    <label>Image URL</label>
+                    <input
+                      value={item.image_url}
+                      onChange={(event) => onImageChange(index, { image_url: event.target.value })}
+                      placeholder="https://..."
+                    />
+                  </div>
+                  <label
+                    className={`image-upload-zone ${uploadingImageIndex === index ? "uploading" : ""}`}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onDrop={(event) => handleUploadDrop(index, item, event)}
+                  >
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={(event) => handleUploadInput(index, item, event)}
+                      disabled={uploadingImageIndex !== null}
+                    />
+                    <Upload size={17} />
+                    <span>{uploadingImageIndex === index ? "Uploading..." : "Upload image"}</span>
+                    <small>JPEG, PNG, or WebP up to 4 MB</small>
+                  </label>
                 </div>
                 <ImageUrlPreview rawUrl={item.image_url} label={`Image ${index + 1}`} />
                 <TextField
@@ -1456,72 +1617,147 @@ function SimpleRenderForm({
   );
 }
 
+function isFileDragEvent(event: DragEvent<HTMLElement>) {
+  return Array.from(event.dataTransfer.types).includes("Files");
+}
+
+function parseDraggedImageIndex(event: DragEvent<HTMLElement>, fallback: number | null) {
+  const raw =
+    event.dataTransfer.getData("application/x-superreferrals-image-index") ||
+    event.dataTransfer.getData("text/plain");
+  const parsed = Number(raw);
+  if (Number.isInteger(parsed) && parsed >= 0) {
+    return parsed;
+  }
+  return fallback;
+}
+
+function titleFromFileName(fileName: string) {
+  return fileName
+    .replace(/\.[^.]+$/, "")
+    .replace(/[-_]+/g, " ")
+    .trim();
+}
+
 type ImageUrlPreviewState =
-  | { status: "empty" }
-  | { status: "invalid"; message: string }
-  | { status: "loading" }
-  | { status: "loaded"; width: number; height: number }
-  | { status: "failed"; message: string };
+  | { imageUrl: string; status: "empty" }
+  | { imageUrl: string; status: "invalid"; message: string }
+  | { imageUrl: string; status: "loading" }
+  | { imageUrl: string; status: "loaded"; width: number; height: number }
+  | { imageUrl: string; status: "failed"; message: string };
+
+function createImagePreviewState(imageUrl: string, previewError: string): ImageUrlPreviewState {
+  if (!imageUrl) {
+    return { imageUrl, status: "empty" };
+  }
+  if (previewError) {
+    return { imageUrl, status: "invalid", message: previewError };
+  }
+  return { imageUrl, status: "loading" };
+}
 
 function ImageUrlPreview({ rawUrl, label }: { rawUrl: string; label: string }) {
   const imageUrl = rawUrl.trim();
   const previewError = getImagePreviewUrlError(imageUrl);
   const [state, setState] = useState<ImageUrlPreviewState>(() =>
-    imageUrl ? previewError ? { status: "invalid", message: previewError } : { status: "loading" } : { status: "empty" }
+    createImagePreviewState(imageUrl, previewError)
   );
+  const activeState = state.imageUrl === imageUrl ? state : createImagePreviewState(imageUrl, previewError);
 
   useEffect(() => {
     if (!imageUrl) {
-      setState({ status: "empty" });
+      setState({ imageUrl, status: "empty" });
       return;
     }
     if (previewError) {
-      setState({ status: "invalid", message: previewError });
+      setState({ imageUrl, status: "invalid", message: previewError });
       return;
     }
-    setState({ status: "loading" });
+    let cancelled = false;
+    const image = new Image();
+    const timeout = window.setTimeout(() => {
+      if (!cancelled) {
+        setState({
+          imageUrl,
+          status: "failed",
+          message: "Preview timed out while detecting this image ratio."
+        });
+      }
+    }, 15000);
+
+    function clearPreviewTimeout() {
+      window.clearTimeout(timeout);
+    }
+
+    function completeLoadedPreview() {
+      clearPreviewTimeout();
+      if (cancelled) return;
+      if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+        setState({
+          imageUrl,
+          status: "loaded",
+          width: image.naturalWidth,
+          height: image.naturalHeight
+        });
+        return;
+      }
+      setState({
+        imageUrl,
+        status: "failed",
+        message: "Preview loaded without readable image dimensions."
+      });
+    }
+
+    setState({ imageUrl, status: "loading" });
+    image.onload = completeLoadedPreview;
+    image.onerror = () => {
+      clearPreviewTimeout();
+      if (!cancelled) {
+        setState({ imageUrl, status: "failed", message: "Preview unavailable for this image URL." });
+      }
+    };
+    image.decoding = "async";
+    image.src = imageUrl;
+    if (image.complete) {
+      completeLoadedPreview();
+    }
+    return () => {
+      cancelled = true;
+      clearPreviewTimeout();
+      image.onload = null;
+      image.onerror = null;
+    };
   }, [imageUrl, previewError]);
 
   if (!imageUrl) {
     return null;
   }
 
-  const dimensions = state.status === "loaded" ? `${state.width} x ${state.height}` : "";
-  const aspectRatio = state.status === "loaded" ? formatDetectedAspectRatio(state.width, state.height) : "";
+  const dimensions = activeState.status === "loaded" ? `${activeState.width} x ${activeState.height}` : "";
+  const aspectRatio = activeState.status === "loaded" ? formatDetectedAspectRatio(activeState.width, activeState.height) : "";
   const statusText =
-    state.status === "loaded" ? `${aspectRatio} - ${dimensions}` :
-      state.status === "loading" ? "Detecting aspect ratio..." :
-        state.status === "invalid" || state.status === "failed" ? state.message :
+    activeState.status === "loaded" ? `${aspectRatio} - ${dimensions}` :
+      activeState.status === "loading" ? "Detecting aspect ratio..." :
+        activeState.status === "invalid" || activeState.status === "failed" ? activeState.message :
           "";
 
   return (
-    <div className={`image-url-preview full image-url-preview-${state.status}`}>
+    <div className={`image-url-preview full image-url-preview-${activeState.status}`}>
       <div className="image-url-preview-frame">
-        {!previewError && (
+        {activeState.status === "loaded" && (
           <img
             key={imageUrl}
             src={imageUrl}
             alt={`${label} preview`}
             loading="lazy"
             decoding="async"
-            onLoad={(event) => {
-              const target = event.currentTarget;
-              if (target.naturalWidth > 0 && target.naturalHeight > 0) {
-                setState({
-                  status: "loaded",
-                  width: target.naturalWidth,
-                  height: target.naturalHeight
-                });
-              }
-            }}
-            onError={() => setState({ status: "failed", message: "Preview unavailable for this image URL." })}
           />
         )}
-        {state.status !== "loaded" && <span>{state.status === "loading" ? "Loading" : "No preview"}</span>}
+        {activeState.status !== "loaded" && <span>{activeState.status === "loading" ? "Loading" : "No preview"}</span>}
       </div>
       <div className="image-url-preview-meta">
         <strong>{label}</strong>
-        <span className={state.status === "loaded" ? "badge ok" : "badge"}>{statusText}</span>
+        <span className={activeState.status === "loaded" ? "badge ok" : "badge"}>{statusText}</span>
       </div>
     </div>
   );

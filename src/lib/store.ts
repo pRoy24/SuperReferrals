@@ -337,7 +337,7 @@ async function withRedisStoreLock<T>(operation: () => Promise<T>) {
   throw new Error(`Timed out waiting for Redis store lock ${lockKey}`);
 }
 
-async function redisCommand<T>(command: Array<string | number>) {
+export async function redisCommand<T>(command: Array<string | number>) {
   const config = requireRedisRestConfig();
   const response = await fetch(config.url, {
     method: "POST",
