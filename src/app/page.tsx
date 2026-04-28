@@ -17,26 +17,26 @@ export const dynamic = "force-dynamic";
 const productPillars = [
   {
     icon: Database,
-    title: "Works with your product admin",
-    copy: "Pull product images, descriptions, price points, CTA URLs, and campaign metadata from the systems your team already uses."
+    title: "Catalog-ready",
+    copy: "Use product images, descriptions, prices, CTA URLs, and campaign metadata from your existing tools."
   },
   {
     icon: SlidersHorizontal,
-    title: "Any campaign style",
-    copy: "Generate natural explainers, fast-paced launch edits, anime promos, futuristic ads, or brand-specific product videos from one brief."
+    title: "Flexible video styles",
+    copy: "Create explainers, launch edits, anime promos, futuristic ads, or brand-specific videos from one brief."
   },
   {
     icon: Film,
-    title: "Referral pages that sell",
-    copy: "Each link opens a guided page with product context, creator attribution, video generation, purchase actions, and shareable output."
+    title: "Referral pages that convert",
+    copy: "Each link opens a page with product context, creator attribution, purchase actions, and shareable video output."
   }
 ];
 
 const valuePoints = [
-  "Connect catalog data once and reuse it across creator campaigns.",
-  "Turn product images and details into tailored video ads in the style that fits the audience.",
-  "Give customers enough context to feel confident about the purchase.",
-  "Let referrers promote products with useful media instead of a bare tracking URL."
+  "Connect catalog data once for every campaign.",
+  "Turn product images and details into audience-ready videos.",
+  "Give buyers context before they purchase.",
+  "Replace bare tracking URLs with useful media."
 ];
 
 export default async function Home() {
@@ -69,14 +69,13 @@ export default async function Home() {
       <section className="landing-hero">
         <div className="landing-hero-copy">
           <div className="eyebrow">Product Video Referrals</div>
-          <h1>Turn every referral link into a product marketing video.</h1>
+          <h1>Turn every Ref link into a marketing video</h1>
           <p className="landing-lede">
-            Give every recommendation the product images, story, style, and CTA it needs to convert with confidence.
+            Give every recommendation a product story, visual style, and clear next step.
           </p>
           <p className="landing-support">
-            SuperReferrals plugs into product and admin workflows, turns catalog assets into personalized videos,
-            and lets teams launch creator referral pages for natural demos, fast-paced ads, anime promos, futuristic
-            campaigns, and more.
+            SuperReferrals turns catalog assets into personalized videos and referral pages for creators,
+            affiliates, and storefront teams.
           </p>
           <div className="landing-actions" aria-label="Open project routes">
             <a className="btn primary large" href={referrerHref} target="_blank" rel="noreferrer">
@@ -123,18 +122,17 @@ export default async function Home() {
         </div>
         <div className="showcase-outcome">
           <span className="eyebrow">Customer outcome</span>
-          <h2>A recommendation that feels helpful, not extractive.</h2>
+          <h2>A recommendation that helps buyers decide.</h2>
           <p>
-            Buyers see the product, understand the creator context, choose a campaign experience, and move forward with
-            a clearer reason to trust the recommendation.
+            Buyers see the product, creator context, campaign style, and purchase action in one place.
           </p>
         </div>
       </section>
 
       <section className="landing-section landing-split">
         <div>
-          <div className="eyebrow">Actual Use Case</div>
-          <h2>Built for teams that want referrals to explain, show, and sell.</h2>
+          <div className="eyebrow">Use Case</div>
+          <h2>Referrals that show the product and lead to purchase.</h2>
         </div>
         <div className="value-list">
           {valuePoints.map((point) => (
@@ -162,13 +160,13 @@ export default async function Home() {
       <section className="landing-section route-section">
         <div>
           <div className="eyebrow">Marketing Video Creator</div>
-          <h2>Start with the workflow you need.</h2>
+          <h2>Start where you need.</h2>
         </div>
         <div className="route-grid">
-          <RouteButton href="/dashboard" title="Manage storefront" copy="Set products, pricing, credits, and campaign automation." />
-          <RouteButton href="/storefronts" title="Create a product video" copy="Choose a storefront, connect a wallet, and generate a video." />
-          <RouteButton href="/feed" title="View video gallery" copy="Browse completed marketing videos and social actions." />
-          <RouteButton href={inftHref} title="Open latest video" copy="Preview a completed render or continue to the gallery." />
+          <RouteButton href="/dashboard" title="Manage storefront" copy="Set products, pricing, credits, and automation." />
+          <RouteButton href="/storefronts" title="Create a product video" copy="Choose a storefront, connect a wallet, and generate." />
+          <RouteButton href="/feed" title="View video gallery" copy="Browse completed videos and social actions." />
+          <RouteButton href={inftHref} title="Open latest video" copy="Preview the latest render." />
         </div>
       </section>
     </main>

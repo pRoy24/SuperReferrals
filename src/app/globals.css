@@ -533,7 +533,7 @@ a:hover {
   margin-top: 10px;
   color: #fff;
   font-size: clamp(44px, 7vw, 84px);
-  line-height: 0.94;
+  line-height: 1.08;
 }
 
 .landing-lede {
@@ -541,7 +541,7 @@ a:hover {
   margin: 20px 0 0;
   color: #fff7ed;
   font-size: clamp(22px, 3vw, 34px);
-  line-height: 1.08;
+  line-height: 1.32;
   font-weight: 700;
 }
 
@@ -550,7 +550,7 @@ a:hover {
   margin: 16px 0 0;
   color: #dbeafe;
   font-size: 16px;
-  line-height: 1.55;
+  line-height: 1.72;
 }
 
 .landing-actions {
@@ -621,6 +621,7 @@ a:hover {
   color: var(--ink);
   font-weight: 800;
   text-align: center;
+  line-height: 1.35;
 }
 
 .flow-step svg {
@@ -641,14 +642,14 @@ a:hover {
 .landing-section h2,
 .landing-card h2 {
   font-size: clamp(24px, 3vw, 38px);
-  line-height: 1.02;
+  line-height: 1.18;
 }
 
 .showcase-outcome p,
 .landing-card p {
   margin: 0;
   color: var(--muted);
-  line-height: 1.5;
+  line-height: 1.7;
 }
 
 .landing-section {
@@ -680,6 +681,7 @@ a:hover {
   padding: 10px 12px;
   color: var(--ink);
   font-weight: 700;
+  line-height: 1.5;
 }
 
 .value-item svg {
@@ -752,11 +754,12 @@ a:hover {
 .route-button strong {
   margin-bottom: 8px;
   font-size: 16px;
+  line-height: 1.32;
 }
 
 .route-button small {
   color: var(--muted);
-  line-height: 1.42;
+  line-height: 1.62;
 }
 
 .route-button svg {

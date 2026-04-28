@@ -172,7 +172,7 @@ function restorePersistedGenerationForm(
 ): GenerationFormState {
   const next = createDefaultGenerationForm();
   if (persisted && typeof persisted === "object" && !Array.isArray(persisted)) {
-    if (typeof persisted.imageUrls === "string") next.imageUrls = persisted.imageUrls;
+    if (typeof persisted.imageUrls === "string") next.imageUrls = sanitizeImageUrlsForForm(persisted.imageUrls);
     if (typeof persisted.metadata === "string") next.metadata = persisted.metadata;
     if (typeof persisted.prompt === "string") next.prompt = persisted.prompt;
     if (typeof persisted.videoModel === "string") next.videoModel = persisted.videoModel as VideoModel;
@@ -356,7 +356,11 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const renderSubmitDisabled = busy === "generation" || renderSessionLocked || imageCount === 0;
 
   function updateGenerationForm(patch: RenderFormPatch) {
-    setGenerationForm((current) => ({ ...current, ...patch }));
+    const nextPatch = {
+      ...patch,
+      ...(typeof patch.imageUrls === "string" ? { imageUrls: sanitizeImageUrlsForForm(patch.imageUrls) } : {})
+    };
+    setGenerationForm((current) => ({ ...current, ...nextPatch }));
   }
 
   function syncRenderWizardState(form: GenerationFormState) {
@@ -2334,6 +2338,23 @@ function serializeImageWizardItems(items: ImageWizardItem[]) {
   return JSON.stringify(payload, null, 2);
 }
 
+function sanitizeImageUrlsForForm(raw: string) {
+  if (!/skip_enhancement|skipEnhancement/.test(raw)) {
+    return raw;
+  }
+  try {
+    return JSON.stringify(
+      parseImageInputs(raw).map((item) =>
+        typeof item === "string" ? item : withoutEnhancementSkipFlags(item)
+      ),
+      null,
+      2
+    );
+  } catch {
+    return raw;
+  }
+}
+
 function parseMetadataWizardItems(raw: string): MetadataWizardItem[] {
   try {
     const parsed = parseJsonObject(raw);
@@ -2608,7 +2629,7 @@ function normalizeImageInputItem(item: unknown, index: number): string | Record<
   }
   assertUsableImageUrl(imageUrl, `image_urls item ${index + 1}`);
   return {
-    ...record,
+    ...withoutEnhancementSkipFlags(record),
     image_url: imageUrl
   };
 }
