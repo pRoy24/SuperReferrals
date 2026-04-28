@@ -2376,43 +2376,6 @@ button.item {
   color: #0f172a;
 }
 
-.feed-tag-row {
-  grid-column: 1 / -1;
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.44) transparent;
-}
-
-.tag-chip {
-  min-height: 34px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #dff9fd;
-  padding: 6px 10px;
-  cursor: pointer;
-  white-space: nowrap;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.tag-chip.active {
-  color: #041112;
-  background: rgba(244, 253, 255, 0.92);
-  border-color: rgba(244, 253, 255, 0.92);
-}
-
-.tag-chip span {
-  color: inherit;
-  opacity: 0.78;
-}
-
 .feed-empty {
   width: 100vw;
   min-height: 100svh;
@@ -2723,27 +2686,6 @@ button.item {
   font-size: 20px;
   line-height: 1.12;
   overflow-wrap: anywhere;
-}
-
-.feed-meta p {
-  max-width: min(680px, 64vw);
-  margin: 5px 0;
-  color: rgba(239, 249, 252, 0.78);
-  line-height: 1.36;
-  overflow-wrap: anywhere;
-}
-
-.feed-meta-tags {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.feed-meta-tags span {
-  color: rgba(248, 251, 255, 0.68);
-  font-weight: 800;
-  font-size: 12px;
 }
 
 .feed-comment-drawer {
@@ -3105,8 +3047,7 @@ button.item {
     padding-bottom: 2px;
   }
 
-  .feed-meta h2,
-  .feed-meta p {
+  .feed-meta h2 {
     max-width: calc(100vw - 96px);
   }
 

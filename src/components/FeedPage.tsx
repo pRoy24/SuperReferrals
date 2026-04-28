@@ -12,7 +12,6 @@ import {
   Send,
   SlidersHorizontal,
   Smartphone,
-  Tags,
   Volume2,
   VolumeX,
   X
@@ -24,10 +23,6 @@ type FeedViewMode = "mobile" | "desktop";
 
 type FeedResponse = {
   items: PublicFeedItem[];
-  tags: Array<{ tag: string; count: number }>;
-  sort: FeedSortOption;
-  search: string;
-  selectedTag: string;
 };
 
 const sortOptions: Array<{ value: FeedSortOption; label: string }> = [
@@ -40,9 +35,7 @@ const sortOptions: Array<{ value: FeedSortOption; label: string }> = [
 
 export default function FeedPage() {
   const [items, setItems] = useState<PublicFeedItem[]>([]);
-  const [tags, setTags] = useState<FeedResponse["tags"]>([]);
   const [query, setQuery] = useState("");
-  const [selectedTag, setSelectedTag] = useState("");
   const [sort, setSort] = useState<FeedSortOption>("ranked");
   const [viewMode, setViewMode] = useState<FeedViewMode>("desktop");
   const [viewerId, setViewerId] = useState("");
@@ -60,8 +53,13 @@ export default function FeedPage() {
   const mobileCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const viewedItems = useRef(new Set<string>());
 
-  const activeItem = items[activeIndex] || items[0];
-  const commentItem = commentItemId ? items.find((item) => item.id === commentItemId) : undefined;
+  const visibleItems = useMemo(
+    () => items.filter((item) => isVisibleInFeedMode(item, viewMode)),
+    [items, viewMode]
+  );
+  const activeItem = visibleItems[activeIndex] || visibleItems[0];
+  const commentItem = commentItemId ? visibleItems.find((item) => item.id === commentItemId) : undefined;
+  const emptyFormatLabel = viewMode === "desktop" ? "landscape" : "portrait";
 
   useEffect(() => {
     setViewerId(getOrCreateViewerId());
@@ -77,13 +75,24 @@ export default function FeedPage() {
       loadFeed().catch((error) => setMessage(error.message));
     }, 180);
     return () => window.clearTimeout(timeout);
-  }, [viewerId, query, selectedTag, sort]);
+  }, [viewerId, query, sort]);
 
   useEffect(() => {
-    if (activeIndex >= items.length) {
+    if (visibleItems.length > 0 && activeIndex >= visibleItems.length) {
       setActiveIndex(0);
     }
-  }, [activeIndex, items.length]);
+  }, [activeIndex, visibleItems.length]);
+
+  useEffect(() => {
+    setActiveIndex(0);
+    setCommentItemId(null);
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (commentItemId && !visibleItems.some((item) => item.id === commentItemId)) {
+      setCommentItemId(null);
+    }
+  }, [commentItemId, visibleItems]);
 
   useEffect(() => {
     const current = activeItem?.id;
@@ -102,14 +111,14 @@ export default function FeedPage() {
   }, [activeItem?.id, muted, playing, volume, items, viewMode]);
 
   useEffect(() => {
-    if (viewMode !== "desktop" || items.length < 2 || !playing) {
+    if (viewMode !== "desktop" || visibleItems.length < 2 || !playing) {
       return;
     }
     const interval = window.setInterval(() => {
-      setActiveIndex((index) => (index + 1) % items.length);
+      setActiveIndex((index) => (index + 1) % visibleItems.length);
     }, 9500);
     return () => window.clearInterval(interval);
-  }, [items.length, playing, viewMode]);
+  }, [visibleItems.length, playing, viewMode]);
 
   useEffect(() => {
     if (viewMode !== "mobile") {
@@ -120,13 +129,13 @@ export default function FeedPage() {
         .filter((entry) => entry.isIntersecting)
         .sort((left, right) => right.intersectionRatio - left.intersectionRatio)[0];
       const id = visible?.target.getAttribute("data-feed-id");
-      const index = items.findIndex((item) => item.id === id);
+      const index = visibleItems.findIndex((item) => item.id === id);
       if (index >= 0) {
         setActiveIndex(index);
       }
     }, { threshold: [0.62, 0.78] });
 
-    for (const item of items) {
+    for (const item of visibleItems) {
       const node = mobileCardRefs.current[item.id];
       if (node) {
         observer.observe(node);
@@ -134,7 +143,7 @@ export default function FeedPage() {
     }
 
     return () => observer.disconnect();
-  }, [items, viewMode]);
+  }, [visibleItems, viewMode]);
 
   useEffect(() => {
     if (!activeItem || !viewerId || viewedItems.current.has(activeItem.id)) {
@@ -158,13 +167,9 @@ export default function FeedPage() {
       if (query.trim()) {
         params.set("q", query.trim());
       }
-      if (selectedTag) {
-        params.set("tag", selectedTag);
-      }
       const response = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
       const data = await parseResponse<FeedResponse>(response);
       setItems(data.items);
-      setTags(data.tags);
     } finally {
       setLoading(false);
     }
@@ -222,12 +227,12 @@ export default function FeedPage() {
   }
 
   function selectItem(index: number, behavior: ScrollBehavior = "smooth") {
-    if (items.length === 0) {
+    if (visibleItems.length === 0) {
       return;
     }
-    const nextIndex = (index + items.length) % items.length;
+    const nextIndex = (index + visibleItems.length) % visibleItems.length;
     setActiveIndex(nextIndex);
-    const nextItem = items[nextIndex];
+    const nextItem = visibleItems[nextIndex];
     if (viewMode === "mobile" && nextItem) {
       window.requestAnimationFrame(() => {
         mobileCardRefs.current[nextItem.id]?.scrollIntoView({ behavior, block: "start" });
@@ -285,7 +290,7 @@ export default function FeedPage() {
       <section className="feed-controls" aria-label="Feed filters">
         <label className="feed-search">
           <Search size={16} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search videos, creators, tags" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search videos or creators" />
         </label>
         <label className="feed-select">
           <SlidersHorizontal size={16} />
@@ -295,16 +300,6 @@ export default function FeedPage() {
             ))}
           </select>
         </label>
-        <div className="feed-tag-row">
-          <button className={`tag-chip ${selectedTag === "" ? "active" : ""}`} onClick={() => setSelectedTag("")}>
-            <Tags size={14} /> All
-          </button>
-          {tags.map((item) => (
-            <button className={`tag-chip ${selectedTag === item.tag ? "active" : ""}`} key={item.tag} onClick={() => setSelectedTag(item.tag)}>
-              #{item.tag} <span>{item.count}</span>
-            </button>
-          ))}
-        </div>
       </section>
 
       {message && <p className="notice">{message}</p>}
@@ -313,9 +308,11 @@ export default function FeedPage() {
         <section className="feed-empty">Loading published videos...</section>
       ) : items.length === 0 ? (
         <section className="feed-empty">No published feed videos match these filters.</section>
+      ) : visibleItems.length === 0 ? (
+        <section className="feed-empty">No {emptyFormatLabel} videos match these filters.</section>
       ) : viewMode === "mobile" ? (
         <section className="mobile-video-feed">
-          {items.map((item, index) => (
+          {visibleItems.map((item, index) => (
             <article
               className={`mobile-feed-card ${index === activeIndex ? "active" : ""}`}
               data-feed-id={item.id}
@@ -329,7 +326,7 @@ export default function FeedPage() {
               <MobileOverlay
                 item={item}
                 activeIndex={activeIndex}
-                items={items}
+                items={visibleItems}
                 muted={muted}
                 playing={playing}
                 volume={volume}
@@ -362,7 +359,7 @@ export default function FeedPage() {
             <DesktopMinimalControls
               item={activeItem}
               activeIndex={activeIndex}
-              items={items}
+              items={visibleItems}
               muted={muted}
               playing={playing}
               volume={volume}
@@ -562,10 +559,6 @@ function FeedMiniMeta({ item }: { item: PublicFeedItem }) {
     <div className="feed-meta">
       <div className="feed-author">@{item.authorName}</div>
       <h2>{item.title}</h2>
-      <p>{item.description}</p>
-      <div className="feed-meta-tags">
-        {item.tags.slice(0, 5).map((tag) => <span key={tag}>#{tag}</span>)}
-      </div>
     </div>
   );
 }
@@ -703,4 +696,10 @@ function formatMetric(value: number) {
     return `${(value / 1_000).toFixed(1)}k`;
   }
   return String(value);
+}
+
+function isVisibleInFeedMode(item: PublicFeedItem, viewMode: FeedViewMode) {
+  return viewMode === "mobile"
+    ? item.aspectRatio === "9:16"
+    : item.aspectRatio !== "9:16";
 }
