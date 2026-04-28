@@ -30,7 +30,8 @@ export async function POST(request: Request) {
     const result = await submitPageAssistantMessage({
       user,
       pagePath: normalizePagePath(String(body.pagePath || "/")),
-      message: String(body.message || body.question || "")
+      message: String(body.message || body.question || ""),
+      runtimeContext: String(body.context || body.runtimeContext || "")
     });
     return NextResponse.json(result);
   } catch (error) {

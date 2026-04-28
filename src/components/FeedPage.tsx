@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Bot,
   ExternalLink,
   Heart,
   MessageCircle,
@@ -16,13 +17,33 @@ import {
   VolumeX,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type FormEvent, type MutableRefObject, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type MutableRefObject, type PointerEvent } from "react";
+import { samsarAuthHeaders } from "@/lib/storefront-auth-client";
 import type { FeedSortOption, PublicFeedItem } from "@/lib/types";
 
 type FeedViewMode = "mobile" | "desktop";
 
 type FeedResponse = {
   items: PublicFeedItem[];
+};
+
+type AssistantRole = "user" | "assistant";
+
+type FeedAssistantMessage = {
+  id: string;
+  role: AssistantRole;
+  content: string;
+  createdAt: string;
+  model?: string;
+  network?: string;
+};
+
+type FeedAssistantThread = {
+  id: string;
+  pagePath: string;
+  pageTitle: string;
+  messages: FeedAssistantMessage[];
+  updatedAt: string;
 };
 
 const sortOptions: Array<{ value: FeedSortOption; label: string }> = [
@@ -32,7 +53,7 @@ const sortOptions: Array<{ value: FeedSortOption; label: string }> = [
   { value: "most_commented", label: "Most commented" },
   { value: "most_viewed", label: "Most viewed" }
 ];
-const PAGE_ASSISTANT_COMMAND_EVENT = "superreferrals:page-assistant";
+const ASSISTANT_USER_STORAGE_KEY = "superreferrals:page-assistant-user";
 
 export default function FeedPage() {
   const [items, setItems] = useState<PublicFeedItem[]>([]);
@@ -50,6 +71,7 @@ export default function FeedPage() {
   const [playing, setPlaying] = useState(true);
   const [controlsVisible, setControlsVisible] = useState(false);
   const [commentItemId, setCommentItemId] = useState<string | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const mobileCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const viewedItems = useRef(new Set<string>());
@@ -273,12 +295,16 @@ export default function FeedPage() {
     }
   }
 
-  function openAssistant() {
+  function toggleAssistant() {
     setControlsVisible(true);
-    window.dispatchEvent(new CustomEvent(PAGE_ASSISTANT_COMMAND_EVENT, { detail: { action: "open" } }));
+    if (controlsHideTimer.current !== null) {
+      window.clearTimeout(controlsHideTimer.current);
+      controlsHideTimer.current = null;
+    }
+    setAssistantOpen((current) => !current);
   }
 
-  const feedClass = `feed-shell ${viewMode === "mobile" ? "is-mobile" : "is-desktop"} ${controlsVisible ? "controls-visible" : ""}`;
+  const feedClass = `feed-shell ${viewMode === "mobile" ? "is-mobile" : "is-desktop"} ${controlsVisible || assistantOpen ? "controls-visible" : ""}`;
 
   return (
     <main className={feedClass} onPointerDown={revealControls} onPointerMove={revealControls}>
@@ -303,10 +329,21 @@ export default function FeedPage() {
           <button className="icon-toggle" onClick={() => loadFeed().catch((error) => setMessage(error.message))} title="Refresh feed">
             <RefreshCw size={18} />
           </button>
-          <button className="icon-toggle feed-assistant-toggle" onClick={openAssistant} title="Open assistant">
-            <MessageCircle size={18} />
-            <span>Assistant</span>
-          </button>
+          <div className="feed-assistant-menu">
+            <button className={`icon-toggle feed-assistant-toggle ${assistantOpen ? "active" : ""}`} onClick={toggleAssistant} title="Open video assistant">
+              <MessageCircle size={18} />
+              <span>Assistant</span>
+            </button>
+            {assistantOpen && (
+              <FeedAssistantPopdown
+                activeItem={activeItem}
+                itemCount={visibleItems.length}
+                onClose={() => setAssistantOpen(false)}
+                sort={sort}
+                viewMode={viewMode}
+              />
+            )}
+          </div>
         </div>
       </header>
 
@@ -415,6 +452,169 @@ export default function FeedPage() {
         </section>
       )}
     </main>
+  );
+}
+
+function FeedAssistantPopdown({
+  activeItem,
+  itemCount,
+  onClose,
+  sort,
+  viewMode
+}: {
+  activeItem?: PublicFeedItem;
+  itemCount: number;
+  onClose: () => void;
+  sort: FeedSortOption;
+  viewMode: FeedViewMode;
+}) {
+  const [thread, setThread] = useState<FeedAssistantThread | null>(null);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState<"load" | "send" | "">("load");
+  const [error, setError] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const assistantUserIdRef = useRef("");
+  const messages = thread?.messages || [];
+
+  useEffect(() => {
+    assistantUserIdRef.current = getOrCreateAssistantUserId();
+    const controller = new AbortController();
+    setBusy("load");
+    setError("");
+    fetch("/api/assistant/page?pagePath=%2Ffeed", {
+      cache: "no-store",
+      headers: assistantHeaders(assistantUserIdRef.current),
+      signal: controller.signal
+    })
+      .then(parseResponse<{ thread: FeedAssistantThread }>)
+      .then((data) => setThread(data.thread))
+      .catch((loadError) => {
+        if (!controller.signal.aborted) {
+          setError(loadError instanceof Error ? loadError.message : "Unable to load video assistant.");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setBusy("");
+        }
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [messages.length, busy]);
+
+  async function submitMessage(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    const message = input.trim();
+    if (!message || busy === "send") {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    const optimisticMessage: FeedAssistantMessage = {
+      id: `pending-${Date.now()}`,
+      role: "user",
+      content: message,
+      createdAt: timestamp
+    };
+    setInput("");
+    setBusy("send");
+    setError("");
+    setThread((current) => current
+      ? { ...current, messages: [...current.messages, optimisticMessage], updatedAt: timestamp }
+      : {
+        id: "pending",
+        pagePath: "/feed",
+        pageTitle: "Video Feed",
+        messages: [optimisticMessage],
+        updatedAt: timestamp
+      });
+
+    try {
+      const data = await fetch("/api/assistant/page", {
+        method: "POST",
+        headers: assistantHeaders(assistantUserIdRef.current, { "content-type": "application/json" }),
+        body: JSON.stringify({
+          pagePath: "/feed",
+          message,
+          userId: assistantUserIdRef.current,
+          context: feedAssistantContext({ activeItem, itemCount, sort, viewMode })
+        })
+      }).then(parseResponse<{ thread: FeedAssistantThread }>);
+      setThread(data.thread);
+    } catch (sendError) {
+      setError(sendError instanceof Error ? sendError.message : "Assistant request failed.");
+      setThread((current) => current
+        ? { ...current, messages: current.messages.filter((item) => item.id !== optimisticMessage.id) }
+        : current);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      submitMessage().catch(() => undefined);
+    }
+  }
+
+  return (
+    <section className="feed-assistant-popdown" aria-label="Video assistant" onPointerDown={(event) => event.stopPropagation()}>
+      <header className="feed-assistant-header">
+        <div className="feed-assistant-title">
+          <span><Bot size={17} /></span>
+          <div>
+            <strong>Video Assistant</strong>
+            <small>{viewMode} · {sort.replace(/_/g, " ")}</small>
+          </div>
+        </div>
+        <button className="feed-assistant-close" onClick={onClose} title="Close assistant" type="button">
+          <X size={16} />
+        </button>
+      </header>
+
+      <div className="feed-assistant-body">
+        {error && <div className="feed-assistant-notice">{error}</div>}
+        {messages.length > 0 ? (
+          <div className="feed-assistant-messages">
+            {messages.map((message) => (
+              <article className={`feed-assistant-message ${message.role}`} key={message.id}>
+                <div className="feed-assistant-message-meta">
+                  <strong>{message.role === "user" ? "You" : "Assistant"}</strong>
+                  <span>{formatAssistantTime(message.createdAt)}</span>
+                </div>
+                <div className="feed-assistant-message-text">{message.content}</div>
+              </article>
+            ))}
+            {busy === "send" && <div className="feed-assistant-typing"><span /><span /><span /></div>}
+            <div ref={messagesEndRef} />
+          </div>
+        ) : (
+          <div className="feed-assistant-empty">
+            {busy === "load" ? <RefreshCw size={22} className="spin" /> : <MessageCircle size={24} />}
+          </div>
+        )}
+      </div>
+
+      <form className="feed-assistant-form" onSubmit={submitMessage}>
+        <textarea
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Ask about this video or feed controls..."
+          rows={2}
+          value={input}
+        />
+        <button className="feed-assistant-send" disabled={!input.trim() || busy === "send"} type="submit">
+          {busy === "send" ? <RefreshCw size={16} className="spin" /> : <Send size={16} />}
+        </button>
+      </form>
+    </section>
   );
 }
 
@@ -715,6 +915,67 @@ function getOrCreateViewerId() {
   const next = window.crypto?.randomUUID?.() || `viewer-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   window.localStorage.setItem(key, next);
   return next;
+}
+
+function getOrCreateAssistantUserId() {
+  try {
+    const existing = window.localStorage.getItem(ASSISTANT_USER_STORAGE_KEY);
+    if (existing) {
+      return existing;
+    }
+    const generated = window.crypto?.randomUUID?.() || `assistant-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    window.localStorage.setItem(ASSISTANT_USER_STORAGE_KEY, generated);
+    return generated;
+  } catch {
+    return `assistant-${Date.now()}`;
+  }
+}
+
+function assistantHeaders(userId: string, init?: HeadersInit) {
+  const headers = samsarAuthHeaders(init);
+  if (userId) {
+    headers.set("x-superreferrals-assistant-user", userId);
+  }
+  return headers;
+}
+
+function feedAssistantContext({
+  activeItem,
+  itemCount,
+  sort,
+  viewMode
+}: {
+  activeItem?: PublicFeedItem;
+  itemCount: number;
+  sort: FeedSortOption;
+  viewMode: FeedViewMode;
+}) {
+  return [
+    `Current feed mode: ${viewMode}`,
+    `Current sort option: ${sort}`,
+    `Visible video count: ${itemCount}`,
+    activeItem
+      ? [
+        `Active video title: ${activeItem.title}`,
+        `Active video creator: ${activeItem.authorName}`,
+        `Active video model: ${activeItem.videoModel}`,
+        `Active video aspect ratio: ${activeItem.aspectRatio}`,
+        `Active video likes/comments/views: ${activeItem.metrics.likes}/${activeItem.metrics.comments}/${activeItem.metrics.views}`,
+        `Active video tags: ${activeItem.tags.join(", ") || "none"}`
+      ].join("\n")
+      : "No active video is currently selected."
+  ].join("\n");
+}
+
+function formatAssistantTime(value: string) {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    return "";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(timestamp);
 }
 
 function formatMetric(value: number) {
