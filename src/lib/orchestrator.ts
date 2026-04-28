@@ -2,7 +2,7 @@ import { appBaseUrl, env, isMockMode, isProviderMock } from "./env";
 import { getAgentConsoleSnapshot } from "./agent-framework";
 import { askZeroGCompute } from "./compute";
 import { buildINFTAssistantSystemPrompt } from "./assistant-prompt";
-import { deriveAgentWallet, mintINFT } from "./inft";
+import { deriveAgentWallet, mintINFT, updateINFTMetadata } from "./inft";
 import { buildGenerationFeedSettings } from "./feed";
 import { bytes32From, createId, nowIso, normalizeWallet } from "./ids";
 import {
@@ -960,6 +960,7 @@ function extractSamsarInternalSessionId(status: Record<string, unknown>) {
     status.video_session_id,
     status.videoSessionId,
     status.session_id,
+    status.sessionId,
     status.sessionID
   );
 }
@@ -1014,27 +1015,63 @@ function firstUrlValue(...values: unknown[]): string {
 }
 
 export async function handleSamsarWebhook(payload: Record<string, unknown>) {
-  const requestId = String(
-    payload.request_id ||
-    payload.requestId ||
-    payload.session_id ||
-    payload.sessionID ||
-    payload.external_request_id ||
-    ""
-  );
+  const requestId = extractSamsarWebhookRequestId(payload);
   if (!requestId) {
     throw new Error("Webhook payload did not include a request id");
   }
+  const normalizedRequestId = normalizeSamsarVideoSessionId(requestId);
   const store = await readStore();
   const generation = store.generations.find((item) =>
     item.samsarRequestId === requestId ||
     item.samsarSessionId === requestId ||
+    (normalizedRequestId && (
+      item.samsarRequestId === normalizedRequestId ||
+      item.samsarSessionId === normalizedRequestId
+    )) ||
     item.id === requestId
   );
   if (!generation) {
     return { ignored: true, requestId };
   }
   return syncGeneration(generation.id);
+}
+
+const samsarWebhookRequestIdKeys = [
+  "request_id",
+  "requestId",
+  "global_status_id",
+  "globalStatusId",
+  "session_id",
+  "sessionId",
+  "sessionID",
+  "video_session_id",
+  "videoSessionId",
+  "videoSessionID",
+  "upstream_session_id",
+  "upstreamSessionId",
+  "upstream_request_id",
+  "upstreamRequestId",
+  "external_request_id",
+  "externalRequestId",
+  "external_session_id",
+  "externalSessionId"
+];
+
+function extractSamsarWebhookRequestId(payload: Record<string, unknown>): string {
+  const direct = firstString(payload, samsarWebhookRequestIdKeys);
+  if (direct) {
+    return direct;
+  }
+  for (const key of ["data", "result", "input", "session", "request", "payload", "event"]) {
+    const nested = payload[key];
+    if (isRecord(nested)) {
+      const nestedRequestId = extractSamsarWebhookRequestId(nested);
+      if (nestedRequestId) {
+        return nestedRequestId;
+      }
+    }
+  }
+  return "";
 }
 
 async function finalizeGeneration(
@@ -1411,6 +1448,10 @@ export async function runINFTAction(id: string, action: string, payload: Record<
   if (!customer) {
     throw new Error("INFT storefront customer was not found.");
   }
+  const subAccount = store.subAccounts.find((item) => item.id === generation.subAccountId);
+  if (!subAccount) {
+    throw new Error("INFT generation is missing its sub-account.");
+  }
   if (action === "action_status") {
     const requestId = String(payload.requestId || payload.request_id || payload.sessionId || payload.session_id || "");
     if (!requestId) {
@@ -1431,10 +1472,27 @@ export async function runINFTAction(id: string, action: string, payload: Record<
         resultUrl = await fetchLatestVideoUrl(fallbackSessionId, statusContext).catch(() => "");
       }
     }
+    const finalized = normalizedStatus === "COMPLETED" && resultUrl
+      ? await finalizeINFTActionResult({
+        action: firstString(payload, ["sourceAction", "source_action", "operation", "action"]),
+        customer,
+        generation,
+        inft,
+        requestId,
+        resultUrl,
+        status,
+        subAccount
+      }).catch((error) => ({
+        errorMessage: `Video completed but INFT metadata update failed: ${formatErrorText(error)}`
+      }))
+      : undefined;
     return {
       ...status,
       status: normalizedStatus || status.status || "PROCESSING",
-      resultUrl: resultUrl || undefined
+      resultUrl: resultUrl || undefined,
+      finalization: finalized,
+      inft: finalized && "inft" in finalized ? finalized.inft : undefined,
+      generation: finalized && "generation" in finalized ? finalized.generation : undefined
     };
   }
 
@@ -1574,6 +1632,119 @@ export async function runINFTAction(id: string, action: string, payload: Record<
   }
 
   throw new Error(`Unsupported INFT action: ${action}`);
+}
+
+async function finalizeINFTActionResult({
+  action,
+  customer,
+  generation,
+  inft,
+  requestId,
+  resultUrl,
+  status,
+  subAccount
+}: {
+  action: string;
+  customer: Customer;
+  generation: Generation;
+  inft: INFTRecord;
+  requestId: string;
+  resultUrl: string;
+  status: Record<string, unknown>;
+  subAccount: SubAccount;
+}) {
+  return withSerializedZeroGTransaction(`inft-action-finalize:${inft.id}:${requestId}`, async () => {
+    const latestStore = await readStore();
+    const latestGeneration = latestStore.generations.find((item) => item.id === generation.id) || generation;
+    const latestInft = latestStore.infts.find((item) => item.id === inft.id) || inft;
+    if (latestInft.videoUrl === resultUrl && latestGeneration.resultUrl === resultUrl) {
+      return {
+        mode: "already_finalized",
+        inft: latestInft,
+        generation: latestGeneration
+      };
+    }
+
+    const actionSessionId = firstInternalSamsarSessionId(
+      extractSamsarInternalSessionId(status),
+      requestId,
+      latestGeneration.samsarSessionId
+    );
+    const videoArtifact = await persistRemoteVideoToZeroG(resultUrl);
+    const metadataTitle = latestInft.title || resolveINFTTitle(latestGeneration, subAccount);
+    const metadata = {
+      name: metadataTitle,
+      description: latestInft.description || String(latestGeneration.input.prompt || "Generated marketing video"),
+      animation_url: resultUrl,
+      external_url: `${appBaseUrl()}/inft/${latestInft.id}`,
+      image: firstImageUrl(latestGeneration.input),
+      attributes: latestInft.attributes,
+      superreferrals: {
+        generationId: latestGeneration.id,
+        customerId: customer.id,
+        subAccountId: subAccount.id,
+        title: metadataTitle,
+        samsarRequestId: requestId,
+        samsarSessionId: actionSessionId || latestGeneration.samsarSessionId,
+        sourceInftId: latestInft.id,
+        sourceGenerationId: latestGeneration.id,
+        action: action || "video_session_edit",
+        referrerCode: subAccount.referrerCode,
+        referrerUrl: `${customer.referrerBaseUrl}/r/${subAccount.referrerCode}`,
+        ownerWallet: subAccount.wallet,
+        userProfile: subAccount.blockchainRegistration,
+        metadata: latestGeneration.input.metadata || {}
+      },
+      storage: {
+        video: videoArtifact
+      }
+    };
+    const metadataArtifact = await persistJsonToZeroG(metadata);
+    const tokenMetadataUri =
+      buildZeroGStorageGatewayUrl(metadataArtifact.rootHash) ||
+      metadataArtifact.uri;
+    const metadataHash = bytes32From(JSON.stringify(metadata));
+    const chainUpdate = latestInft.tokenId
+      ? await updateINFTMetadata({
+        tokenId: latestInft.tokenId,
+        metadataUri: tokenMetadataUri,
+        metadataHash
+      })
+      : undefined;
+    const timestamp = nowIso();
+    const updatedInft: INFTRecord = {
+      ...latestInft,
+      videoUrl: resultUrl,
+      storageRootHash: videoArtifact.rootHash,
+      metadataRootHash: metadataArtifact.rootHash,
+      metadataUri: tokenMetadataUri,
+      mintTxHash: chainUpdate?.txHash || latestInft.mintTxHash,
+      updatedAt: timestamp
+    };
+    const updatedGeneration = await mutateStore((mutableStore) => {
+      addINFT(mutableStore, updatedInft);
+      return updateGeneration(mutableStore, latestGeneration.id, {
+        status: "COMPLETED",
+        resultUrl,
+        samsarRequestId: requestId || latestGeneration.samsarRequestId,
+        samsarSessionId: actionSessionId || latestGeneration.samsarSessionId,
+        storage: {
+          video: videoArtifact,
+          metadata: metadataArtifact
+        },
+        inftId: latestInft.id,
+        errorMessage: undefined
+      });
+    });
+
+    return {
+      mode: latestInft.tokenId ? "updated_in_place" : "updated_local_record",
+      action: action || "video_session_edit",
+      chainTxHash: chainUpdate?.txHash,
+      inft: updatedInft,
+      generation: updatedGeneration
+    };
+  });
 }
 
 function paymentPayloadFromINFTAction(payload: Record<string, unknown>) {

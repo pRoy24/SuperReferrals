@@ -15,6 +15,7 @@ import type { INFTAttribute, INFTRecord } from "./types";
 const inftAbi = parseAbi([
   "function nextTokenId() view returns (uint256)",
   "function mintAgent(address to, string encryptedURI, bytes32 metadataHash, address agentWallet, string referrerCode) returns (uint256)",
+  "function updateAgentMetadata(uint256 tokenId, string encryptedURI, bytes32 metadataHash)",
   "function tokenURI(uint256 tokenId) view returns (string)",
   "function ownerOf(uint256 tokenId) view returns (address)",
   "function agentData(uint256 tokenId) view returns ((string encryptedURI, bytes32 metadataHash, address agentWallet, string referrerCode))"
@@ -107,6 +108,60 @@ export async function mintINFT({
 
 export function deriveAgentWallet(seed: string) {
   return `0x${shortHash(seed).padEnd(40, "0")}` as `0x${string}`;
+}
+
+export async function updateINFTMetadata({
+  tokenId,
+  metadataUri,
+  metadataHash
+}: {
+  tokenId: string;
+  metadataUri: string;
+  metadataHash: `0x${string}`;
+}) {
+  const contractAddress = env("INFT_CONTRACT_ADDRESS") as `0x${string}`;
+  const privateKey = env("OG_PRIVATE_KEY") as `0x${string}`;
+  const chain = getINFTChain();
+  const rpcUrl = chain.rpcUrls.default.http[0];
+
+  if (isProviderMock("INFT")) {
+    return {
+      txHash: createId("mock_update_inft"),
+      mock: true
+    };
+  }
+  if (!contractAddress || !privateKey) {
+    throw new Error("INFT_CONTRACT_ADDRESS and OG_PRIVATE_KEY are required for live INFT metadata updates.");
+  }
+  if (!/^\d+$/.test(tokenId)) {
+    throw new Error("A numeric token id is required for INFT metadata updates.");
+  }
+
+  const account = privateKeyToAccount(privateKey);
+  const publicClient = createPublicClient({
+    chain,
+    transport: http(rpcUrl)
+  });
+  const walletClient = createWalletClient({
+    account,
+    chain,
+    transport: http(rpcUrl)
+  });
+  const txHash = await withSerializedZeroGTransaction(`0g-inft:${account.address.toLowerCase()}:${rpcUrl}`, () =>
+    writeMetadataUpdateWithRetry({
+      accountAddress: account.address,
+      contractAddress,
+      metadataHash,
+      metadataUri,
+      publicClient,
+      tokenId: BigInt(tokenId),
+      walletClient
+    })
+  );
+  return {
+    txHash,
+    mock: false
+  };
 }
 
 export async function recoverINFTFromChain(id: string): Promise<INFTRecord | undefined> {
@@ -352,6 +407,51 @@ async function writeMintWithRetry({
         abi: inftAbi,
         functionName: "mintAgent",
         args: [ownerWallet, metadataUri, metadataHash, agentWallet, referrerCode],
+        ...(nonce === undefined ? {} : { nonce }),
+        ...feeOverrides
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt < INFT_TRANSACTION_RETRY_COUNT && isReplacementTransactionError(error)) {
+        await delay(zeroGTransactionRetryDelayMs(attempt));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+async function writeMetadataUpdateWithRetry({
+  accountAddress,
+  contractAddress,
+  metadataHash,
+  metadataUri,
+  publicClient,
+  tokenId,
+  walletClient
+}: {
+  accountAddress: `0x${string}`;
+  contractAddress: `0x${string}`;
+  metadataHash: `0x${string}`;
+  metadataUri: string;
+  publicClient: any;
+  tokenId: bigint;
+  walletClient: any;
+}) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= INFT_TRANSACTION_RETRY_COUNT; attempt += 1) {
+    try {
+      const nonce = await publicClient.getTransactionCount({
+        address: accountAddress,
+        blockTag: "pending"
+      }).catch(() => undefined);
+      const feeOverrides = await buildViemFeeOverrides(publicClient, attempt);
+      return await walletClient.writeContract({
+        address: contractAddress,
+        abi: inftAbi,
+        functionName: "updateAgentMetadata",
+        args: [tokenId, metadataUri, metadataHash],
         ...(nonce === undefined ? {} : { nonce }),
         ...feeOverrides
       });

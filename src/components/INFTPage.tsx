@@ -31,7 +31,7 @@ type ActionPollState = {
 };
 
 type ActionPaymentFlow = {
-  status: "idle" | "payment" | "confirming" | "starting" | "started" | "failed";
+  status: "idle" | "payment" | "confirming" | "starting" | "started" | "completed" | "failed";
   message: string;
   txHash?: string;
 };
@@ -39,6 +39,7 @@ type ActionPaymentFlow = {
 const terminalActionStatuses = new Set(["COMPLETED", "FAILED", "CANCELLED", "REFUNDED"]);
 
 export default function INFTPage({ inft }: { inft: INFTRecord }) {
+  const [activeInft, setActiveInft] = useState(inft);
   const [actionResult, setActionResult] = useState("");
   const [busy, setBusy] = useState("");
   const [peerId, setPeerId] = useState("mock-peer-video-a");
@@ -59,14 +60,18 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [lastVideoOperation, setLastVideoOperation] = useState("");
   const [actionPoll, setActionPoll] = useState<ActionPollState | null>(null);
   const [store, setStore] = useState<SuperReferralsStore | null>(null);
-  const [walletAddress, setWalletAddress] = useState(inft.ownerWallet || "");
+  const [walletAddress, setWalletAddress] = useState(activeInft.ownerWallet || "");
   const [walletProviders, setWalletProviders] = useState<BrowserWalletProvider[]>([]);
   const [activeWalletProvider, setActiveWalletProvider] = useState<BrowserWalletProvider | null>(null);
   const [paymentCurrency, setPaymentCurrency] = useState<PaymentCurrencySymbol>("USDC");
   const [actionQuote, setActionQuote] = useState<PaymentQuote | null>(null);
   const [actionPaymentFlow, setActionPaymentFlow] = useState<ActionPaymentFlow>({ status: "idle", message: "" });
-  const publicInftPath = `/inft/${inft.id}`;
+  const publicInftPath = `/inft/${activeInft.id}`;
   const updateOutroRequiredValue = updateOutroMode === "cta" ? updateOutroCtaUrl.trim() : updateOutroImageUrl.trim();
+
+  useEffect(() => {
+    setActiveInft(inft);
+  }, [inft]);
 
   async function loadStore() {
     const response = await fetch("/api/bootstrap", { cache: "no-store" });
@@ -84,8 +89,8 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   useEffect(() => subscribeToBrowserWalletProviders(setWalletProviders), []);
 
   const customer = useMemo(
-    () => store?.customers.find((item) => item.id === inft.customerId) || null,
-    [store, inft.customerId]
+    () => store?.customers.find((item) => item.id === activeInft.customerId) || null,
+    [store, activeInft.customerId]
   );
   const transactionChain = useMemo(
     () => getTransactionChainConfig(normalizeTransactionChainIdForEnvironment(customer?.pricing.chainId)),
@@ -101,30 +106,40 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     findPaymentToken(customer?.pricing.settlementTokenAddress || "", transactionChain.id) ||
     settlementTokenForCurrency(customer?.pricing.currency || "USDC", transactionChain.id) ||
     selectedPaymentToken;
+  const actionRenderPending = Boolean(actionPoll?.requestId && !terminalActionStatuses.has(actionPoll.status.toUpperCase()));
+  const videoActionDisabled = Boolean(busy) || actionRenderPending;
+
   useEffect(() => {
     if (!actionPoll?.requestId || terminalActionStatuses.has(actionPoll.status.toUpperCase())) {
       return;
     }
     const pollRequestId = actionPoll.requestId;
+    const pollAction = actionPoll.action;
     let cancelled = false;
 
     async function pollActionStatus() {
       try {
-        const response = await fetch(`/api/infts/${inft.id}/actions`, {
+        const response = await fetch(`/api/infts/${activeInft.id}/actions`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             action: "action_status",
-            payload: { requestId: pollRequestId }
+            payload: { requestId: pollRequestId, sourceAction: pollAction }
           })
         });
         const data = await parseResponse(response);
         const result = data.result as Record<string, unknown>;
         const nextStatus = extractActionStatus(result);
         const nextResultUrl = extractActionResultUrl(result);
-        const nextErrorMessage = extractActionError(result);
+        const finalization = isRecord(result.finalization) ? result.finalization : undefined;
+        const finalizationError = firstStringValue(finalization, "errorMessage", "message");
+        const nextErrorMessage = extractActionError(result) || finalizationError;
+        const finalizedInft = isRecord(result.inft) ? result.inft as unknown as INFTRecord : undefined;
         if (!cancelled) {
           setActionResult(JSON.stringify(result, null, 2));
+          if (finalizedInft) {
+            setActiveInft(finalizedInft);
+          }
           setActionPoll((current) => {
             if (!current || current.requestId !== pollRequestId) {
               return current;
@@ -136,6 +151,22 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
               errorMessage: nextErrorMessage
             };
           });
+          if (nextStatus === "COMPLETED") {
+            setActionPaymentFlow({
+              status: finalizationError ? "failed" : "completed",
+              message: finalizationError ||
+                (nextResultUrl
+                ? `${formatActionLabel(pollAction)} completed and the INFT video was updated.`
+                : `${formatActionLabel(pollAction)} completed.`)
+            });
+            await loadStore().catch(() => undefined);
+          }
+          if (nextStatus && terminalActionStatuses.has(nextStatus) && nextStatus !== "COMPLETED") {
+            setActionPaymentFlow({
+              status: "failed",
+              message: nextErrorMessage || `${formatActionLabel(pollAction)} ended with status ${nextStatus}.`
+            });
+          }
         }
       } catch (error) {
         if (!cancelled) {
@@ -160,7 +191,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [actionPoll?.requestId, actionPoll?.status, inft.id]);
+  }, [actionPoll?.action, actionPoll?.requestId, actionPoll?.status, activeInft.id]);
 
   function getPublicInftUrl() {
     if (typeof window === "undefined") {
@@ -183,8 +214,8 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     try {
       if (navigator.share) {
         await navigator.share({
-          title: inft.title,
-          text: inft.description,
+          title: activeInft.title,
+          text: activeInft.description,
           url
         });
         setShareMessage("Share sheet opened.");
@@ -203,7 +234,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     }
     const url = getPublicInftUrl();
     const shareUrl = new URL("https://twitter.com/intent/tweet");
-    shareUrl.searchParams.set("text", inft.title);
+    shareUrl.searchParams.set("text", activeInft.title);
     shareUrl.searchParams.set("url", url);
     window.open(shareUrl.toString(), "_blank", "noopener,noreferrer");
   }
@@ -248,9 +279,13 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   }
 
   async function runAction(action: string, payload: Record<string, unknown> = {}) {
+    if (actionRenderPending && action !== "message_peer") {
+      setActionResult("Wait for the current video operation to finish before starting another one.");
+      return;
+    }
     setBusy(action);
     try {
-      const response = await fetch(`/api/infts/${inft.id}/actions`, {
+      const response = await fetch(`/api/infts/${activeInft.id}/actions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action, payload })
@@ -280,7 +315,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   function quoteMatchesAction(activeQuote: PaymentQuote | null, action: INFTPaidAction, paymentToken: PaymentToken) {
     return Boolean(
       activeQuote &&
-      activeQuote.inftId === inft.id &&
+      activeQuote.inftId === activeInft.id &&
       activeQuote.operation === action &&
       activeQuote.chainId === transactionChain.id &&
       activeQuote.paymentTokenAddress?.toLowerCase() === paymentToken.address.toLowerCase()
@@ -300,8 +335,8 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         customerId: customer.id,
-        subAccountId: inft.subAccountId,
-        inftId: inft.id,
+        subAccountId: activeInft.subAccountId,
+        inftId: activeInft.id,
         action,
         tokenIn: paymentToken.address,
         tokenOut: settlementToken.address,
@@ -374,7 +409,15 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   }
 
   async function runPaidAction(action: INFTPaidAction, payload: Record<string, unknown> = {}) {
+    if (actionRenderPending) {
+      setActionPaymentFlow({
+        status: "started",
+        message: "Wait for the current video operation to finish before starting another one."
+      });
+      return;
+    }
     setBusy(action);
+    setActionPoll(null);
     setActionPaymentFlow({ status: "payment", message: "Preparing payment quote." });
     try {
       if (!selectedPaymentToken) {
@@ -389,7 +432,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
         message: `Payment ${shortHash(txHash)} confirmed. Starting ${formatActionLabel(action)}.`,
         txHash
       });
-      const response = await fetch(`/api/infts/${inft.id}/actions`, {
+      const response = await fetch(`/api/infts/${activeInft.id}/actions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -424,7 +467,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       }
       setActionPaymentFlow({
         status: "started",
-        message: `${formatActionLabel(action)} started after ${shortHash(txHash)}.`,
+        message: `${formatActionLabel(action)} started after ${shortHash(txHash)}. Waiting for render completion before enabling another video operation.`,
         txHash
       });
       await loadStore().catch(() => undefined);
@@ -484,8 +527,8 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       <div className="topbar">
         <div>
           <div className="eyebrow">INFT Viewer</div>
-          <h1>{inft.title}</h1>
-          <p className="subtle">{inft.description}</p>
+          <h1>{activeInft.title}</h1>
+          <p className="subtle">{activeInft.description}</p>
         </div>
         <a className="btn" href="/">
           <RefreshCw size={16} /> Dashboard
@@ -495,9 +538,9 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       <div className="inft-grid">
         <section className="stack">
           <div className="panel">
-            <video className="video" src={inft.videoUrl} controls />
+            <video className="video" src={activeInft.videoUrl} controls />
             <div className="button-row">
-              <a className="btn primary" href={inft.videoUrl} download target="_blank" rel="noreferrer">
+              <a className="btn primary" href={activeInft.videoUrl} download target="_blank" rel="noreferrer">
                 <Download size={16} /> Download video
               </a>
               <button className="btn" onClick={shareInft}>
@@ -506,9 +549,9 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
               <button className="btn" onClick={shareOnX}>
                 <Share2 size={16} /> Share on X
               </button>
-              <span className="badge ok">token #{inft.tokenId}</span>
-              <span className="badge">{inft.referrer.code}</span>
-              {inft.referrer.ensName && <span className="badge">{inft.referrer.ensName}</span>}
+              <span className="badge ok">token #{activeInft.tokenId}</span>
+              <span className="badge">{activeInft.referrer.code}</span>
+              {activeInft.referrer.ensName && <span className="badge">{activeInft.referrer.ensName}</span>}
             </div>
           </div>
 
@@ -553,19 +596,19 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
             </div>
             {actionPaymentFlow.message && <p className="notice">{actionPaymentFlow.message}</p>}
             <div className="button-row">
-              <button className="btn" onClick={() => runPaidAction("translate", { language })} disabled={busy === "translate"}>
+              <button className="btn" onClick={() => runPaidAction("translate", { language })} disabled={videoActionDisabled}>
                 <Languages size={16} /> Retranslate {formatActionPrice(customer, "translate")}
               </button>
-              <button className="btn" onClick={() => runPaidAction("join", { session_id: joinSession, blend_scenes: true })} disabled={busy === "join" || !joinSession}>
+              <button className="btn" onClick={() => runPaidAction("join", { session_id: joinSession, blend_scenes: true })} disabled={videoActionDisabled || !joinSession}>
                 <Clapperboard size={16} /> Join {formatActionPrice(customer, "join")}
               </button>
-              <button className="btn" onClick={() => runPaidAction("remove_subtitles")} disabled={busy === "remove_subtitles"}>
+              <button className="btn" onClick={() => runPaidAction("remove_subtitles")} disabled={videoActionDisabled}>
                 <Scissors size={16} /> Remove subtitles {formatActionPrice(customer, "remove_subtitles")}
               </button>
-              <button className="btn" onClick={() => runPaidAction("add_outro", { outro_image_url: outroImageUrl, add_outro_animation: true })} disabled={busy === "add_outro" || !outroImageUrl}>
+              <button className="btn" onClick={() => runPaidAction("add_outro", { outro_image_url: outroImageUrl, add_outro_animation: true })} disabled={videoActionDisabled || !outroImageUrl}>
                 <ImagePlus size={16} /> Add outro {formatActionPrice(customer, "add_outro")}
               </button>
-              <button className="btn" onClick={() => setShowUpdateOutro((visible) => !visible)} disabled={busy === "update_outro"}>
+              <button className="btn" onClick={() => setShowUpdateOutro((visible) => !visible)} disabled={videoActionDisabled}>
                 <ImagePlus size={16} /> Update outro {formatActionPrice(customer, "update_outro")}
               </button>
               <button className="btn" onClick={() => runAction("message_peer", { peerId, message: "Can we compose a cross-referrer outro trade?" })} disabled={busy === "message_peer"}>
@@ -625,11 +668,11 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                   <button
                     className="btn primary"
                     onClick={updateOutro}
-                    disabled={busy === "update_outro" || !updateOutroRequiredValue}
+                    disabled={videoActionDisabled || !updateOutroRequiredValue}
                   >
                     <ImagePlus size={16} /> Update outro {formatActionPrice(customer, "update_outro")}
                   </button>
-                  <button className="btn" onClick={() => setShowUpdateOutro(false)} disabled={busy === "update_outro"}>
+                  <button className="btn" onClick={() => setShowUpdateOutro(false)} disabled={videoActionDisabled}>
                     Close
                   </button>
                 </div>
@@ -653,11 +696,11 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
             {actionResult && <pre className="item mono">{actionResult}</pre>}
             {lastVideoOperation && (
               <StorefrontRatingForm
-                customerId={inft.customerId}
-                subAccountId={inft.subAccountId}
-                generationId={inft.generationId}
-                inftId={inft.id}
-                wallet={inft.ownerWallet}
+                customerId={activeInft.customerId}
+                subAccountId={activeInft.subAccountId}
+                generationId={activeInft.generationId}
+                inftId={activeInft.id}
+                wallet={activeInft.ownerWallet}
                 operation={lastVideoOperation}
                 title="Rate this storefront after the operation"
               />
@@ -672,11 +715,11 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
               <Wallet size={18} />
             </div>
             <p className="subtle">Owner wallet</p>
-            <p className="mono">{inft.ownerWallet}</p>
+            <p className="mono">{activeInft.ownerWallet}</p>
             <p className="subtle">Agent wallet</p>
-            <p className="mono">{inft.agentWalletAddress}</p>
+            <p className="mono">{activeInft.agentWalletAddress}</p>
             <p className="subtle">Contract</p>
-            <p className="mono">{inft.contractAddress}</p>
+            <p className="mono">{activeInft.contractAddress}</p>
           </div>
 
           <div className="panel">
@@ -702,11 +745,11 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
               <Link2 size={18} />
             </div>
             <p className="subtle">Video root</p>
-            <p className="mono">{inft.storageRootHash}</p>
+            <p className="mono">{activeInft.storageRootHash}</p>
             <p className="subtle">Metadata root</p>
-            <p className="mono">{inft.metadataRootHash}</p>
+            <p className="mono">{activeInft.metadataRootHash}</p>
             <p className="subtle">Metadata URI</p>
-            <p className="mono">{inft.metadataUri}</p>
+            <p className="mono">{activeInft.metadataUri}</p>
           </div>
 
           <div className="panel">
@@ -714,9 +757,9 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
               <h2>Referrer Metadata</h2>
               <Link2 size={18} />
             </div>
-            <p className="mono">{inft.referrer.url}</p>
+            <p className="mono">{activeInft.referrer.url}</p>
             <div className="list">
-              {inft.attributes.map((attribute) => (
+              {activeInft.attributes.map((attribute) => (
                 <div className="item" key={attribute.trait_type}>
                   <div className="item-title">
                     <span className="subtle">{attribute.trait_type}</span>
@@ -1042,7 +1085,21 @@ function parseOutroFocusArea(raw: string) {
 }
 
 function extractActionRequestId(value: unknown) {
-  return firstStringValue(value, "request_id", "requestId", "session_id", "sessionID", "id");
+  return firstStringValue(
+    value,
+    "request_id",
+    "requestId",
+    "global_status_id",
+    "globalStatusId",
+    "session_id",
+    "sessionId",
+    "sessionID",
+    "video_session_id",
+    "videoSessionId",
+    "external_request_id",
+    "externalRequestId",
+    "id"
+  );
 }
 
 function extractActionStatus(value: unknown) {
