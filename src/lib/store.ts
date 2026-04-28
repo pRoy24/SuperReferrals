@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { appBaseUrl, env } from "./env";
 import { createId, makeReferrerCode, nowIso, normalizeWallet } from "./ids";
+import { recoverINFTFromChain } from "./inft";
 import { findPaymentToken, getTransactionChainId, settlementTokenForCurrency } from "./payment-tokens";
 import { defaultModelPricingConfigurations, defaultPricing } from "./pricing";
 import { normalizeWalletList } from "./storefront-access";
@@ -24,10 +25,18 @@ import type {
 
 const STORE_FILE = "data.json";
 const DEFAULT_DATA_DIR = ".superreferrals";
+const DEFAULT_REDIS_STORE_KEY_PREFIX = "superreferrals:store";
+const DEFAULT_REDIS_LOCK_TTL_MS = 15_000;
+const DEFAULT_REDIS_LOCK_RETRIES = 40;
+const REDIS_LOCK_RELEASE_SCRIPT = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
 const LEGACY_DEMO_CUSTOMER_ID = "cus_demo";
 const LEGACY_DEMO_SUB_ACCOUNT_ID = "sub_demo";
 const LEGACY_DEMO_OWNER_WALLET = "0x1111111111111111111111111111111111111111";
-let storeMutationQueue: Promise<unknown> = Promise.resolve();
+
+type RedisRestConfig = {
+  url: string;
+  token: string;
+};
 
 function dataDir() {
   const configured = env("SUPERREFERRALS_DATA_DIR", DEFAULT_DATA_DIR);
@@ -42,6 +51,43 @@ function dataDir() {
 
 function dataPath() {
   return path.join(dataDir(), STORE_FILE);
+}
+
+function requireRedisRestConfig(): RedisRestConfig {
+  const url = env("KV_REST_API_URL") || env("UPSTASH_REDIS_REST_URL");
+  const token = env("KV_REST_API_TOKEN") || env("UPSTASH_REDIS_REST_TOKEN");
+  if (!url || !token) {
+    throw new Error([
+      "SuperReferrals requires a durable Redis KV store.",
+      "Run `npm run deploy:setup:staging` or `npm run deploy:setup:production` to create/link Upstash Redis, then redeploy or pull Vercel env locally.",
+      "Required runtime env vars: KV_REST_API_URL and KV_REST_API_TOKEN."
+    ].join(" "));
+  }
+  return {
+    url: url.replace(/\/+$/, ""),
+    token
+  };
+}
+
+function redisStoreKey() {
+  const explicit = env("SUPERREFERRALS_REDIS_STORE_KEY");
+  if (explicit) {
+    return explicit;
+  }
+  const prefix = env("SUPERREFERRALS_REDIS_KEY_PREFIX", DEFAULT_REDIS_STORE_KEY_PREFIX).replace(/:+$/, "");
+  return `${prefix}:${storeEnvironmentSlug()}`;
+}
+
+function redisStoreLockKey() {
+  return `${redisStoreKey()}:lock`;
+}
+
+function storeEnvironmentSlug() {
+  const raw = env("DEPLOYMENT_ENV") || env("VERCEL_ENV") || process.env.NODE_ENV || "local";
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9:_-]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "local";
 }
 
 function isServerlessRuntime() {
@@ -83,22 +129,21 @@ export function emptyStore(): SuperReferralsStore {
 }
 
 export async function readStore(): Promise<SuperReferralsStore> {
+  return readRedisStore();
+}
+
+async function readLegacyFileStoreForRedisSeed(): Promise<SuperReferralsStore | undefined> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
       const raw = await fs.readFile(dataPath(), "utf8");
       const parsed = JSON.parse(raw) as SuperReferralsStore;
       const store = { ...emptyStore(), ...parsed, version: 4 as const };
       const normalized = normalizeStoreForRuntime(store);
-      if (normalized.changed) {
-        await writeStore(normalized.store);
-      }
       return normalized.store;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === "ENOENT") {
-        const empty = emptyStore();
-        await writeStore(empty);
-        return empty;
+        return undefined;
       }
       if (error instanceof SyntaxError && attempt < 4) {
         await delay(25 * (attempt + 1));
@@ -110,7 +155,51 @@ export async function readStore(): Promise<SuperReferralsStore> {
       throw error;
     }
   }
-  throw new Error("Unable to read store");
+  throw new Error("Unable to read legacy file store");
+}
+
+async function readRedisStore(): Promise<SuperReferralsStore> {
+  const store = await readRedisStoreDocument();
+  const normalized = normalizeStoreForRuntime(store);
+  if (normalized.changed) {
+    await writeRedisStoreDocument(normalized.store);
+  }
+  return normalized.store;
+}
+
+async function readRedisStoreDocument(): Promise<SuperReferralsStore> {
+  const key = redisStoreKey();
+  const raw = await redisCommand<unknown>(["GET", key]);
+  if (raw === null || raw === undefined) {
+    return initializeRedisStoreDocument();
+  }
+  return parseStoreDocument(raw, `Redis key ${key}`);
+}
+
+async function initializeRedisStoreDocument(): Promise<SuperReferralsStore> {
+  const key = redisStoreKey();
+  const initial = await readLegacyFileStoreForRedisSeed() || emptyStore();
+  await redisCommand<string | null>(["SET", key, JSON.stringify(initial), "NX"]);
+  const current = await redisCommand<unknown>(["GET", key]);
+  if (current === null || current === undefined) {
+    return initial;
+  }
+  return parseStoreDocument(current, `Redis key ${key}`);
+}
+
+function parseStoreDocument(raw: unknown, source: string): SuperReferralsStore {
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new SyntaxError("Store document is not a JSON object");
+    }
+    return { ...emptyStore(), ...(parsed as Partial<SuperReferralsStore>), version: 4 as const };
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new Error(`${source} contains invalid JSON. Restore the key before continuing.`);
+    }
+    throw error;
+  }
 }
 
 function normalizeStoreForRuntime(store: SuperReferralsStore) {
@@ -208,23 +297,87 @@ function isLegacyDemoCustomer(customer: Customer) {
 }
 
 export async function writeStore(store: SuperReferralsStore) {
-  const dir = dataDir();
-  await fs.mkdir(dir, { recursive: true });
-  const targetPath = dataPath();
-  const tempPath = path.join(dir, `.${STORE_FILE}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`);
-  await fs.writeFile(tempPath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
-  await fs.rename(tempPath, targetPath);
+  await writeRedisStoreDocument(store);
+}
+
+async function writeRedisStoreDocument(store: SuperReferralsStore) {
+  await redisCommand<string>(["SET", redisStoreKey(), JSON.stringify(store)]);
 }
 
 export async function mutateStore<T>(mutator: (store: SuperReferralsStore) => T | Promise<T>) {
-  const run = storeMutationQueue.then(async () => {
-    const store = await readStore();
-    const result = await mutator(store);
-    await writeStore(store);
+  return mutateRedisStore(mutator);
+}
+
+async function mutateRedisStore<T>(mutator: (store: SuperReferralsStore) => T | Promise<T>) {
+  return withRedisStoreLock(async () => {
+    const store = await readRedisStoreDocument();
+    const normalized = normalizeStoreForRuntime(store).store;
+    const result = await mutator(normalized);
+    await writeRedisStoreDocument(normalized);
     return result;
   });
-  storeMutationQueue = run.catch(() => undefined);
-  return run;
+}
+
+async function withRedisStoreLock<T>(operation: () => Promise<T>) {
+  const lockKey = redisStoreLockKey();
+  const token = createId("lock");
+  const ttlMs = parsePositiveIntegerEnv("SUPERREFERRALS_REDIS_LOCK_TTL_MS", DEFAULT_REDIS_LOCK_TTL_MS);
+  const retries = parsePositiveIntegerEnv("SUPERREFERRALS_REDIS_LOCK_RETRIES", DEFAULT_REDIS_LOCK_RETRIES);
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const acquired = await redisCommand<string | null>(["SET", lockKey, token, "NX", "PX", String(ttlMs)]);
+    if (String(acquired || "").toUpperCase() === "OK") {
+      try {
+        return await operation();
+      } finally {
+        await redisCommand<number>(["EVAL", REDIS_LOCK_RELEASE_SCRIPT, "1", lockKey, token]).catch(() => undefined);
+      }
+    }
+    await delay(Math.min(1000, 50 + attempt * 25));
+  }
+  throw new Error(`Timed out waiting for Redis store lock ${lockKey}`);
+}
+
+async function redisCommand<T>(command: Array<string | number>) {
+  const config = requireRedisRestConfig();
+  const response = await fetch(config.url, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(command),
+    cache: "no-store"
+  });
+  const bodyText = await response.text();
+  let body: unknown = {};
+  if (bodyText) {
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      body = { error: bodyText };
+    }
+  }
+  const error = extractRedisError(body);
+  if (!response.ok || error) {
+    throw new Error(error || `Redis command failed with status ${response.status}`);
+  }
+  if (body && typeof body === "object" && "result" in body) {
+    return (body as { result: T }).result;
+  }
+  return body as T;
+}
+
+function extractRedisError(body: unknown) {
+  if (!body || typeof body !== "object" || !("error" in body)) {
+    return "";
+  }
+  const value = (body as { error?: unknown }).error;
+  return value ? String(value) : "";
+}
+
+function parsePositiveIntegerEnv(name: string, fallback: number) {
+  const value = Number(env(name));
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 }
 
 function delay(ms: number) {
@@ -248,7 +401,16 @@ export async function getGeneration(id: string) {
 
 export async function getINFT(id: string) {
   const store = await readStore();
-  return store.infts.find((inft) => inft.id === id);
+  const existing = store.infts.find((inft) => inft.id === id || inft.generationId === id || inft.tokenId === id);
+  if (existing) {
+    return existing;
+  }
+  const recovered = await recoverINFTFromChain(id).catch(() => undefined);
+  if (!recovered) {
+    return undefined;
+  }
+  await mutateStore((mutableStore) => addINFT(mutableStore, recovered)).catch(() => undefined);
+  return recovered;
 }
 
 export function publicStore(store: SuperReferralsStore): SuperReferralsStore {

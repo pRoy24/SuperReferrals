@@ -1,0 +1,52 @@
+{
+  "vercel": {
+    "defaultScope": "proy24s-projects",
+    "defaultProject": "super-referrals",
+    "blob": {
+      "enabled": false,
+      "storeName": "superreferrals-private",
+      "access": "private",
+      "region": "iad1"
+    },
+    "redis": {
+      "integration": "upstash/upstash-kv",
+      "resourceName": "superreferrals-redis",
+      "plan": "free",
+      "primaryRegion": "iad1",
+      "eviction": false,
+      "prodPack": false,
+      "autoUpgrade": false
+    }
+  },
+  "targets": {
+    "staging": {
+      "envFile": ".env.staging",
+      "fallbackEnvFiles": [
+        ".env.local"
+      ],
+      "environment": "preview",
+      "branch": "develop"
+    },
+    "production": {
+      "envFile": ".env.production",
+      "environment": "production",
+      "branch": ""
+    }
+  },
+  "zeroG": {
+    "required": [
+      "ZERO_G_MOCKS",
+      "OG_CHAIN_ID",
+      "OG_RPC_URL",
+      "OG_STORAGE_INDEXER_RPC",
+      "OG_PRIVATE_KEY"
+    ],
+    "recommended": [
+      "OG_STORAGE_GATEWAY_URL",
+      "INFT_CHAIN_ID",
+      "INFT_RPC_URL",
+      "INFT_CONTRACT_ADDRESS",
+      "USER_REGISTRY_CONTRACT_ADDRESS"
+    ]
+  }
+}

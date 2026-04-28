@@ -2,6 +2,7 @@ import { createPublicClient, createWalletClient, http, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { env, isProviderMock } from "./env";
 import { createId, shortHash } from "./ids";
+import { buildZeroGStorageGatewayUrl } from "./zero-g";
 import {
   delay,
   isReplacementTransactionError,
@@ -9,10 +10,14 @@ import {
   zeroGTransactionRetryDelayMs,
   getZeroGChainConfig
 } from "./zero-g-chain";
+import type { INFTAttribute, INFTRecord } from "./types";
 
 const inftAbi = parseAbi([
   "function nextTokenId() view returns (uint256)",
-  "function mintAgent(address to, string encryptedURI, bytes32 metadataHash, address agentWallet, string referrerCode) returns (uint256)"
+  "function mintAgent(address to, string encryptedURI, bytes32 metadataHash, address agentWallet, string referrerCode) returns (uint256)",
+  "function tokenURI(uint256 tokenId) view returns (string)",
+  "function ownerOf(uint256 tokenId) view returns (address)",
+  "function agentData(uint256 tokenId) view returns ((string encryptedURI, bytes32 metadataHash, address agentWallet, string referrerCode))"
 ]);
 const INFT_TRANSACTION_RETRY_COUNT = 3;
 
@@ -102,6 +107,195 @@ export async function mintINFT({
 
 export function deriveAgentWallet(seed: string) {
   return `0x${shortHash(seed).padEnd(40, "0")}` as `0x${string}`;
+}
+
+export async function recoverINFTFromChain(id: string): Promise<INFTRecord | undefined> {
+  const contractAddress = env("INFT_CONTRACT_ADDRESS") as `0x${string}`;
+  if (isProviderMock("INFT") || !contractAddress) {
+    return undefined;
+  }
+
+  const chain = getINFTChain();
+  const publicClient = createPublicClient({
+    chain,
+    transport: http(chain.rpcUrls.default.http[0])
+  });
+
+  const tokenIds = await resolveRecoveryTokenIds(publicClient, contractAddress, id);
+  for (const tokenId of tokenIds) {
+    const recovered = await recoverINFTToken(publicClient, contractAddress, tokenId).catch(() => undefined);
+    if (recovered && (recovered.id === id || recovered.generationId === id || recovered.tokenId === id)) {
+      return recovered;
+    }
+  }
+  return undefined;
+}
+
+async function resolveRecoveryTokenIds(publicClient: ReturnType<typeof createPublicClient>, contractAddress: `0x${string}`, id: string) {
+  if (/^\d+$/.test(id)) {
+    return [BigInt(id)];
+  }
+
+  const nextTokenId = await publicClient.readContract({
+    address: contractAddress,
+    abi: inftAbi,
+    functionName: "nextTokenId"
+  }) as bigint;
+  const latestTokenId = nextTokenId > 1n ? nextTokenId - 1n : 0n;
+  const scanLimit = Math.max(1, Number(env("INFT_RECOVERY_SCAN_LIMIT", "250")) || 250);
+  const tokenIds: bigint[] = [];
+  for (let tokenId = latestTokenId; tokenId >= 1n && tokenIds.length < scanLimit; tokenId -= 1n) {
+    tokenIds.push(tokenId);
+  }
+  return tokenIds;
+}
+
+async function recoverINFTToken(
+  publicClient: ReturnType<typeof createPublicClient>,
+  contractAddress: `0x${string}`,
+  tokenId: bigint
+): Promise<INFTRecord | undefined> {
+  const [ownerWallet, tokenUri, rawAgentData] = await Promise.all([
+    publicClient.readContract({
+      address: contractAddress,
+      abi: inftAbi,
+      functionName: "ownerOf",
+      args: [tokenId]
+    }) as Promise<string>,
+    publicClient.readContract({
+      address: contractAddress,
+      abi: inftAbi,
+      functionName: "tokenURI",
+      args: [tokenId]
+    }) as Promise<string>,
+    publicClient.readContract({
+      address: contractAddress,
+      abi: inftAbi,
+      functionName: "agentData",
+      args: [tokenId]
+    }) as Promise<{
+      encryptedURI: string;
+      metadataHash: `0x${string}`;
+      agentWallet: string;
+      referrerCode: string;
+    }>
+  ]);
+  const agentData = normalizeAgentData(rawAgentData);
+  const metadata = await fetchTokenMetadata(tokenUri);
+  const superreferrals = recordValue(metadata.superreferrals);
+  const generationId = stringValue(superreferrals.generationId) || stringValue(superreferrals.generation_id);
+  if (!generationId) {
+    return undefined;
+  }
+
+  const storage = recordValue(metadata.storage);
+  const videoStorage = recordValue(storage.video);
+  const metadataRootHash =
+    rootHashFromUri(tokenUri) ||
+    stringValue(superreferrals.metadataRootHash) ||
+    stringValue(superreferrals.metadata_root_hash);
+  const videoRootHash =
+    stringValue(videoStorage.rootHash) ||
+    stringValue(videoStorage.root_hash) ||
+    stringValue(superreferrals.videoRootHash) ||
+    stringValue(superreferrals.video_root_hash);
+  const attributes = Array.isArray(metadata.attributes)
+    ? metadata.attributes.filter(isINFTAttribute)
+    : [];
+  const timestamp = new Date().toISOString();
+
+  return {
+    id: generationId,
+    generationId,
+    customerId: stringValue(superreferrals.customerId) || stringValue(superreferrals.customer_id),
+    subAccountId: stringValue(superreferrals.subAccountId) || stringValue(superreferrals.sub_account_id),
+    ownerWallet,
+    title: stringValue(metadata.name) || `SuperReferrals Video ${generationId}`,
+    description: stringValue(metadata.description) || "Generated marketing video",
+    videoUrl: stringValue(metadata.animation_url) || stringValue(metadata.animationUrl) || stringValue(videoStorage.uri),
+    storageRootHash: videoRootHash,
+    metadataRootHash,
+    metadataUri: tokenUri,
+    tokenId: tokenId.toString(),
+    contractAddress,
+    agentWalletAddress: agentData.agentWallet,
+    referrer: {
+      code: agentData.referrerCode || stringValue(superreferrals.referrerCode) || stringValue(superreferrals.referrer_code),
+      url: stringValue(superreferrals.referrerUrl) || stringValue(superreferrals.referrer_url)
+    },
+    attributes,
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+}
+
+function normalizeAgentData(value: unknown) {
+  if (Array.isArray(value)) {
+    return {
+      encryptedURI: stringValue(value[0]),
+      metadataHash: stringValue(value[1]),
+      agentWallet: stringValue(value[2]),
+      referrerCode: stringValue(value[3])
+    };
+  }
+  const record = recordValue(value);
+  return {
+    encryptedURI: stringValue(record.encryptedURI),
+    metadataHash: stringValue(record.metadataHash),
+    agentWallet: stringValue(record.agentWallet),
+    referrerCode: stringValue(record.referrerCode)
+  };
+}
+
+async function fetchTokenMetadata(uri: string) {
+  const metadataUrl = uriToFetchUrl(uri);
+  if (!metadataUrl) {
+    throw new Error(`Unsupported INFT metadata URI: ${uri}`);
+  }
+  const response = await fetch(metadataUrl, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`Unable to fetch INFT metadata from ${metadataUrl}: ${response.status}`);
+  }
+  const metadata = await response.json();
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    throw new Error("INFT metadata was not a JSON object");
+  }
+  return metadata as Record<string, unknown>;
+}
+
+function uriToFetchUrl(uri: string) {
+  if (/^https?:\/\//i.test(uri)) {
+    return uri;
+  }
+  const rootHash = rootHashFromUri(uri);
+  return rootHash ? buildZeroGStorageGatewayUrl(rootHash) : "";
+}
+
+function rootHashFromUri(uri: string) {
+  if (uri.startsWith("0g://")) {
+    return uri.slice("0g://".length).split(/[/?#]/)[0];
+  }
+  try {
+    const url = new URL(uri);
+    return url.searchParams.get("root") || "";
+  } catch {
+    return "";
+  }
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function isINFTAttribute(value: unknown): value is INFTAttribute {
+  const item = recordValue(value);
+  return Boolean(stringValue(item.trait_type) && ["string", "number", "boolean"].includes(typeof item.value));
 }
 
 async function writeMintWithRetry({

@@ -78,6 +78,7 @@ Important runtime guardrails:
 - Renders do not start until the server verifies payment sender, recipient, chain, token, and amount.
 - `ALLOW_MOCK_RENDER_PAYMENT=true` is only for local demos.
 - 0G records, INFT minting, and agent registry use the configured 0G network, not the payment network.
+- Completed public INFT pages recover from the configured INFT collection and 0G token metadata when the server runtime index is missing. Keep `INFT_CONTRACT_ADDRESS`, `INFT_RPC_URL`, and `OG_STORAGE_INDEXER_RPC` configured in staging and production.
 - Live ETH-to-USDC render payments require KeeperHub platform wallet and payment workflow configuration; the app quotes a buffered ETH amount and KeeperHub settles the storefront's USDC amount to the merchant payout wallet.
 
 ## Local Run
@@ -173,13 +174,33 @@ By default staging maps to Vercel `preview` for branch `develop`, and production
 
 Vercel env changes apply to new deployments only; redeploy or push after syncing if the running deployment needs the new values. See the [Vercel env CLI docs](https://vercel.com/docs/cli/env) and [environment variable docs](https://vercel.com/docs/environment-variables).
 
-On Vercel, set `SUPERREFERRALS_DATA_DIR=/tmp/superreferrals`. The deployed bundle directory is not a writable data directory, and `/tmp` storage is ephemeral, so a production app that must retain customers, ratings, generations, or feed state across cold starts needs a durable database or object store behind `src/lib/store.ts`.
+## Deploy Storage Bootstrap
+
+`deploy.json` describes the Vercel project, required Upstash Redis resource, disabled-by-default Blob store, staging/production env files, and required 0G storage variables. A new operator can run the bootstrap script to validate 0G env, launch Vercel login/link flows when needed, and create the free Upstash Redis resource:
+
+```bash
+npm run deploy:setup:staging
+npm run deploy:setup:production
+```
+
+Use `--dry-run` to preview actions:
+
+```bash
+npm run deploy:setup:staging -- --dry-run
+```
+
+The script can use `VERCEL_TOKEN`, `.vercel-token`, or an active Vercel CLI login. If Vercel asks for an auth challenge, complete the browser/email flow and rerun the command. Upstash Redis provisioning first checks for an existing linked Redis resource, accepts Marketplace terms by default when provisioning is needed, and should add `KV_REST_API_URL` and `KV_REST_API_TOKEN` to the linked project. Pass `--no-accept-marketplace-terms` only if you want to complete Marketplace terms manually. Environment sync is intentionally not run by default; pass `--sync-env` when the target env file is ready to upload.
+
+Upstash Redis is required for mutable app state: authenticated user/session state, Samsar account/session cache, credits, checkout state, quotes, render hot indexes, storefront ratings, and webhook/polling state. The application fails fast with setup instructions if `KV_REST_API_URL` and `KV_REST_API_TOKEN` are missing. Vercel Blob is disabled by default because Redis holds mutable app state and 0G Storage holds render artifacts/metadata. Blob is only useful later for encrypted private object snapshots/backups or private non-KV files. Keep 0G Storage for public generation artifacts and durable public render metadata; do not put auth tokens or private user secrets into public 0G metadata.
+
+The legacy local JSON store is only read once to seed an empty Redis key during migration. Runtime reads and writes go to Redis. Completed INFT views should still be recoverable through the onchain INFT token URI and 0G metadata when live 0G/INFT env vars are configured.
 
 For staging previews, Vercel needs a Git event it can deploy. Push a new commit to `develop` or open a PR from `develop`; a local branch or a branch pointer that matches an already deployed `main` commit may not create a new Preview Deployment by itself.
 
 ## Key Environment Variables
 
 - `SUPERREFERRALS_MOCKS`: global mock switch. Defaults to mocked behavior when unset.
+- `KV_REST_API_URL`, `KV_REST_API_TOKEN`: required Upstash/Vercel KV store for mutable app state.
 - `<PROVIDER>_MOCKS`: per-provider overrides such as `SAMSAR_MOCKS`, `KEEPERHUB_MOCKS`, `ZERO_G_MOCKS`, `INFT_MOCKS`, `OG_COMPUTE_MOCKS`, and `AXL_MOCKS`.
 - `SAMSAR_API_URL`: production Samsar API origin. Defaults to `https://api.samsar.one`.
 - `SAMSAR_API_KEY`: required for live Samsar generation when a logged-in customer account does not provide its own API key.
@@ -191,6 +212,7 @@ For staging previews, Vercel needs a Git event it can deploy. Push a new commit 
 - `OG_NETWORK`, `OG_CHAIN_ID`, `OG_RPC_URL`, `OG_STORAGE_INDEXER_RPC`, `OG_PRIVATE_KEY`: 0G Chain, Storage, registry, and INFT signer.
 - `USER_REGISTRY_CONTRACT_ADDRESS`: deployed `SuperReferralsUserRegistry` address.
 - `INFT_CONTRACT_ADDRESS`: deployed INFT collection. Minting uses `OG_PRIVATE_KEY`.
+- `INFT_RECOVERY_SCAN_LIMIT`: maximum number of recent INFT tokens scanned when rebuilding a public `/inft/:id` view from onchain token metadata.
 - `AXL_BASE_URL`: local Gensyn AXL node API, default `http://localhost:9002`.
 
 ## Contracts

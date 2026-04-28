@@ -1054,9 +1054,12 @@ async function finalizeGenerationUnlocked(
     attributes,
     superreferrals: {
       generationId: generationForMetadata.id,
+      customerId: customer.id,
+      subAccountId: subAccount.id,
       samsarSessionId: generationForMetadata.samsarSessionId,
       referrerCode: subAccount.referrerCode,
       referrerUrl: `${customer.referrerBaseUrl}/r/${subAccount.referrerCode}`,
+      ownerWallet: subAccount.wallet,
       userProfile: subAccount.blockchainRegistration,
       metadata: generationForMetadata.input.metadata || {}
     },
@@ -1244,17 +1247,10 @@ export async function askINFT(id: string, question: string) {
 
 export async function runINFTAction(id: string, action: string, payload: Record<string, unknown>) {
   const store = await readStore();
-  const inft = store.infts.find((item) => item.id === id);
+  const inft = await getINFT(id);
   if (!inft) {
     throw new Error("INFT was not found");
   }
-  const generation = store.generations.find((item) => item.id === inft.generationId);
-  if (!generation) {
-    throw new Error("INFT generation was not found");
-  }
-  const customer = store.customers.find((item) => item.id === generation.customerId);
-  const samsarApiKey = customer ? customerSamsarApiKey(customer) : undefined;
-
   if (action === "message_peer") {
     const peerId = String(payload.peerId || payload.peer_id || "");
     if (!peerId) {
@@ -1267,6 +1263,13 @@ export async function runINFTAction(id: string, action: string, payload: Record<
       referrer: inft.referrer
     });
   }
+
+  const generation = store.generations.find((item) => item.id === inft.generationId);
+  if (!generation) {
+    throw new Error("INFT generation was not found in the local runtime store. The public view can be recovered from 0G/onchain metadata, but video mutation actions need the live generation session index.");
+  }
+  const customer = store.customers.find((item) => item.id === generation.customerId);
+  const samsarApiKey = customer ? customerSamsarApiKey(customer) : undefined;
 
   if (action === "update_outro") {
     const outroImageUrl = String(payload.outroImageUrl || payload.outro_image_url || payload.newOutroImageUrl || payload.new_outro_image_url || "");
@@ -1327,11 +1330,12 @@ function normalizeGenerationInput(input: GenerationInput): GenerationInput {
   const hasProvidedOutro = Boolean(input.outro_image_url);
   const addOutroAnimation = input.add_outro_animation ?? Boolean(input.cta_url);
   const aspectRatio = input.aspect_ratio || "16:9";
-  return {
+  const normalizedInput: GenerationInput = {
     ...input,
     video_model: input.video_model || "VEO3.1I2V",
     aspect_ratio: aspectRatio,
     enable_subtitles: input.enable_subtitles ?? true,
+    resize_image: true,
     outro_image_url: input.outro_image_url,
     add_outro_animation: addOutroAnimation === true,
     add_outro_focus_area: input.add_outro_focus_area === true,
@@ -1341,18 +1345,21 @@ function normalizeGenerationInput(input: GenerationInput): GenerationInput {
     cta_text_top: hasProvidedOutro ? undefined : input.cta_text_top,
     cta_text_bottom: hasProvidedOutro ? undefined : input.cta_text_bottom,
     cta_logo: hasProvidedOutro ? undefined : input.cta_logo,
-    add_footer_animation: input.add_footer_animation === true,
-    footer_metadata: Array.isArray(input.footer_metadata) ? input.footer_metadata : undefined,
     image_urls: normalizeGenerationImageInputs(input.image_urls || [], aspectRatio)
   };
+  delete normalizedInput.add_footer_animation;
+  delete normalizedInput.footer_metadata;
+  return normalizedInput;
 }
 
 function normalizeGenerationImageInputs(imageUrls: GenerationInput["image_urls"], aspectRatio: VideoAspectRatio): GenerationInput["image_urls"] {
   return imageUrls.map((item) => {
     if (typeof item === "string") {
-      return isSampleImageUrl(item)
-        ? { image_url: buildAspectSizedSampleImageUrl(item, aspectRatio), skip_enhancement: true }
-        : item;
+      const isSample = isSampleImageUrl(item);
+      return {
+        image_url: isSample ? buildAspectSizedSampleImageUrl(item, aspectRatio) : item,
+        resize_image: true
+      };
     }
 
     if (!item || typeof item !== "object" || Array.isArray(item)) {
@@ -1362,16 +1369,21 @@ function normalizeGenerationImageInputs(imageUrls: GenerationInput["image_urls"]
     const record = item as Record<string, unknown>;
     const imageUrl = getGenerationImageUrl(record);
     const isSample = isSampleImageUrl(imageUrl);
-    const hasExplicitSkip =
-      Object.prototype.hasOwnProperty.call(record, "skip_enhancement") ||
-      Object.prototype.hasOwnProperty.call(record, "skipEnhancement");
+    const normalizedRecord = withoutEnhancementSkipFlags(record);
 
     return {
-      ...record,
+      ...normalizedRecord,
       ...(record.image_url && !isSample ? {} : { image_url: isSample ? buildAspectSizedSampleImageUrl(imageUrl, aspectRatio) : imageUrl }),
-      ...(!hasExplicitSkip && isSample ? { skip_enhancement: true } : {})
+      resize_image: true
     };
   });
+}
+
+function withoutEnhancementSkipFlags(item: Record<string, unknown>) {
+  const next = { ...item };
+  delete next.skip_enhancement;
+  delete next.skipEnhancement;
+  return next;
 }
 
 function getGenerationImageUrl(item: Record<string, unknown>) {
@@ -1427,9 +1439,6 @@ function validateGenerationAssetUrls(input: GenerationInput) {
   }
   if (input.cta_logo) {
     assertReachableUrlShape(input.cta_logo, "cta_logo");
-  }
-  for (const [index, item] of (input.footer_metadata || []).entries()) {
-    assertReachableUrlShape(item.url, `footer_metadata item ${index + 1} url`);
   }
 }
 

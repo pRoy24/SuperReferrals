@@ -1716,6 +1716,58 @@ button.item {
   flex-wrap: wrap;
 }
 
+.wizard-section-collapsible {
+  gap: 0;
+  border: 1px solid rgba(31, 91, 160, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+  overflow: hidden;
+}
+
+.wizard-section-collapsible > summary {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  color: #475569;
+  cursor: pointer;
+  padding: 10px 12px;
+  list-style: none;
+}
+
+.wizard-section-collapsible > summary::-webkit-details-marker {
+  display: none;
+}
+
+.wizard-section-collapsible[open] > summary {
+  border-bottom: 1px solid rgba(31, 91, 160, 0.12);
+}
+
+.wizard-section-summary > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.wizard-section-chevron {
+  flex: 0 0 auto;
+  transition: transform 0.18s ease;
+}
+
+.wizard-section-collapsible[open] .wizard-section-chevron {
+  transform: rotate(180deg);
+}
+
+.wizard-section-actions {
+  margin: 0;
+  padding: 10px 12px 0;
+}
+
+.wizard-section-collapsible > .wizard-list {
+  padding: 10px 12px 12px;
+}
+
 .wizard-list {
   display: grid;
   gap: 10px;

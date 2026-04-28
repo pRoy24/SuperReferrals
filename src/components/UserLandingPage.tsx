@@ -58,7 +58,6 @@ type GenerationFormState = {
   ctaTextTop: string;
   ctaTextBottom: string;
   ctaLogo: string;
-  addFooterAnimation: boolean;
   footerMetadata: string;
   publishToFeed: boolean;
   feedTags: string;
@@ -72,7 +71,6 @@ type ImageWizardItem = {
   image_url: string;
   title: string;
   image_text: string;
-  skip_enhancement?: boolean;
 };
 
 type MetadataWizardItem = {
@@ -116,20 +114,17 @@ const starterImages = [
   {
     image_url: "https://images.pexels.com/photos/7562351/pexels-photo-7562351.jpeg?auto=compress&cs=tinysrgb&w=1600",
     title: "Immersive Reality",
-    image_text: "Step into a new way to play, explore, and connect.",
-    skip_enhancement: true
+    image_text: "Step into a new way to play, explore, and connect."
   },
   {
     image_url: "https://images.pexels.com/photos/4240501/pexels-photo-4240501.jpeg?auto=compress&cs=tinysrgb&w=1600",
     title: "Mobile Workspace",
-    image_text: "Stay connected and productive from anywhere.",
-    skip_enhancement: true
+    image_text: "Stay connected and productive from anywhere."
   },
   {
     image_url: "https://images.pexels.com/photos/7605937/pexels-photo-7605937.jpeg?auto=compress&cs=tinysrgb&w=1600",
     title: "Creator Flow",
-    image_text: "Plan, create, and multitask with tools that move with you.",
-    skip_enhancement: true
+    image_text: "Plan, create, and multitask with tools that move with you."
   }
 ];
 
@@ -164,7 +159,6 @@ function createDefaultGenerationForm(modelSelection?: Pick<GenerationFormState, 
     ctaTextTop: "Explore the upgrade",
     ctaTextBottom: "Built for modern life",
     ctaLogo: "",
-    addFooterAnimation: true,
     footerMetadata: starterFooterMetadata,
     publishToFeed: true,
     feedTags: "tech, lifestyle, product",
@@ -191,7 +185,6 @@ function restorePersistedGenerationForm(
     if (typeof persisted.ctaTextTop === "string") next.ctaTextTop = persisted.ctaTextTop;
     if (typeof persisted.ctaTextBottom === "string") next.ctaTextBottom = persisted.ctaTextBottom;
     if (typeof persisted.ctaLogo === "string") next.ctaLogo = persisted.ctaLogo;
-    if (typeof persisted.addFooterAnimation === "boolean") next.addFooterAnimation = persisted.addFooterAnimation;
     if (typeof persisted.footerMetadata === "string") next.footerMetadata = persisted.footerMetadata;
     if (typeof persisted.publishToFeed === "boolean") next.publishToFeed = persisted.publishToFeed;
     if (typeof persisted.feedTags === "string") next.feedTags = persisted.feedTags;
@@ -1255,7 +1248,6 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
             ) : (
               <AdvancedRenderForm
                 form={generationForm}
-                imageCount={imageCount}
                 generationPayloadPreview={generationPayloadPreview}
                 onPatch={updateGenerationForm}
               />
@@ -1492,49 +1484,38 @@ function SimpleRenderForm({
         </WizardSection>
       )}
 
-      <label className="toggle-row">
-        <input
-          type="checkbox"
-          checked={form.addFooterAnimation}
-          onChange={(event) => onPatch({ addFooterAnimation: event.target.checked })}
-        />
-        Bottom CTA footer cards
-      </label>
-
-      {form.addFooterAnimation && (
-        <WizardSection
-          title="Footer cards"
-          badge={`${footerCardCount}/${imageCount} ready`}
-          actionLabel="Add card"
-          onAction={onFooterAdd}
-        >
-          <div className="wizard-list">
-            {footerWizardItems.map((item, index) => (
-              <div className="wizard-key-value" key={`footer-${index}`}>
-                <div className="field">
-                  <label>URL</label>
-                  <input
-                    value={item.url}
-                    onChange={(event) => onFooterChange(index, { url: event.target.value })}
-                    placeholder="https://..."
-                  />
-                </div>
-                <div className="field">
-                  <label>Title</label>
-                  <input
-                    value={item.title}
-                    onChange={(event) => onFooterChange(index, { title: event.target.value })}
-                    placeholder="Launch Shoe"
-                  />
-                </div>
-                <button type="button" className="icon-btn danger" onClick={() => onFooterRemove(index)} title="Remove card">
-                  <Trash2 size={16} />
-                </button>
+      <CollapsibleWizardSection
+        title="Footer cards"
+        badge={`${footerCardCount}/${imageCount} ready`}
+        actionLabel="Add card"
+        onAction={onFooterAdd}
+      >
+        <div className="wizard-list">
+          {footerWizardItems.map((item, index) => (
+            <div className="wizard-key-value" key={`footer-${index}`}>
+              <div className="field">
+                <label>URL</label>
+                <input
+                  value={item.url}
+                  onChange={(event) => onFooterChange(index, { url: event.target.value })}
+                  placeholder="https://..."
+                />
               </div>
-            ))}
-          </div>
-        </WizardSection>
-      )}
+              <div className="field">
+                <label>Title</label>
+                <input
+                  value={item.title}
+                  onChange={(event) => onFooterChange(index, { title: event.target.value })}
+                  placeholder="Launch Shoe"
+                />
+              </div>
+              <button type="button" className="icon-btn danger" onClick={() => onFooterRemove(index)} title="Remove card">
+                <Trash2 size={16} />
+              </button>
+            </div>
+          ))}
+        </div>
+      </CollapsibleWizardSection>
 
       <TextField label="Payment tx hash (manual fallback)" value={form.txHash} onChange={(txHash) => onPatch({ txHash })} full />
     </div>
@@ -1543,12 +1524,10 @@ function SimpleRenderForm({
 
 function AdvancedRenderForm({
   form,
-  imageCount,
   generationPayloadPreview,
   onPatch
 }: {
   form: GenerationFormState;
-  imageCount: number;
   generationPayloadPreview: string;
   onPatch: (patch: RenderFormPatch) => void;
 }) {
@@ -1603,21 +1582,6 @@ function AdvancedRenderForm({
           onChange={(event) => onPatch({ outroFocusArea: event.target.value })}
         />
       </div>
-      <label className="toggle-row">
-        <input
-          type="checkbox"
-          checked={form.addFooterAnimation}
-          onChange={(event) => onPatch({ addFooterAnimation: event.target.checked })}
-        />
-        Bottom CTA footer cards
-      </label>
-      <div className="field full">
-        <label>Footer metadata JSON array ({imageCount} items)</label>
-        <textarea
-          value={form.footerMetadata}
-          onChange={(event) => onPatch({ footerMetadata: event.target.value })}
-        />
-      </div>
       <div className="field full">
         <label>Generated SuperReferrals payload preview</label>
         <textarea className="payload-preview" value={generationPayloadPreview} readOnly />
@@ -1654,6 +1618,40 @@ function WizardSection({
       </div>
       {children}
     </div>
+  );
+}
+
+function CollapsibleWizardSection({
+  title,
+  badge,
+  actionLabel,
+  onAction,
+  children
+}: {
+  title: string;
+  badge?: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <details className="wizard-section wizard-section-collapsible full">
+      <summary className="wizard-section-summary">
+        <span>
+          <ChevronDown size={16} className="wizard-section-chevron" aria-hidden="true" />
+          <label>{title}</label>
+          {badge && <span className="badge">{badge}</span>}
+        </span>
+      </summary>
+      {actionLabel && onAction && (
+        <div className="inline-actions wizard-section-actions">
+          <button type="button" className="btn small" onClick={onAction}>
+            <Plus size={15} /> {actionLabel}
+          </button>
+        </div>
+      )}
+      {children}
+    </details>
   );
 }
 
@@ -2302,8 +2300,7 @@ function parseImageWizardItems(raw: string): ImageWizardItem[] {
       return {
         image_url: getImageInputUrl(record),
         title: String(record.title || ""),
-        image_text: String(record.image_text || record.imageText || ""),
-        skip_enhancement: Boolean(record.skip_enhancement || record.skipEnhancement)
+        image_text: String(record.image_text || record.imageText || "")
       };
     });
     return items.length > 0 ? items : [emptyImageWizardItem()];
@@ -2321,8 +2318,7 @@ function serializeImageWizardItems(items: ImageWizardItem[]) {
     .map((item) => ({
       image_url: item.image_url.trim(),
       title: item.title.trim(),
-      image_text: item.image_text.trim(),
-      skip_enhancement: item.skip_enhancement
+      image_text: item.image_text.trim()
     }))
     .filter((item) => item.image_url)
     .map((item) => {
@@ -2332,9 +2328,6 @@ function serializeImageWizardItems(items: ImageWizardItem[]) {
       }
       if (item.image_text) {
         output.image_text = item.image_text;
-      }
-      if (item.skip_enhancement) {
-        output.skip_enhancement = true;
       }
       return output;
     });
@@ -2488,6 +2481,7 @@ function buildGenerationPayload(form: GenerationFormState, fallbackReferrerCode:
     aspect_ratio: form.aspectRatio,
     language: form.language,
     enable_subtitles: true,
+    resize_image: true,
     generate_outro_image: true,
     cta_url: ctaUrl,
     cta_text_top: form.ctaTextTop.trim() || "Scan to buy",
@@ -2504,31 +2498,33 @@ function buildGenerationPayload(form: GenerationFormState, fallbackReferrerCode:
     payload.cta_logo = form.ctaLogo.trim();
   }
 
-  if (form.addFooterAnimation) {
-    payload.add_footer_animation = true;
-    payload.footer_metadata = parseFooterMetadata(form.footerMetadata, imageInputs.length);
-  }
-
   return payload;
 }
 
 function applySampleImageProcessingFlags(item: string | Record<string, unknown>, aspectRatio: VideoAspectRatio): string | Record<string, unknown> {
   if (typeof item === "string") {
-    return isSampleImageUrl(item)
-      ? { image_url: buildAspectSizedSampleImageUrl(item, aspectRatio), skip_enhancement: true }
-      : item;
+    const isSampleImage = isSampleImageUrl(item);
+    return {
+      image_url: isSampleImage ? buildAspectSizedSampleImageUrl(item, aspectRatio) : item,
+      resize_image: true
+    };
   }
 
-  const hasExplicitSkip =
-    Object.prototype.hasOwnProperty.call(item, "skip_enhancement") ||
-    Object.prototype.hasOwnProperty.call(item, "skipEnhancement");
+  const normalizedItem = withoutEnhancementSkipFlags(item);
   const imageUrl = getImageInputUrl(item);
 
   return {
-    ...item,
+    ...normalizedItem,
     ...(isSampleImageUrl(imageUrl) ? { image_url: buildAspectSizedSampleImageUrl(imageUrl, aspectRatio) } : {}),
-    ...(!hasExplicitSkip && isSampleImageUrl(imageUrl) ? { skip_enhancement: true } : {})
+    resize_image: true
   };
+}
+
+function withoutEnhancementSkipFlags(item: Record<string, unknown>) {
+  const next = { ...item };
+  delete next.skip_enhancement;
+  delete next.skipEnhancement;
+  return next;
 }
 
 function isSampleImageUrl(rawUrl: string) {
@@ -2658,34 +2654,6 @@ function parseOutroFocusArea(raw: string) {
     throw new Error("outro focus area must include valid x, y, width, and height numbers");
   }
   return focusArea;
-}
-
-function parseFooterMetadata(raw: string, expectedCount: number) {
-  if (!raw.trim()) {
-    if (expectedCount > 0) {
-      throw new Error(`footer metadata must contain exactly ${expectedCount} item${expectedCount === 1 ? "" : "s"} to match image_urls`);
-    }
-    return [];
-  }
-  const parsed = JSON.parse(raw);
-  if (!Array.isArray(parsed)) {
-    throw new Error("footer metadata must be a JSON array");
-  }
-  if (parsed.length !== expectedCount) {
-    throw new Error(`footer metadata must contain exactly ${expectedCount} item${expectedCount === 1 ? "" : "s"} to match image_urls`);
-  }
-  return parsed.map((item, index) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
-      throw new Error(`footer metadata item ${index + 1} must be an object`);
-    }
-    const record = item as Record<string, unknown>;
-    const url = String(record.url || "").trim();
-    if (!url) {
-      throw new Error(`footer metadata item ${index + 1} must include url`);
-    }
-    const title = String(record.title || "").trim();
-    return title ? { url, title } : { url };
-  });
 }
 
 function sameWallet(left?: string, right?: string) {

@@ -185,6 +185,7 @@ export interface GenerationInput {
   duration_seconds?: number;
   language?: string;
   enable_subtitles?: boolean;
+  resize_image?: boolean;
   outro_image_url?: string;
   add_outro_animation?: boolean;
   add_outro_focus_area?: boolean;
