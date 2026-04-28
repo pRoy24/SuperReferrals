@@ -1335,7 +1335,6 @@ function normalizeGenerationInput(input: GenerationInput): GenerationInput {
     video_model: input.video_model || "VEO3.1I2V",
     aspect_ratio: aspectRatio,
     enable_subtitles: input.enable_subtitles ?? true,
-    resize_image: true,
     outro_image_url: input.outro_image_url,
     add_outro_animation: addOutroAnimation === true,
     add_outro_focus_area: input.add_outro_focus_area === true,
@@ -1357,8 +1356,7 @@ function normalizeGenerationImageInputs(imageUrls: GenerationInput["image_urls"]
     if (typeof item === "string") {
       const isSample = isSampleImageUrl(item);
       return {
-        image_url: isSample ? buildAspectSizedSampleImageUrl(item, aspectRatio) : item,
-        resize_image: true
+        image_url: isSample ? buildAspectSizedSampleImageUrl(item, aspectRatio) : item
       };
     }
 
@@ -1373,8 +1371,7 @@ function normalizeGenerationImageInputs(imageUrls: GenerationInput["image_urls"]
 
     return {
       ...normalizedRecord,
-      ...(record.image_url && !isSample ? {} : { image_url: isSample ? buildAspectSizedSampleImageUrl(imageUrl, aspectRatio) : imageUrl }),
-      resize_image: true
+      ...(record.image_url && !isSample ? {} : { image_url: isSample ? buildAspectSizedSampleImageUrl(imageUrl, aspectRatio) : imageUrl })
     };
   });
 }
@@ -1383,6 +1380,8 @@ function withoutEnhancementSkipFlags(item: Record<string, unknown>) {
   const next = { ...item };
   delete next.skip_enhancement;
   delete next.skipEnhancement;
+  delete next.resize_image;
+  delete next.resizeImage;
   return next;
 }
 

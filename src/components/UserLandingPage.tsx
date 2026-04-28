@@ -2339,13 +2339,13 @@ function serializeImageWizardItems(items: ImageWizardItem[]) {
 }
 
 function sanitizeImageUrlsForForm(raw: string) {
-  if (!/skip_enhancement|skipEnhancement/.test(raw)) {
+  if (!/skip_enhancement|skipEnhancement|resize_image|resizeImage/.test(raw)) {
     return raw;
   }
   try {
     return JSON.stringify(
       parseImageInputs(raw).map((item) =>
-        typeof item === "string" ? item : withoutEnhancementSkipFlags(item)
+        typeof item === "string" ? item : withoutProcessorOnlyImageFlags(item)
       ),
       null,
       2
@@ -2502,7 +2502,6 @@ function buildGenerationPayload(form: GenerationFormState, fallbackReferrerCode:
     aspect_ratio: form.aspectRatio,
     language: form.language,
     enable_subtitles: true,
-    resize_image: true,
     generate_outro_image: true,
     cta_url: ctaUrl,
     cta_text_top: form.ctaTextTop.trim() || "Scan to buy",
@@ -2526,25 +2525,25 @@ function applySampleImageProcessingFlags(item: string | Record<string, unknown>,
   if (typeof item === "string") {
     const isSampleImage = isSampleImageUrl(item);
     return {
-      image_url: isSampleImage ? buildAspectSizedSampleImageUrl(item, aspectRatio) : item,
-      resize_image: true
+      image_url: isSampleImage ? buildAspectSizedSampleImageUrl(item, aspectRatio) : item
     };
   }
 
-  const normalizedItem = withoutEnhancementSkipFlags(item);
+  const normalizedItem = withoutProcessorOnlyImageFlags(item);
   const imageUrl = getImageInputUrl(item);
 
   return {
     ...normalizedItem,
-    ...(isSampleImageUrl(imageUrl) ? { image_url: buildAspectSizedSampleImageUrl(imageUrl, aspectRatio) } : {}),
-    resize_image: true
+    ...(isSampleImageUrl(imageUrl) ? { image_url: buildAspectSizedSampleImageUrl(imageUrl, aspectRatio) } : {})
   };
 }
 
-function withoutEnhancementSkipFlags(item: Record<string, unknown>) {
+function withoutProcessorOnlyImageFlags(item: Record<string, unknown>) {
   const next = { ...item };
   delete next.skip_enhancement;
   delete next.skipEnhancement;
+  delete next.resize_image;
+  delete next.resizeImage;
   return next;
 }
 
@@ -2629,7 +2628,7 @@ function normalizeImageInputItem(item: unknown, index: number): string | Record<
   }
   assertUsableImageUrl(imageUrl, `image_urls item ${index + 1}`);
   return {
-    ...withoutEnhancementSkipFlags(record),
+    ...withoutProcessorOnlyImageFlags(record),
     image_url: imageUrl
   };
 }
