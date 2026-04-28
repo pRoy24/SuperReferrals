@@ -201,7 +201,7 @@ export async function createExternalImageListVideo({
     });
   const data = response.data;
   const requestId = String(data.request_id || data.external_request_id || data.requestId || "");
-  const sessionId = String(
+  const sessionId = normalizeSamsarVideoSessionId(
     data.upstream_session_id ||
     data.upstreamSessionId ||
     data.upstream_request_id ||
@@ -217,6 +217,14 @@ export async function createExternalImageListVideo({
     creditsRemaining: Number(response.headers.get("x-credits-remaining") || data.remainingCredits || 0),
     raw: data
   };
+}
+
+export function normalizeSamsarVideoSessionId(value: unknown) {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  if (!candidate) {
+    return "";
+  }
+  return candidate.startsWith("extreq_") ? candidate.slice("extreq_".length) : candidate;
 }
 
 export async function getSamsarStatus(requestId: string, externalUser?: ExternalUserIdentity, externalApiKey?: string, apiKey?: string) {
@@ -257,13 +265,14 @@ export async function getSamsarStatus(requestId: string, externalUser?: External
 }
 
 export async function fetchLatestVideoUrl(sessionId: string, apiKey?: string) {
-  if (shouldMockSamsar(apiKey) || sessionId.startsWith("mock_samsar_")) {
+  const videoSessionId = normalizeSamsarVideoSessionId(sessionId);
+  if (shouldMockSamsar(apiKey) || videoSessionId.startsWith("mock_samsar_")) {
     return MOCK_VIDEO_URL;
   }
   const response = await samsarRequest("video/fetch_latest_version", {
     apiKey,
     method: "GET",
-    query: { session_id: sessionId }
+    query: { session_id: videoSessionId }
   });
   return String(response.data.result_url || response.data.remoteURL || "");
 }
@@ -276,46 +285,47 @@ export async function runSamsarSessionAction(action: string, payload: Record<str
       mock: true
     };
   }
+  const sessionActionPayload = normalizeSamsarSessionActionPayload(payload);
   if (action === "translate") {
     return (await samsarRequest("video/translate_video", {
       apiKey,
       method: "POST",
-      body: JSON.stringify({ input: payload })
+      body: JSON.stringify({ input: sessionActionPayload })
     })).data;
   }
   if (action === "join") {
     return (await samsarRequest("video/join_videos", {
       apiKey,
       method: "POST",
-      body: JSON.stringify({ input: payload })
+      body: JSON.stringify({ input: sessionActionPayload })
     })).data;
   }
   if (action === "remove_subtitles") {
     return (await samsarRequest("video/remove_subtitles", {
       apiKey,
       method: "POST",
-      body: JSON.stringify({ input: payload })
+      body: JSON.stringify({ input: sessionActionPayload })
     })).data;
   }
   if (action === "update_outro") {
     return (await samsarRequest("video/update_outro_image", {
       apiKey,
       method: "POST",
-      body: JSON.stringify({ input: payload })
+      body: JSON.stringify({ input: sessionActionPayload })
     })).data;
   }
   if (action === "add_outro") {
     return (await samsarRequest("video/add_outro_image", {
       apiKey,
       method: "POST",
-      body: JSON.stringify({ input: payload })
+      body: JSON.stringify({ input: sessionActionPayload })
     })).data;
   }
   if (action === "cancel_render") {
     return (await samsarRequest("video/cancel_render", {
       apiKey,
       method: "POST",
-      body: JSON.stringify({ input: payload })
+      body: JSON.stringify({ input: sessionActionPayload })
     })).data;
   }
   if (action === "enhance_message") {
@@ -368,6 +378,30 @@ export async function runSamsarSessionAction(action: string, payload: Record<str
     })).data;
   }
   throw new Error(`Unsupported SuperReferrals action: ${action}`);
+}
+
+function normalizeSamsarSessionActionPayload(payload: Record<string, unknown>) {
+  const normalized = { ...payload };
+  for (const key of ["videoSessionId", "video_session_id", "sessionId", "session_id", "sessionID"]) {
+    const sessionId = normalizeSamsarVideoSessionId(normalized[key]);
+    if (sessionId) {
+      normalized[key] = sessionId;
+    }
+  }
+
+  const sessionIds = normalized.session_ids || normalized.sessionIds;
+  if (Array.isArray(sessionIds)) {
+    const normalizedSessionIds = sessionIds
+      .map((sessionId) => normalizeSamsarVideoSessionId(sessionId))
+      .filter(Boolean);
+    if (normalized.session_ids) {
+      normalized.session_ids = normalizedSessionIds;
+    }
+    if (normalized.sessionIds) {
+      normalized.sessionIds = normalizedSessionIds;
+    }
+  }
+  return normalized;
 }
 
 export async function createSamsarAssistantCompletion(payload: Record<string, unknown>) {

@@ -196,7 +196,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
 
   function buildUpdateOutroPayload() {
     const payload: Record<string, unknown> = {
-      addOutroAnimation: updateOutroAnimation
+      add_outro_animation: updateOutroAnimation
     };
 
     if (updateOutroMode === "image") {
@@ -204,21 +204,21 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       if (!imageUrl) {
         throw new Error("New outro image URL is required.");
       }
-      payload.newOutroImageUrl = imageUrl;
-      payload.addOutroFocusArea = updateOutroFocusArea;
+      payload.new_outro_image_url = imageUrl;
+      payload.add_outro_focus_area = updateOutroFocusArea;
       if (updateOutroFocusArea) {
-        payload.outroFocusArea = parseOutroFocusArea(updateOutroFocusAreaJson);
+        payload.outro_focust_area = parseOutroFocusArea(updateOutroFocusAreaJson);
       }
     } else {
       const ctaUrl = updateOutroCtaUrl.trim();
       if (!ctaUrl) {
         throw new Error("CTA URL is required.");
       }
-      payload.generateOutroImage = true;
-      payload.ctaUrl = ctaUrl;
-      if (updateOutroTextTop.trim()) payload.ctaTextTop = updateOutroTextTop.trim();
-      if (updateOutroTextBottom.trim()) payload.ctaTextBottom = updateOutroTextBottom.trim();
-      if (updateOutroCtaLogo.trim()) payload.ctaLogo = updateOutroCtaLogo.trim();
+      payload.generate_outro_image = true;
+      payload.cta_url = ctaUrl;
+      if (updateOutroTextTop.trim()) payload.cta_text_top = updateOutroTextTop.trim();
+      if (updateOutroTextBottom.trim()) payload.cta_text_bottom = updateOutroTextBottom.trim();
+      if (updateOutroCtaLogo.trim()) payload.cta_logo = updateOutroCtaLogo.trim();
     }
     return payload;
   }
@@ -299,13 +299,13 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
               <button className="btn" onClick={() => runAction("translate", { language })} disabled={busy === "translate"}>
                 <Languages size={16} /> Retranslate
               </button>
-              <button className="btn" onClick={() => runAction("join", { sessionId: joinSession, blendScenes: true })} disabled={busy === "join" || !joinSession}>
+              <button className="btn" onClick={() => runAction("join", { session_id: joinSession, blend_scenes: true })} disabled={busy === "join" || !joinSession}>
                 <Clapperboard size={16} /> Join
               </button>
               <button className="btn" onClick={() => runAction("remove_subtitles")} disabled={busy === "remove_subtitles"}>
                 <Scissors size={16} /> Remove subtitles
               </button>
-              <button className="btn" onClick={() => runAction("add_outro", { outroImageUrl, addOutroAnimation: true })} disabled={busy === "add_outro" || !outroImageUrl}>
+              <button className="btn" onClick={() => runAction("add_outro", { outro_image_url: outroImageUrl, add_outro_animation: true })} disabled={busy === "add_outro" || !outroImageUrl}>
                 <ImagePlus size={16} /> Add outro
               </button>
               <button className="btn" onClick={() => setShowUpdateOutro((visible) => !visible)} disabled={busy === "update_outro"}>

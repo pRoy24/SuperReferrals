@@ -90,7 +90,11 @@ OG_DA_URL=
 OG_SERVICE_MARKETPLACE_MOCKS=false
 OG_SERVICE_MARKETPLACE_URL=
 OG_COMPUTE_MOCKS=false
-OG_COMPUTE_URL=
+OG_COMPUTE_TESTNET_URL=
+OG_COMPUTE_MAINNET_URL=
+OG_COMPUTE_TESTNET_MODEL=qwen-2.5-7b-instruct
+OG_COMPUTE_MAINNET_MODEL=gpt-oss-120b
+OG_COMPUTE_API_KEY=
 ```
 
 The app remains mock-first. A local run should exercise the full agent path without external keys, then each provider can be made live independently.

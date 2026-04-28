@@ -210,6 +210,7 @@ For staging previews, Vercel needs a Git event it can deploy. Push a new commit 
 - `KEEPERHUB_API_KEY`, `KEEPERHUB_WALLET_ADDRESS`, `KEEPERHUB_PAYMENT_WORKFLOW_ID`: live KeeperHub payment and settlement.
 - `UNISWAP_API_KEY`: live Uniswap quote and swap transaction data.
 - `OG_NETWORK`, `OG_CHAIN_ID`, `OG_RPC_URL`, `OG_STORAGE_INDEXER_RPC`, `OG_PRIVATE_KEY`: 0G Chain, Storage, registry, and INFT signer.
+- `OG_COMPUTE_MOCKS`, `OG_COMPUTE_TESTNET_URL`, `OG_COMPUTE_MAINNET_URL`, `OG_COMPUTE_TESTNET_MODEL`, `OG_COMPUTE_MAINNET_MODEL`, `OG_COMPUTE_API_KEY`: 0G Compute assistant routing. Testnet defaults to `qwen-2.5-7b-instruct`; mainnet defaults to `gpt-oss-120b`. Runtime calls use the configured service URL and optional bearer token, not a private key.
 - `USER_REGISTRY_CONTRACT_ADDRESS`: deployed `SuperReferralsUserRegistry` address.
 - `INFT_CONTRACT_ADDRESS`: deployed INFT collection. Minting uses `OG_PRIVATE_KEY`.
 - `INFT_RECOVERY_SCAN_LIMIT`: maximum number of recent INFT tokens scanned when rebuilding a public `/inft/:id` view from onchain token metadata.
