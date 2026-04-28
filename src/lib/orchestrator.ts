@@ -2051,8 +2051,12 @@ function resolveGenerationVideoSessionId(generation: Pick<Generation, "samsarReq
 }
 
 function resolveGenerationVideoActionSessionId(generation: Pick<Generation, "samsarRequestId" | "samsarSessionId">) {
-  return normalizeSamsarActionSessionId(generation.samsarSessionId) ||
-    normalizeSamsarActionSessionId(generation.samsarRequestId);
+  const sessionId = normalizeSamsarActionSessionId(generation.samsarSessionId);
+  const requestId = normalizeSamsarActionSessionId(generation.samsarRequestId);
+  if (requestId.startsWith("extreq_") && sessionId === normalizeSamsarVideoSessionId(requestId)) {
+    return requestId;
+  }
+  return sessionId || requestId;
 }
 
 function resolveINFTTitle(generation: Generation, subAccount: SubAccount) {

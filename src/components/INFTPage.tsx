@@ -574,6 +574,9 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       payload.new_outro_image_url = imageUrl;
       payload.add_outro_focus_area = updateOutroFocusArea;
       if (updateOutroFocusArea) {
+        payload.add_outro_animation = true;
+      }
+      if (updateOutroFocusArea) {
         payload.outro_focust_area = parseOutroFocusArea(updateOutroFocusAreaJson);
       }
     } else {
@@ -772,6 +775,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                   <input
                     type="checkbox"
                     checked={updateOutroAnimation}
+                    disabled={updateOutroMode === "image" && updateOutroFocusArea}
                     onChange={(event) => setUpdateOutroAnimation(event.target.checked)}
                   />
                   Animate outro update
@@ -782,7 +786,13 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                       <input
                         type="checkbox"
                         checked={updateOutroFocusArea}
-                        onChange={(event) => setUpdateOutroFocusArea(event.target.checked)}
+                        onChange={(event) => {
+                          const checked = event.target.checked;
+                          setUpdateOutroFocusArea(checked);
+                          if (checked) {
+                            setUpdateOutroAnimation(true);
+                          }
+                        }}
                       />
                       Add outro focus area
                     </label>

@@ -1,7 +1,7 @@
-import SamsarClient from "samsar-js";
+import SamsarClient, { SamsarRequestError } from "samsar-js";
 import { appBaseUrl, isProviderMock } from "./env";
 import { createId, nowIso } from "./ids";
-import { samsarApiV2Url } from "./samsar-api";
+import { samsarApiV1Url, samsarApiV2Url } from "./samsar-api";
 import type {
   ExternalUserIdentity,
   GenerationInput,
@@ -32,9 +32,13 @@ type SamsarVideoActionClient = {
   createV2VideoFromImageList(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
   updateV2VideoOutroImage(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
   addV2VideoOutroImage(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
+  updateVideoOutroImage(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
+  addVideoOutroImage(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
   getV2Status(requestId: string, options?: Record<string, unknown>): Promise<SamsarClientResult>;
   postV2(path: string, payload?: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
 };
+
+type SamsarLegacyVideoActionClient = Pick<SamsarVideoActionClient, "updateVideoOutroImage" | "addVideoOutroImage">;
 
 type SamsarClientResult = {
   data: Record<string, unknown>;
@@ -243,16 +247,38 @@ export async function runSamsarSessionAction(
     }, videoOptions));
   }
   if (action === "update_outro") {
-    return samsarClientActionResult(await videoClient.updateV2VideoOutroImage(
-      sessionActionPayload,
-      videoOptions
-    ));
+    try {
+      return samsarClientActionResult(await videoClient.updateV2VideoOutroImage(
+        sessionActionPayload,
+        videoOptions
+      ));
+    } catch (error) {
+      if (!isMissingSamsarV2OutroRoute(error)) {
+        throw error;
+      }
+      const legacyClient = await samsarLegacyVideoActionClient(normalizedOptions);
+      return samsarClientActionResult(await legacyClient.updateVideoOutroImage(
+        sessionActionPayload,
+        videoOptions
+      ));
+    }
   }
   if (action === "add_outro") {
-    return samsarClientActionResult(await videoClient.addV2VideoOutroImage(
-      sessionActionPayload,
-      videoOptions
-    ));
+    try {
+      return samsarClientActionResult(await videoClient.addV2VideoOutroImage(
+        sessionActionPayload,
+        videoOptions
+      ));
+    } catch (error) {
+      if (!isMissingSamsarV2OutroRoute(error)) {
+        throw error;
+      }
+      const legacyClient = await samsarLegacyVideoActionClient(normalizedOptions);
+      return samsarClientActionResult(await legacyClient.addVideoOutroImage(
+        sessionActionPayload,
+        videoOptions
+      ));
+    }
   }
   if (action === "cancel_render") {
     return samsarClientActionResult(await videoClient.postV2("cancel_render", {
@@ -330,6 +356,24 @@ async function samsarVideoActionClient(options: SamsarSessionActionOptions): Pro
   }) as SamsarVideoActionClient;
 }
 
+async function samsarLegacyVideoActionClient(options: SamsarSessionActionOptions): Promise<SamsarLegacyVideoActionClient> {
+  const appKey = options.appKey?.trim();
+  const appSecret = options.appSecret?.trim();
+  if (!appKey) {
+    throw new Error("A storefront Samsar APP_KEY is required for SuperReferrals video actions.");
+  }
+  if (!appSecret) {
+    throw new Error("A Samsar APP_SECRET is required when using APP_KEY authentication.");
+  }
+  return new SamsarClient({
+    apiKey: undefined,
+    appKey,
+    appSecret,
+    baseUrl: samsarApiV1Url(),
+    externalUserApiKey: usableExternalApiKey(options.externalApiKey)
+  }) as SamsarLegacyVideoActionClient;
+}
+
 function samsarVideoActionRequestOptions(options: SamsarSessionActionOptions & { externalUser?: ExternalUserIdentity }) {
   return {
     webhookUrl: `${appBaseUrl()}/api/webhooks/samsar`,
@@ -337,6 +381,21 @@ function samsarVideoActionRequestOptions(options: SamsarSessionActionOptions & {
     externalUserApiKey: usableExternalApiKey(options.externalApiKey),
     externalUser: options.externalUser
   };
+}
+
+function isMissingSamsarV2OutroRoute(error: unknown) {
+  if (error instanceof SamsarRequestError) {
+    return error.status === 404 && /\/v2\/(?:update_outro_image|add_outro_image)/i.test(error.url || "");
+  }
+  if (error && typeof error === "object") {
+    const record = error as { status?: unknown; url?: unknown; message?: unknown };
+    if (Number(record.status) === 404 && /\/v2\/(?:update_outro_image|add_outro_image)/i.test(String(record.url || ""))) {
+      return true;
+    }
+    const message = String(record.message || "");
+    return /\/v2\/(?:update_outro_image|add_outro_image)/i.test(message) && /404|not found/i.test(message);
+  }
+  return false;
 }
 
 function samsarClientActionResult(response: SamsarClientResult): Record<string, unknown> {
