@@ -69,7 +69,7 @@ export default async function Home() {
       <section className="landing-hero">
         <div className="landing-hero-copy">
           <div className="eyebrow">Product Video Referrals</div>
-          <h1>Turn every Ref link into a marketing video</h1>
+          <h1>Turn referral links into videos that convert</h1>
           <p className="landing-lede">
             Give every recommendation a product story, visual style, and clear next step.
           </p>
