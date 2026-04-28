@@ -1271,6 +1271,27 @@ export async function runINFTAction(id: string, action: string, payload: Record<
   const customer = store.customers.find((item) => item.id === generation.customerId);
   const samsarApiKey = customer ? customerSamsarApiKey(customer) : undefined;
 
+  if (action === "action_status") {
+    const requestId = String(payload.requestId || payload.request_id || payload.sessionId || payload.session_id || "");
+    if (!requestId) {
+      throw new Error("requestId is required");
+    }
+    const status = await getSamsarStatus(requestId, undefined, undefined, samsarApiKey);
+    const normalizedStatus = String(status.status || "").toUpperCase();
+    let resultUrl = extractSamsarResultUrl(status);
+    if (!resultUrl && normalizedStatus === "COMPLETED") {
+      const fallbackSessionId = firstInternalSamsarSessionId(extractSamsarInternalSessionId(status), requestId);
+      if (fallbackSessionId) {
+        resultUrl = await fetchLatestVideoUrl(fallbackSessionId, samsarApiKey).catch(() => "");
+      }
+    }
+    return {
+      ...status,
+      status: normalizedStatus || status.status || "PROCESSING",
+      resultUrl: resultUrl || undefined
+    };
+  }
+
   if (action === "update_outro") {
     const outroImageUrl = String(payload.outroImageUrl || payload.outro_image_url || payload.newOutroImageUrl || payload.new_outro_image_url || "");
     if (!outroImageUrl) {
@@ -1278,7 +1299,8 @@ export async function runINFTAction(id: string, action: string, payload: Record<
     }
     return runSamsarSessionAction("update_outro", {
       videoSessionId: generation.samsarSessionId,
-      outro_image_url: outroImageUrl
+      outro_image_url: outroImageUrl,
+      add_outro_focus_area: payload.addOutroFocusArea === true || payload.add_outro_focus_area === true
     }, samsarApiKey);
   }
 

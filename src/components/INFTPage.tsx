@@ -1,9 +1,19 @@
 "use client";
 
-import { Ban, Bot, Cable, Clapperboard, Copy, Download, ImagePlus, Languages, Link2, MessageSquare, RefreshCw, Scissors, Send, Share2, Wallet } from "lucide-react";
-import { useState } from "react";
+import { Bot, Cable, Clapperboard, Copy, Download, ImagePlus, Languages, Link2, MessageSquare, RefreshCw, Scissors, Send, Share2, Wallet } from "lucide-react";
+import { useEffect, useState } from "react";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
 import type { INFTRecord } from "@/lib/types";
+
+type ActionPollState = {
+  action: string;
+  requestId: string;
+  status: string;
+  resultUrl?: string;
+  errorMessage?: string;
+};
+
+const terminalActionStatuses = new Set(["COMPLETED", "FAILED", "CANCELLED", "REFUNDED"]);
 
 export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [question, setQuestion] = useState("What can this INFT do?");
@@ -14,9 +24,74 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [joinSession, setJoinSession] = useState("");
   const [language, setLanguage] = useState("es");
   const [outroImageUrl, setOutroImageUrl] = useState("");
+  const [newOutroImageUrl, setNewOutroImageUrl] = useState("");
+  const [showUpdateOutro, setShowUpdateOutro] = useState(false);
+  const [addOutroFocusArea, setAddOutroFocusArea] = useState(false);
   const [shareMessage, setShareMessage] = useState("");
   const [lastVideoOperation, setLastVideoOperation] = useState("");
+  const [actionPoll, setActionPoll] = useState<ActionPollState | null>(null);
   const publicInftPath = `/inft/${inft.id}`;
+
+  useEffect(() => {
+    if (!actionPoll?.requestId || terminalActionStatuses.has(actionPoll.status.toUpperCase())) {
+      return;
+    }
+    const pollRequestId = actionPoll.requestId;
+    let cancelled = false;
+
+    async function pollActionStatus() {
+      try {
+        const response = await fetch(`/api/infts/${inft.id}/actions`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "action_status",
+            payload: { requestId: pollRequestId }
+          })
+        });
+        const data = await parseResponse(response);
+        const result = data.result as Record<string, unknown>;
+        const nextStatus = extractActionStatus(result);
+        const nextResultUrl = extractActionResultUrl(result);
+        const nextErrorMessage = extractActionError(result);
+        if (!cancelled) {
+          setActionResult(JSON.stringify(result, null, 2));
+          setActionPoll((current) => {
+            if (!current || current.requestId !== pollRequestId) {
+              return current;
+            }
+            return {
+              ...current,
+              status: nextStatus || current.status || "PROCESSING",
+              resultUrl: nextResultUrl || current.resultUrl,
+              errorMessage: nextErrorMessage
+            };
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setActionPoll((current) => {
+            if (!current || current.requestId !== pollRequestId) {
+              return current;
+            }
+            return {
+              ...current,
+              errorMessage: error instanceof Error ? error.message : "Unable to poll action status"
+            };
+          });
+        }
+      }
+    }
+
+    pollActionStatus().catch(() => undefined);
+    const interval = window.setInterval(() => {
+      pollActionStatus().catch(() => undefined);
+    }, 8000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [actionPoll?.requestId, actionPoll?.status, inft.id]);
 
   function getPublicInftUrl() {
     if (typeof window === "undefined") {
@@ -93,6 +168,16 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       setActionResult(JSON.stringify(data.result, null, 2));
       if (action !== "message_peer") {
         setLastVideoOperation(action);
+        const requestId = extractActionRequestId(data.result);
+        if (requestId) {
+          setActionPoll({
+            action,
+            requestId,
+            status: extractActionStatus(data.result) || "QUEUED",
+            resultUrl: extractActionResultUrl(data.result),
+            errorMessage: extractActionError(data.result)
+          });
+        }
       }
     } catch (error) {
       setActionResult(error instanceof Error ? error.message : "Action failed");
@@ -159,7 +244,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
             <div className="form-grid">
               <TextField label="Target language" value={language} onChange={setLanguage} />
               <TextField label="Join with session id" value={joinSession} onChange={setJoinSession} />
-              <TextField label="Outro image URL" value={outroImageUrl} onChange={setOutroImageUrl} full />
+              <TextField label="Add outro image URL" value={outroImageUrl} onChange={setOutroImageUrl} full />
               <TextField label="AXL peer id" value={peerId} onChange={setPeerId} full />
             </div>
             <div className="button-row">
@@ -175,16 +260,53 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
               <button className="btn" onClick={() => runAction("add_outro", { outroImageUrl, addOutroAnimation: true })} disabled={busy === "add_outro" || !outroImageUrl}>
                 <ImagePlus size={16} /> Add outro
               </button>
-              <button className="btn" onClick={() => runAction("update_outro", { outroImageUrl })} disabled={busy === "update_outro" || !outroImageUrl}>
-                <ImagePlus size={16} /> Update outro
-              </button>
-              <button className="btn warn" onClick={() => runAction("cancel_render")} disabled={busy === "cancel_render"}>
-                <Ban size={16} /> Cancel render
+              <button className="btn" onClick={() => setShowUpdateOutro((visible) => !visible)} disabled={busy === "update_outro"}>
+                <ImagePlus size={16} /> Update outro URL
               </button>
               <button className="btn" onClick={() => runAction("message_peer", { peerId, message: "Can we compose a cross-referrer outro trade?" })} disabled={busy === "message_peer"}>
                 <Send size={16} /> AXL message
               </button>
             </div>
+            {showUpdateOutro && (
+              <div className="form-grid action-form">
+                <TextField label="New outro URL" value={newOutroImageUrl} onChange={setNewOutroImageUrl} full />
+                <label className="toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={addOutroFocusArea}
+                    onChange={(event) => setAddOutroFocusArea(event.target.checked)}
+                  />
+                  Add outro focus area
+                </label>
+                <div className="button-row">
+                  <button
+                    className="btn primary"
+                    onClick={() => runAction("update_outro", { newOutroImageUrl, addOutroFocusArea })}
+                    disabled={busy === "update_outro" || !newOutroImageUrl}
+                  >
+                    <ImagePlus size={16} /> Regenerate outro
+                  </button>
+                  <button className="btn" onClick={() => setShowUpdateOutro(false)} disabled={busy === "update_outro"}>
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+            {actionPoll && (
+              <div className="item">
+                <div className="item-title">
+                  <span className="subtle">{actionPoll.action.replaceAll("_", " ")}</span>
+                  <strong>{actionPoll.status}</strong>
+                </div>
+                <p className="mono">{actionPoll.requestId}</p>
+                {actionPoll.resultUrl && (
+                  <a className="btn" href={actionPoll.resultUrl} target="_blank" rel="noreferrer">
+                    <Download size={16} /> Open result
+                  </a>
+                )}
+                {actionPoll.errorMessage && <p className="subtle">{actionPoll.errorMessage}</p>}
+              </div>
+            )}
             {actionResult && <pre className="item mono">{actionResult}</pre>}
             {lastVideoOperation && (
               <StorefrontRatingForm
@@ -284,6 +406,66 @@ function TextField({
       <input value={value} onChange={(event) => onChange(event.target.value)} />
     </div>
   );
+}
+
+function extractActionRequestId(value: unknown) {
+  return firstStringValue(value, "request_id", "requestId", "session_id", "sessionID", "id");
+}
+
+function extractActionStatus(value: unknown) {
+  return firstStringValue(value, "status", "state")?.toUpperCase();
+}
+
+function extractActionError(value: unknown) {
+  return firstStringValue(value, "message", "error", "errorMessage");
+}
+
+function extractActionResultUrl(value: unknown): string | undefined {
+  if (typeof value === "string" && /^https?:\/\//i.test(value.trim())) {
+    return value.trim();
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = extractActionResultUrl(item);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+  if (isRecord(value)) {
+    return extractActionResultUrl([
+      value.resultUrl,
+      value.result_url,
+      value.videoUrl,
+      value.video_url,
+      value.remoteUrl,
+      value.remoteURL,
+      value.outputUrl,
+      value.output_url,
+      value.url,
+      value.result,
+      value.output,
+      value.data
+    ]);
+  }
+  return undefined;
+}
+
+function firstStringValue(value: unknown, ...keys: string[]): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  for (const key of keys) {
+    const candidate = value[key];
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 async function parseResponse(response: Response) {

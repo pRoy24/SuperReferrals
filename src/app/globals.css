@@ -1146,6 +1146,17 @@ h3 {
   min-width: 0;
 }
 
+.action-form {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(31, 91, 160, 0.12);
+}
+
+.action-form .button-row {
+  grid-column: 1 / -1;
+  margin-top: 0;
+}
+
 .field {
   display: grid;
   gap: 6px;
