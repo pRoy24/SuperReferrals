@@ -5,7 +5,17 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "SuperReferrals",
-  description: "Turn referral links into product marketing videos with catalog data, creative styles, and creator campaign pages."
+  description: "Turn referral links into product marketing videos with catalog data, creative styles, and creator campaign pages.",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" }
+    ],
+    apple: [
+      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }
+    ]
+  }
 };
 
 const deploymentEnvironment =

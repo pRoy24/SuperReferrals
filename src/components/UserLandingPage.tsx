@@ -1443,37 +1443,9 @@ function SimpleRenderForm({
               onDragOver={(event) => handleImageDragOver(event, index)}
               onDrop={(event) => handleImageDrop(event, index)}
             >
-              <div className="wizard-entry-title">
-                <strong>Image {index + 1}</strong>
-                <div className="wizard-entry-title-actions">
-                  <button
-                    type="button"
-                    className="icon-btn drag-handle"
-                    draggable={uploadingImageIndex === null}
-                    onDragStart={(event) => handleImageDragStart(event, index)}
-                    onDragEnd={() => {
-                      setDraggedImageIndex(null);
-                      setDragOverImageIndex(null);
-                    }}
-                    title="Drag to reorder"
-                    disabled={uploadingImageIndex !== null}
-                  >
-                    <GripVertical size={16} />
-                  </button>
-                  <button type="button" className="icon-btn" onClick={() => onImageMove(index, index - 1)} disabled={uploadingImageIndex !== null || index === 0} title="Move image up">
-                    <ArrowUp size={16} />
-                  </button>
-                  <button type="button" className="icon-btn" onClick={() => onImageMove(index, index + 1)} disabled={uploadingImageIndex !== null || index === imageWizardItems.length - 1} title="Move image down">
-                    <ArrowDown size={16} />
-                  </button>
-                  <button type="button" className="icon-btn danger" onClick={() => onImageRemove(index)} disabled={uploadingImageIndex !== null} title="Remove image">
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              </div>
               <div className="wizard-image-grid">
-                <div className="image-source-grid full">
-                  <div className="field">
+                <div className="image-source-toolbar full">
+                  <div className="field image-url-field">
                     <label>Image URL</label>
                     <input
                       value={item.image_url}
@@ -1495,12 +1467,36 @@ function SimpleRenderForm({
                       onChange={(event) => handleUploadInput(index, item, event)}
                       disabled={uploadingImageIndex !== null}
                     />
-                    <Upload size={17} />
-                    <span>{uploadingImageIndex === index ? "Uploading..." : "Upload image"}</span>
-                    <small>JPEG, PNG, or WebP up to 4 MB</small>
+                    <Upload size={16} />
+                    <span>{uploadingImageIndex === index ? "Uploading..." : "Upload"}</span>
                   </label>
+                  <div className="image-toolbar-actions">
+                    <button
+                      type="button"
+                      className="icon-btn drag-handle"
+                      draggable={uploadingImageIndex === null}
+                      onDragStart={(event) => handleImageDragStart(event, index)}
+                      onDragEnd={() => {
+                        setDraggedImageIndex(null);
+                        setDragOverImageIndex(null);
+                      }}
+                      title="Drag to reorder"
+                      disabled={uploadingImageIndex !== null}
+                    >
+                      <GripVertical size={16} />
+                    </button>
+                    <button type="button" className="icon-btn" onClick={() => onImageMove(index, index - 1)} disabled={uploadingImageIndex !== null || index === 0} title="Move image up">
+                      <ArrowUp size={16} />
+                    </button>
+                    <button type="button" className="icon-btn" onClick={() => onImageMove(index, index + 1)} disabled={uploadingImageIndex !== null || index === imageWizardItems.length - 1} title="Move image down">
+                      <ArrowDown size={16} />
+                    </button>
+                    <button type="button" className="icon-btn danger" onClick={() => onImageRemove(index)} disabled={uploadingImageIndex !== null} title="Remove image">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </div>
-                <ImageUrlPreview rawUrl={item.image_url} label={`Image ${index + 1}`} />
+                <ImageUrlPreview rawUrl={item.image_url} title={item.title} />
                 <TextField
                   label="Title"
                   value={item.title}
@@ -1656,8 +1652,9 @@ function createImagePreviewState(imageUrl: string, previewError: string): ImageU
   return { imageUrl, status: "loading" };
 }
 
-function ImageUrlPreview({ rawUrl, label }: { rawUrl: string; label: string }) {
+function ImageUrlPreview({ rawUrl, title }: { rawUrl: string; title: string }) {
   const imageUrl = rawUrl.trim();
+  const previewTitle = title.trim();
   const previewError = getImagePreviewUrlError(imageUrl);
   const [state, setState] = useState<ImageUrlPreviewState>(() =>
     createImagePreviewState(imageUrl, previewError)
@@ -1733,31 +1730,30 @@ function ImageUrlPreview({ rawUrl, label }: { rawUrl: string; label: string }) {
     return null;
   }
 
-  const dimensions = activeState.status === "loaded" ? `${activeState.width} x ${activeState.height}` : "";
   const aspectRatio = activeState.status === "loaded" ? formatDetectedAspectRatio(activeState.width, activeState.height) : "";
   const statusText =
-    activeState.status === "loaded" ? `${aspectRatio} - ${dimensions}` :
+    activeState.status === "loaded" ? aspectRatio :
       activeState.status === "loading" ? "Detecting aspect ratio..." :
         activeState.status === "invalid" || activeState.status === "failed" ? activeState.message :
           "";
 
   return (
-    <div className={`image-url-preview full image-url-preview-${activeState.status}`}>
+    <div className={`image-url-preview image-url-preview-${activeState.status}`}>
       <div className="image-url-preview-frame">
         {activeState.status === "loaded" && (
           <img
             key={imageUrl}
             src={imageUrl}
-            alt={`${label} preview`}
+            alt={previewTitle ? `${previewTitle} preview` : "Image preview"}
             loading="lazy"
             decoding="async"
           />
         )}
         {activeState.status !== "loaded" && <span>{activeState.status === "loading" ? "Loading" : "No preview"}</span>}
-      </div>
-      <div className="image-url-preview-meta">
-        <strong>{label}</strong>
-        <span className={activeState.status === "loaded" ? "badge ok" : "badge"}>{statusText}</span>
+        <div className="image-url-preview-overlay">
+          {previewTitle && <strong>{previewTitle}</strong>}
+          {statusText && <span>{statusText}</span>}
+        </div>
       </div>
     </div>
   );
