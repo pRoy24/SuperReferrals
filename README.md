@@ -83,7 +83,7 @@ Important runtime guardrails:
 
 ## Local Run
 
-Install note: `package.json` currently references `samsar-js` as a local sibling package at `../samsar_one/samsar-js`. Keep that workspace present, or replace it with the published Samsar JS package before installing.
+Install note: `package.json` uses the published `samsar-js` package. Run `npm install` to install the locked client version.
 
 ```bash
 npm install

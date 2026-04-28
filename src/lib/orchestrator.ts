@@ -1293,15 +1293,40 @@ export async function runINFTAction(id: string, action: string, payload: Record<
   }
 
   if (action === "update_outro") {
-    const outroImageUrl = String(payload.outroImageUrl || payload.outro_image_url || payload.newOutroImageUrl || payload.new_outro_image_url || "");
-    if (!outroImageUrl) {
-      throw new Error("outroImageUrl is required");
+    if (!generation.samsarSessionId) {
+      throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
-    return runSamsarSessionAction("update_outro", {
+    const outroImageUrl = firstString(payload, ["outroImageUrl", "outro_image_url", "newOutroImageUrl", "new_outro_image_url"]);
+    const ctaUrl = firstString(payload, ["ctaUrl", "cta_url"]);
+    if (outroImageUrl && ctaUrl) {
+      throw new Error("Use either an outro image URL or CTA URL, not both.");
+    }
+    if (!outroImageUrl && !ctaUrl) {
+      throw new Error("An outro image URL or CTA URL is required.");
+    }
+
+    const updateInput: Record<string, unknown> = {
       videoSessionId: generation.samsarSessionId,
-      outro_image_url: outroImageUrl,
-      add_outro_focus_area: payload.addOutroFocusArea === true || payload.add_outro_focus_area === true
-    }, samsarApiKey);
+      ...optionalBooleanField("add_outro_animation", payload.addOutroAnimation, payload.add_outro_animation)
+    };
+    if (ctaUrl) {
+      updateInput.generate_outro_image = true;
+      updateInput.cta_url = ctaUrl;
+      const ctaTextTop = firstString(payload, ["ctaTextTop", "cta_text_top"]);
+      const ctaTextBottom = firstString(payload, ["ctaTextBottom", "cta_text_bottom"]);
+      const ctaLogo = firstString(payload, ["ctaLogo", "cta_logo"]);
+      if (ctaTextTop) updateInput.cta_text_top = ctaTextTop;
+      if (ctaTextBottom) updateInput.cta_text_bottom = ctaTextBottom;
+      if (ctaLogo) updateInput.cta_logo = ctaLogo;
+    } else {
+      updateInput.outro_image_url = outroImageUrl;
+      Object.assign(updateInput, optionalBooleanField("add_outro_focus_area", payload.addOutroFocusArea, payload.add_outro_focus_area));
+      const outroFocusArea = payload.outroFocusArea || payload.outro_focus_area || payload.outroFocustArea || payload.outro_focust_area;
+      if (outroFocusArea) {
+        updateInput.outro_focust_area = outroFocusArea;
+      }
+    }
+    return runSamsarSessionAction("update_outro", updateInput, samsarApiKey);
   }
 
   if (action === "add_outro") {
@@ -1620,6 +1645,15 @@ function firstString(record: Record<string, unknown> | undefined, keys: string[]
     }
   }
   return "";
+}
+
+function optionalBooleanField(key: string, ...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "boolean") {
+      return { [key]: value };
+    }
+  }
+  return {};
 }
 
 function buildINFTAttributes(

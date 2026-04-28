@@ -24,13 +24,21 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [joinSession, setJoinSession] = useState("");
   const [language, setLanguage] = useState("es");
   const [outroImageUrl, setOutroImageUrl] = useState("");
-  const [newOutroImageUrl, setNewOutroImageUrl] = useState("");
+  const [updateOutroMode, setUpdateOutroMode] = useState<"cta" | "image">("cta");
+  const [updateOutroImageUrl, setUpdateOutroImageUrl] = useState("");
+  const [updateOutroCtaUrl, setUpdateOutroCtaUrl] = useState("");
+  const [updateOutroTextTop, setUpdateOutroTextTop] = useState("Scan to learn more");
+  const [updateOutroTextBottom, setUpdateOutroTextBottom] = useState("");
+  const [updateOutroCtaLogo, setUpdateOutroCtaLogo] = useState("");
+  const [updateOutroAnimation, setUpdateOutroAnimation] = useState(true);
   const [showUpdateOutro, setShowUpdateOutro] = useState(false);
-  const [addOutroFocusArea, setAddOutroFocusArea] = useState(false);
+  const [updateOutroFocusArea, setUpdateOutroFocusArea] = useState(false);
+  const [updateOutroFocusAreaJson, setUpdateOutroFocusAreaJson] = useState(JSON.stringify({ x: 680, y: 296, width: 432, height: 432 }, null, 2));
   const [shareMessage, setShareMessage] = useState("");
   const [lastVideoOperation, setLastVideoOperation] = useState("");
   const [actionPoll, setActionPoll] = useState<ActionPollState | null>(null);
   const publicInftPath = `/inft/${inft.id}`;
+  const updateOutroRequiredValue = updateOutroMode === "cta" ? updateOutroCtaUrl.trim() : updateOutroImageUrl.trim();
 
   useEffect(() => {
     if (!actionPoll?.requestId || terminalActionStatuses.has(actionPoll.status.toUpperCase())) {
@@ -186,6 +194,46 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     }
   }
 
+  function buildUpdateOutroPayload() {
+    const payload: Record<string, unknown> = {
+      addOutroAnimation: updateOutroAnimation
+    };
+
+    if (updateOutroMode === "image") {
+      const imageUrl = updateOutroImageUrl.trim();
+      if (!imageUrl) {
+        throw new Error("New outro image URL is required.");
+      }
+      payload.newOutroImageUrl = imageUrl;
+      payload.addOutroFocusArea = updateOutroFocusArea;
+      if (updateOutroFocusArea) {
+        payload.outroFocusArea = parseOutroFocusArea(updateOutroFocusAreaJson);
+      }
+    } else {
+      const ctaUrl = updateOutroCtaUrl.trim();
+      if (!ctaUrl) {
+        throw new Error("CTA URL is required.");
+      }
+      payload.generateOutroImage = true;
+      payload.ctaUrl = ctaUrl;
+      if (updateOutroTextTop.trim()) payload.ctaTextTop = updateOutroTextTop.trim();
+      if (updateOutroTextBottom.trim()) payload.ctaTextBottom = updateOutroTextBottom.trim();
+      if (updateOutroCtaLogo.trim()) payload.ctaLogo = updateOutroCtaLogo.trim();
+    }
+    return payload;
+  }
+
+  function updateOutro() {
+    let payload: Record<string, unknown>;
+    try {
+      payload = buildUpdateOutroPayload();
+    } catch (error) {
+      setActionResult(error instanceof Error ? error.message : "Invalid outro update input");
+      return;
+    }
+    runAction("update_outro", payload).catch(() => undefined);
+  }
+
   return (
     <main className="inft-layout">
       <div className="topbar">
@@ -261,7 +309,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                 <ImagePlus size={16} /> Add outro
               </button>
               <button className="btn" onClick={() => setShowUpdateOutro((visible) => !visible)} disabled={busy === "update_outro"}>
-                <ImagePlus size={16} /> Update outro URL
+                <ImagePlus size={16} /> Update outro
               </button>
               <button className="btn" onClick={() => runAction("message_peer", { peerId, message: "Can we compose a cross-referrer outro trade?" })} disabled={busy === "message_peer"}>
                 <Send size={16} /> AXL message
@@ -269,22 +317,60 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
             </div>
             {showUpdateOutro && (
               <div className="form-grid action-form">
-                <TextField label="New outro URL" value={newOutroImageUrl} onChange={setNewOutroImageUrl} full />
+                <SelectField
+                  label="Update mode"
+                  value={updateOutroMode}
+                  options={[
+                    { value: "cta", label: "Generate CTA outro" },
+                    { value: "image", label: "Use image URL" }
+                  ]}
+                  onChange={(value) => setUpdateOutroMode(value as "cta" | "image")}
+                />
+                {updateOutroMode === "image" ? (
+                  <TextField label="New outro image URL" value={updateOutroImageUrl} onChange={setUpdateOutroImageUrl} full />
+                ) : (
+                  <>
+                    <TextField label="CTA URL" value={updateOutroCtaUrl} onChange={setUpdateOutroCtaUrl} full />
+                    <TextField label="Top text" value={updateOutroTextTop} onChange={setUpdateOutroTextTop} />
+                    <TextField label="Bottom text" value={updateOutroTextBottom} onChange={setUpdateOutroTextBottom} />
+                    <TextField label="CTA logo URL" value={updateOutroCtaLogo} onChange={setUpdateOutroCtaLogo} full />
+                  </>
+                )}
                 <label className="toggle-row">
                   <input
                     type="checkbox"
-                    checked={addOutroFocusArea}
-                    onChange={(event) => setAddOutroFocusArea(event.target.checked)}
+                    checked={updateOutroAnimation}
+                    onChange={(event) => setUpdateOutroAnimation(event.target.checked)}
                   />
-                  Add outro focus area
+                  Animate outro update
                 </label>
+                {updateOutroMode === "image" && (
+                  <>
+                    <label className="toggle-row">
+                      <input
+                        type="checkbox"
+                        checked={updateOutroFocusArea}
+                        onChange={(event) => setUpdateOutroFocusArea(event.target.checked)}
+                      />
+                      Add outro focus area
+                    </label>
+                    {updateOutroFocusArea && (
+                      <TextAreaField
+                        label="Outro focus area JSON"
+                        value={updateOutroFocusAreaJson}
+                        onChange={setUpdateOutroFocusAreaJson}
+                        full
+                      />
+                    )}
+                  </>
+                )}
                 <div className="button-row">
                   <button
                     className="btn primary"
-                    onClick={() => runAction("update_outro", { newOutroImageUrl, addOutroFocusArea })}
-                    disabled={busy === "update_outro" || !newOutroImageUrl}
+                    onClick={updateOutro}
+                    disabled={busy === "update_outro" || !updateOutroRequiredValue}
                   >
-                    <ImagePlus size={16} /> Regenerate outro
+                    <ImagePlus size={16} /> Update outro
                   </button>
                   <button className="btn" onClick={() => setShowUpdateOutro(false)} disabled={busy === "update_outro"}>
                     Close
@@ -406,6 +492,67 @@ function TextField({
       <input value={value} onChange={(event) => onChange(event.target.value)} />
     </div>
   );
+}
+
+function TextAreaField({
+  label,
+  value,
+  onChange,
+  full = false
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  full?: boolean;
+}) {
+  return (
+    <div className={`field ${full ? "full" : ""}`}>
+      <label>{label}</label>
+      <textarea value={value} onChange={(event) => onChange(event.target.value)} />
+    </div>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  options,
+  onChange
+}: {
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="field">
+      <label>{label}</label>
+      <select value={value} onChange={(event) => onChange(event.target.value)}>
+        {options.map((option) => (
+          <option value={option.value} key={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function parseOutroFocusArea(raw: string) {
+  const parsed = JSON.parse(raw);
+  if (!isRecord(parsed)) {
+    throw new Error("Outro focus area must be a JSON object.");
+  }
+  const focusArea = {
+    x: Number(parsed.x),
+    y: Number(parsed.y),
+    width: Number(parsed.width),
+    height: Number(parsed.height)
+  };
+  if (!Object.values(focusArea).every((value) => Number.isFinite(value) && value >= 0)) {
+    throw new Error("Outro focus area must include valid x, y, width, and height numbers.");
+  }
+  return focusArea;
 }
 
 function extractActionRequestId(value: unknown) {

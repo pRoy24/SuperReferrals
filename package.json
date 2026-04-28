@@ -28,7 +28,7 @@
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "samsar-js": "file:../samsar_one/samsar-js",
+    "samsar-js": "0.48.18",
     "viem": "latest"
   },
   "devDependencies": {
