@@ -62,7 +62,7 @@ export async function mintINFT({
     };
   }
   if (!contractAddress || !privateKey) {
-    throw new Error("INFT_CONTRACT_ADDRESS and OG_PRIVATE_KEY are required when INFT_MOCKS=false");
+    throw new Error("INFT_CONTRACT_ADDRESS and OG_PRIVATE_KEY are required for live INFT minting.");
   }
 
   const account = privateKeyToAccount(privateKey);

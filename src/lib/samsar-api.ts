@@ -7,11 +7,23 @@ export function samsarApiRootUrl() {
 }
 
 export function samsarApiV1Url() {
+  return samsarVersionedApiUrl("v1");
+}
+
+export function samsarApiV2Url() {
+  return samsarVersionedApiUrl("v2");
+}
+
+function samsarVersionedApiUrl(version: "v1" | "v2") {
   const configured = env("SAMSAR_API_URL", DEFAULT_SAMSAR_API_ROOT_URL).replace(/\/$/, "");
-  return configured.endsWith("/v1") ? configured : `${stripV1Path(configured)}/v1`;
+  return configured.endsWith(`/${version}`) ? configured : `${stripVersionPath(configured)}/${version}`;
 }
 
 function stripV1Path(value: string) {
+  return stripVersionPath(value);
+}
+
+function stripVersionPath(value: string) {
   const normalized = value.replace(/\/$/, "");
-  return normalized.endsWith("/v1") ? normalized.slice(0, -3) : normalized;
+  return normalized.replace(/\/v[0-9]+$/i, "");
 }

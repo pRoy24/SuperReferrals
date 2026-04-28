@@ -1,50 +1,52 @@
 import { NextResponse } from "next/server";
-import { pendingCheckoutCookie, setPendingCreditCheckoutCookie } from "@/lib/account-session";
+import { pendingCheckoutCookie, processorAuthTokenFromRequest, setPendingCreditCheckoutCookie } from "@/lib/account-session";
 import { nowIso } from "@/lib/ids";
-import { appBaseUrl, env } from "@/lib/env";
-import {
-  buildCustomerSamsarExternalUser,
-  createSamsarProcessorCreditCheckout
-} from "@/lib/samsar-processor";
+import { appBaseUrl } from "@/lib/env";
+import { restoreProcessorAuthTokenSession } from "@/lib/orchestrator";
+import { createSamsarProcessorCreditCheckout } from "@/lib/samsar-processor";
 import { mutateStore, readStore, upsertCustomer } from "@/lib/store";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const checkoutEmail = String(body.customerEmail || "").trim().toLowerCase();
+    if (!checkoutEmail) {
+      throw new Error("Email is required to purchase SuperReferrals credits.");
+    }
+    const requestAuthToken = processorAuthTokenFromRequest(request);
+    const sessionCustomer = requestAuthToken
+      ? await restoreProcessorAuthTokenSession(requestAuthToken).catch(() => undefined)
+      : undefined;
     const store = await readStore();
     const customer = body.customerId
       ? store.customers.find((item) => item.id === body.customerId)
-      : store.customers[0];
-    const internalApiKey = env("SAMSAR_API_KEY") || undefined;
-    const parentApiKey = internalApiKey || customer?.samsarAccount?.apiKey;
-    const externalUser = customer && checkoutEmail && parentApiKey
-      ? buildCustomerSamsarExternalUser(customer, checkoutEmail)
-      : undefined;
+      : sessionCustomer || store.customers[0];
+    const requestOrigin = requestOriginFromRequest(request);
     const checkout = await createSamsarProcessorCreditCheckout({
       amountCents: body.amountCents ?? body.amount_cents,
-      apiKey: parentApiKey,
-      authToken: parentApiKey ? undefined : customer?.samsarAccount?.authToken,
-      customerEmail: checkoutEmail || undefined,
-      externalUser,
+      appBaseUrl: requestOrigin,
+      customerEmail: checkoutEmail,
+      redirectUrl: `${requestOrigin}/samsar/callback`,
       metadata: {
         ...(body.metadata || {}),
+        signupMode: "first_class_user",
+        returnOrigin: requestOrigin,
+        authRedirectUrl: `${requestOrigin}/samsar/callback`,
+        storefrontPortalUrl: `${requestOrigin}/dashboard`,
         ...(customer ? { superreferralsCustomerId: customer.id } : {}),
         ...(customer?.name ? { superreferralsCustomerName: customer.name } : {}),
-        ...(checkoutEmail ? { superreferralsAccountEmail: checkoutEmail } : {})
+        superreferralsAccountEmail: checkoutEmail
       },
-      webhookUrl: `${appBaseUrl()}/api/webhooks/processor/credits`
+      webhookUrl: `${requestOrigin}/api/webhooks/processor/credits`
     });
     if (customer) {
       await mutateStore((mutableStore) => upsertCustomer(mutableStore, {
         id: customer.id,
         samsarAccount: {
           ...(customer.samsarAccount || {}),
-          email: checkoutEmail || customer.samsarAccount?.email,
+          email: checkoutEmail,
           username: customer.samsarAccount?.username || customer.name,
           userId: customer.samsarAccount?.userId || customer.id,
-          externalProvider: customer.samsarAccount?.externalProvider,
-          externalUserId: customer.samsarAccount?.externalUserId,
           apiKey: customer.samsarAccount?.apiKey,
           checkoutSessionId: checkout.checkoutSessionId,
           checkoutUrl: checkout.url,
@@ -67,7 +69,7 @@ export async function POST(request: Request) {
       externalPaymentId: checkout.externalPaymentId,
       paymentStatusEndpoint: checkout.paymentStatusEndpoint,
       customerId: customer?.id,
-      email: checkoutEmail || customer?.samsarAccount?.email,
+      email: checkoutEmail,
       amountCents: checkout.amountCents,
       credits: checkout.credits,
       checkoutUrl: checkout.url
@@ -79,4 +81,13 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+}
+
+function requestOriginFromRequest(request: Request) {
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  if (forwardedHost) {
+    return `${forwardedProto || "https"}://${forwardedHost}`.replace(/\/+$/, "");
+  }
+  return new URL(request.url).origin || appBaseUrl();
 }

@@ -2,22 +2,27 @@ import { NextResponse } from "next/server";
 import {
   clearPendingCreditCheckoutCookie,
   type PendingCreditCheckoutCookie,
+  processorAuthTokenFromRequest,
   processorSessionFromCustomer,
   readPendingCreditCheckoutCookie,
   readProcessorAccountSessionCookie,
   setProcessorAccountSessionCookie
 } from "@/lib/account-session";
-import { bootstrap, restoreProcessorAccountSession } from "@/lib/orchestrator";
+import { bootstrap, restoreProcessorAccountSession, restoreProcessorAuthTokenSession } from "@/lib/orchestrator";
 import { reconcileProcessorCreditWebhook } from "@/lib/processor-credit-webhook";
 import { fetchSamsarProcessorCreditCheckoutStatus } from "@/lib/samsar-processor";
-import { isPublicStorefrontCustomer, readStore } from "@/lib/store";
+import { readStore } from "@/lib/store";
 import type { Customer, SuperReferralsStore } from "@/lib/types";
 
 export async function GET(request: Request) {
   const cookieHeader = request.headers.get("cookie");
   const accountSession = readProcessorAccountSessionCookie(cookieHeader);
   const pendingCheckout = readPendingCreditCheckoutCookie(cookieHeader);
-  const restoredCustomer = await restoreProcessorAccountSession(accountSession);
+  const requestAuthToken = processorAuthTokenFromRequest(request);
+  const restoredAuthCustomer = requestAuthToken && requestAuthToken !== accountSession?.authToken
+    ? await restoreProcessorAuthTokenSession(requestAuthToken).catch(() => undefined)
+    : undefined;
+  const restoredCustomer = restoredAuthCustomer || await restoreProcessorAccountSession(accountSession);
   const pendingCheckoutCustomer = !restoredCustomer && pendingCheckout
     ? await restorePendingCreditCheckout(pendingCheckout)
     : undefined;
@@ -30,7 +35,13 @@ export async function GET(request: Request) {
   if (sessionCustomer) {
     setProcessorAccountSessionCookie(response, processorSessionFromCustomer(sessionCustomer, {
       email: pendingCheckout?.email || accountSession?.email || sessionCustomer.samsarAccount?.email,
-      authToken: accountSession?.authToken,
+      authToken: requestAuthToken || accountSession?.authToken,
+      refreshToken: accountSession?.refreshToken || sessionCustomer.samsarAccount?.refreshToken,
+      expiryDate: accountSession?.expiryDate || sessionCustomer.samsarAccount?.expiryDate,
+      refreshTokenExpiresAt: accountSession?.refreshTokenExpiresAt || sessionCustomer.samsarAccount?.refreshTokenExpiresAt,
+      appKeyHash: sessionCustomer.samsarAccount?.appKeyHash || accountSession?.appKeyHash,
+      appKeyPrefix: sessionCustomer.samsarAccount?.appKeyPrefix || accountSession?.appKeyPrefix,
+      appKeyLast4: sessionCustomer.samsarAccount?.appKeyLast4 || accountSession?.appKeyLast4,
       apiKey: accountSession?.apiKey,
       creditsRemaining: sessionCustomer.subscription.creditsRemaining
     }));
@@ -49,7 +60,7 @@ async function findCustomerForPendingCheckout(checkoutSessionId?: string, email?
   return store.customers.find((customer) => {
     const sameCheckout = checkoutSessionId && customer.samsarAccount?.checkoutSessionId === checkoutSessionId;
     const sameEmail = email && customer.samsarAccount?.email?.toLowerCase() === email.toLowerCase();
-    return Boolean((sameCheckout || sameEmail) && isPublicStorefrontCustomer(customer));
+    return Boolean(sameCheckout || sameEmail);
   });
 }
 

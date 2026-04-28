@@ -15,11 +15,10 @@ The generation path is:
 3. Connect or enter a user wallet on the customer-specific user page; switch the wallet to the configured payment transaction chain, then create or reuse the wallet-backed sub-account.
 4. Quote the customer-defined model/aspect price against a selected payment currency and rail on the customer account's configured payment chain.
 5. Confirm payment from the external user's wallet to the customer owner wallet through KeeperHub or direct transfer, or run in local mock mode.
-6. Grant the mapped Samsar external user render credits with `external_users/credits/grant`.
-7. Call Samsar `external_users/image_list_to_video` with user-specific `image_urls`, JSON metadata, prompt, model, aspect ratio, and optional outro/CTA fields.
-8. Poll or receive webhook status.
-9. On completion, fetch the video URL, persist a copy to 0G Storage, upload INFT metadata to 0G Storage, mint `SuperReferralsINFT`, and expose the unique `/inft/:id` URL for download and sharing.
-10. On failure, compute the customer refund policy and submit a KeeperHub direct transfer.
+6. Submit the render through the storefront owner's server-managed Samsar APP_KEY and `SAMSAR_APP_SECRET` on `/v2/image_list_to_video` with user-specific `image_urls`, JSON metadata, prompt, model, aspect ratio, and optional outro/CTA fields.
+7. Poll or receive webhook status through the same storefront credential.
+8. On completion, fetch the video URL, persist a copy to 0G Storage, upload INFT metadata to 0G Storage, mint `SuperReferralsINFT`, and expose the unique `/inft/:id` URL for download and sharing.
+9. On failure, compute the customer refund policy and submit a KeeperHub direct transfer.
 
 ## Live Adapters
 
@@ -32,7 +31,7 @@ The generation path is:
 - ENS lookup: `src/lib/ens.ts`
 - Gensyn AXL peer messaging: `src/lib/axl.ts`
 
-All adapters return deterministic mock results when `SUPERREFERRALS_MOCKS=true`, which keeps local development usable without keys. Individual providers can be made live by setting `<PROVIDER>_MOCKS=false`, for example `SAMSAR_MOCKS=false` with `SAMSAR_API_KEY` for live Samsar and mocked on-chain integrations.
+All adapters return deterministic mock results when `SUPERREFERRALS_MOCKS=true`, which keeps local development usable without keys. Staging and production set `SUPERREFERRALS_MOCKS=false` once the live provider keys and contract addresses are configured. For Samsar, each storefront owner connects through the storefront portal, then the backend provisions a long-lived APP_KEY using `SAMSAR_APP_SECRET`.
 
 Wallet payment prompts and payment adapters default from `TRANSACTION_CHAIN_ID` plus the matching `NEXT_PUBLIC_TRANSACTION_CHAIN_ID`, but the customer account's `pricing.chainId` is the source of truth for user render payments. Dev/staging customers should be saved with Ethereum Sepolia (`11155111`) so wallet prompts, Uniswap quotes, and KeeperHub transfers stay off mainnet. Production customers can use Ethereum mainnet (`1`) or Base mainnet (`8453`) only when `NODE_ENV=production` and `DEPLOYMENT_ENV=production`; non-production runtime maps those production chain ids back to Sepolia. Renders do not start until the server verifies a mined wallet payment transaction against the expected sender, customer or KeeperHub payment recipient, chain, payment token, and quote amount unless `ALLOW_MOCK_RENDER_PAYMENT=true` is explicitly set for local-only demos. Live non-stable token render payments use a KeeperHub payment workflow: the quote event records the expected payment, and the payment-confirmed event is sent only after the server verifies the mined wallet transaction.
 

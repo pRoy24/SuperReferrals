@@ -1,4 +1,4 @@
-import type { Customer, CustomerPricing, GenerationInput, ModelPricingConfiguration, VideoAspectRatio, VideoModel } from "./types";
+import type { Customer, CustomerPricing, GenerationInput, INFTPaidAction, ModelPricingConfiguration, VideoAspectRatio, VideoModel } from "./types";
 import { getTransactionChainId, settlementTokenForCurrency } from "./payment-tokens";
 import {
   getStorefrontDailyWalletRenderLimit,
@@ -11,6 +11,22 @@ export const DEFAULT_CUSTOMER_MULTIPLIER = 1.25;
 type PricingOwner = { pricing?: Partial<CustomerPricing> };
 const allVideoModels: VideoModel[] = ["VEO3.1I2V", "SEEDANCEI2V", "KLING3.0", "RUNWAYML"];
 const allAspectRatios: VideoAspectRatio[] = ["16:9", "9:16"];
+
+export const paidINFTActions: INFTPaidAction[] = [
+  "translate",
+  "join",
+  "remove_subtitles",
+  "add_outro",
+  "update_outro"
+];
+
+export const defaultINFTActionPricesUsd: Record<INFTPaidAction, number> = {
+  translate: 0.75,
+  join: 0.75,
+  remove_subtitles: 0.2,
+  add_outro: 0.35,
+  update_outro: 0.35
+};
 
 export const defaultModelPricingConfigurations: ModelPricingConfiguration[] = [
   {
@@ -91,6 +107,7 @@ export const defaultPricing: CustomerPricing = {
   currency: "USDC",
   pricePerImageUsd: 1.25,
   pricePerSecondUsd: 0.31,
+  inftActionPricesUsd: defaultINFTActionPricesUsd,
   creditUnitUsd: CREDIT_UNIT_USD,
   customerMultiplier: DEFAULT_CUSTOMER_MULTIPLIER,
   modelConfigurations: defaultModelPricingConfigurations,
@@ -122,6 +139,39 @@ export function priceGeneration(customer: Customer, imageCount: number, input?: 
     creditUnitUsd: details.creditUnitUsd,
     customerMultiplier: details.customerMultiplier,
     pricingConfigurationId: modelPricing?.id
+  };
+}
+
+export function normalizeINFTPaidAction(action: string): INFTPaidAction | "" {
+  const normalized = action.trim().toLowerCase();
+  return paidINFTActions.includes(normalized as INFTPaidAction)
+    ? normalized as INFTPaidAction
+    : "";
+}
+
+export function getINFTActionPricesUsd(customer?: PricingOwner | null): Record<INFTPaidAction, number> {
+  const configured = customer?.pricing?.inftActionPricesUsd || {};
+  return paidINFTActions.reduce((prices, action) => {
+    prices[action] = roundMoney(positiveNumber(configured[action], defaultINFTActionPricesUsd[action]));
+    return prices;
+  }, {} as Record<INFTPaidAction, number>);
+}
+
+export function priceINFTAction(customer: Customer, action: INFTPaidAction) {
+  const prices = getINFTActionPricesUsd(customer);
+  const amountUsd = roundMoney(prices[action]);
+  const platformFeeUsd = roundMoney((amountUsd * customer.pricing.platformFeeBps) / 10_000);
+  return {
+    action,
+    amountUsd,
+    platformFeeUsd,
+    totalUsd: roundMoney(amountUsd + platformFeeUsd),
+    durationSeconds: undefined,
+    pricePerSecondUsd: undefined,
+    baseCreditsPerSecond: undefined,
+    creditUnitUsd: getCreditUnitUsd(customer),
+    customerMultiplier: getCustomerMultiplier(customer),
+    pricingConfigurationId: `inft-action-${action}`
   };
 }
 

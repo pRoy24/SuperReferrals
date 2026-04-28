@@ -50,14 +50,14 @@ with:
 
 The agent capability catalog is grounded in the local `samsar-js` client:
 
-- `external_users/image_list_to_video`
-- `video/translate_video`
-- `video/join_videos`
-- `video/remove_subtitles`
-- `video/add_outro_image`
-- `video/update_outro_image`
-- `video/cancel_render`
-- `assistant/completion`
+- `/v2/image_list_to_video`
+- `/v2/translate_video`
+- `/v2/join_videos`
+- `/v2/remove_subtitles`
+- `/v2/add_outro_image`
+- `/v2/update_outro_image`
+- `/v2/cancel_render`
+- `/v2/assistant/completion`
 - `chat/generate_embeddings_from_plain_text`
 - `image/enhance`
 - `image/remove_branding`
@@ -70,31 +70,19 @@ The INFT action route now exposes add/update outro and cancel render in addition
 
 Uniswap is used as the price signal source through `createUniswapChargeSignal`. KeeperHub is used for payment distribution and rollback records through `executeKeeperDistribution` and `executeKeeperRollback`.
 
-Local mock mode creates realistic settlement receipts without moving funds. Live mode requires:
+Local mock mode creates realistic settlement receipts without moving funds. Live mode uses `SUPERREFERRALS_MOCKS=false` and requires:
 
 ```env
-UNISWAP_MOCKS=false
-KEEPERHUB_MOCKS=false
 KEEPERHUB_API_KEY=
-KEEPERHUB_PLATFORM_WALLET_ADDRESS=
+KEEPERHUB_WALLET_ADDRESS=
 ```
 
 ## Live 0G Configuration
 
 ```env
-ZERO_G_MOCKS=false
-AGENT_REGISTRY_MOCKS=false
 AGENT_REGISTRY_CONTRACT_ADDRESS=
-AGENT_REGISTRY_PRIVATE_KEY=
 OG_DA_URL=
-OG_SERVICE_MARKETPLACE_MOCKS=false
 OG_SERVICE_MARKETPLACE_URL=
-OG_COMPUTE_MOCKS=false
-OG_COMPUTE_TESTNET_URL=
-OG_COMPUTE_MAINNET_URL=
-OG_COMPUTE_TESTNET_MODEL=qwen-2.5-7b-instruct
-OG_COMPUTE_MAINNET_MODEL=gpt-oss-120b
-OG_COMPUTE_API_KEY=
 ```
 
-The app remains mock-first. A local run should exercise the full agent path without external keys, then each provider can be made live independently.
+The app remains mock-first when `SUPERREFERRALS_MOCKS` is unset or true. In live mode, 0G Compute uses the 0G serving broker and `OG_PRIVATE_KEY` to discover inference providers; the model and provider endpoint are not env-managed.

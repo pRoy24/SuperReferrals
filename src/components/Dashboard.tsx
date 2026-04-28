@@ -26,14 +26,24 @@ import { getPaymentTokens, getTransactionChainConfig, settlementTokenForCurrency
 import {
   CREDIT_UNIT_USD,
   DEFAULT_CUSTOMER_MULTIPLIER,
+  defaultINFTActionPricesUsd,
   defaultModelPricingConfigurations,
   getCreditUnitUsd,
   getCustomerMultiplier,
+  getINFTActionPricesUsd,
   getModelPricingConfigurations,
+  paidINFTActions,
   resolveModelPriceDetails
 } from "@/lib/pricing";
+import {
+  authCredentialsFromCurrentUrl,
+  fetchWithSamsarAuth,
+  refreshStoredSamsarCredentialsIfNeeded,
+  removeAuthCredentialsFromCurrentUrl,
+  storeSamsarCredentials
+} from "@/lib/storefront-auth-client";
 import { isUsableEvmAddress } from "@/lib/wallet-address";
-import type { Customer, ModelPricingConfiguration, PaymentCurrencySymbol, SuperReferralsStore, VideoAspectRatio, VideoModel } from "@/lib/types";
+import type { Customer, INFTPaidAction, ModelPricingConfiguration, PaymentCurrencySymbol, SuperReferralsStore, VideoAspectRatio, VideoModel } from "@/lib/types";
 
 const processorCreditAmounts = [10, 25, 50, 100];
 const conditionModelOptions: VideoModel[] = ["RUNWAYML", "VEO3.1I2V", "SEEDANCEI2V", "KLING3.0"];
@@ -94,17 +104,45 @@ export default function Dashboard() {
     dailyWalletRenderLimit: "",
     walletAccessMode: "open" as "open" | "whitelist",
     walletWhitelist: "",
+    inftActionPricesUsd: defaultINFTActionPricesUsd,
     modelConfigurations: defaultModelPricingConfigurations
   });
 
   async function load() {
-    const response = await fetch("/api/bootstrap", { cache: "no-store" });
+    const response = await fetchWithSamsarAuth("/api/bootstrap", { cache: "no-store" });
     const data = await response.json();
     setStore(data);
   }
 
+  async function initializeStorefrontSession() {
+    const credentials = authCredentialsFromCurrentUrl();
+    if (credentials.authToken) {
+      storeSamsarCredentials(credentials);
+      try {
+        const response = await fetchWithSamsarAuth("/api/processor/session", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(credentials)
+        });
+        const data = await assertOk(response);
+        storeSamsarCredentials({
+          authToken: data.account?.authToken || credentials.authToken,
+          refreshToken: data.account?.refreshToken || credentials.refreshToken,
+          expiryDate: data.account?.expiryDate || credentials.expiryDate,
+          refreshTokenExpiresAt: data.account?.refreshTokenExpiresAt || credentials.refreshTokenExpiresAt
+        });
+        setMessage(`Signed in to ${data.account?.email || "your SuperReferrals account"}.`);
+      } finally {
+        removeAuthCredentialsFromCurrentUrl();
+      }
+    } else {
+      await refreshStoredSamsarCredentialsIfNeeded();
+    }
+    await load();
+  }
+
   useEffect(() => {
-    load().catch((error) => setMessage(error.message));
+    initializeStorefrontSession().catch((error) => setMessage(error.message));
   }, []);
 
   useEffect(() => subscribeToBrowserWalletProviders(setWalletProviders), []);
@@ -168,6 +206,7 @@ export default function Dashboard() {
         : "",
       walletAccessMode: customer.storefront?.conditions?.walletAccessMode === "whitelist" ? "whitelist" : "open",
       walletWhitelist: customer.storefront?.conditions?.walletWhitelist?.join("\n") || "",
+      inftActionPricesUsd: getINFTActionPricesUsd(customer),
       modelConfigurations: getModelPricingConfigurations(customer)
     });
     setProcessorAccountForm((current) => ({
@@ -206,6 +245,19 @@ export default function Dashboard() {
       modelConfigurations: current.modelConfigurations.map((item) =>
         item.id === id ? { ...item, ...patch } : item
       )
+    }));
+  }
+
+  function updateINFTActionPrice(action: INFTPaidAction, value: string) {
+    const parsed = Number(value);
+    setCustomerForm((current) => ({
+      ...current,
+      inftActionPricesUsd: {
+        ...current.inftActionPricesUsd,
+        [action]: Number.isFinite(parsed) && parsed > 0
+          ? parsed
+          : defaultINFTActionPricesUsd[action]
+      }
     }));
   }
 
@@ -267,6 +319,7 @@ export default function Dashboard() {
       dailyWalletRenderLimit: "",
       walletAccessMode: "open",
       walletWhitelist: "",
+      inftActionPricesUsd: defaultINFTActionPricesUsd,
       modelConfigurations: defaultModelPricingConfigurations.map((item) => ({ ...item }))
     });
     setMessage("Editing a new storefront. Save setup to publish it in the directory.");
@@ -294,7 +347,7 @@ export default function Dashboard() {
         { pricing: { customerMultiplier: customerForm.customerMultiplier, creditUnitUsd: customerForm.creditUnitUsd } },
         enabledPricing
       );
-      const response = await fetch("/api/customers", {
+      const response = await fetchWithSamsarAuth("/api/customers", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -324,6 +377,7 @@ export default function Dashboard() {
             currency: "USDC" as PaymentCurrencySymbol,
             pricePerImageUsd: Number(enabledDetails.pricePerSecondUsd * (enabledPricing?.maxSecondsPerImage || 1)),
             pricePerSecondUsd: enabledDetails.pricePerSecondUsd,
+            inftActionPricesUsd: customerForm.inftActionPricesUsd,
             customerMultiplier: Number(customerForm.customerMultiplier) || DEFAULT_CUSTOMER_MULTIPLIER,
             creditUnitUsd: Number(customerForm.creditUnitUsd) || CREDIT_UNIT_USD,
             modelConfigurations: customerForm.modelConfigurations.map((item) => ({
@@ -383,7 +437,7 @@ export default function Dashboard() {
         throw new Error("Wallet did not return an account");
       }
       setCustomerForm((current) => ({ ...current, ownerWallet: firstAccount }));
-      const response = await fetch("/api/processor/account/action", {
+      const response = await fetchWithSamsarAuth("/api/processor/account/action", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -406,7 +460,7 @@ export default function Dashboard() {
     setBusy("processor-login");
     setMessage("");
     try {
-      const response = await fetch("/api/processor/session", {
+      const response = await fetchWithSamsarAuth("/api/processor/session", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -417,6 +471,12 @@ export default function Dashboard() {
         })
       });
       const data = await assertOk(response);
+      storeSamsarCredentials({
+        authToken: data.account?.authToken,
+        refreshToken: data.account?.refreshToken,
+        expiryDate: data.account?.expiryDate,
+        refreshTokenExpiresAt: data.account?.refreshTokenExpiresAt
+      });
       await load();
       const credits = Number(data.account?.creditsRemaining || 0);
       setProcessorAccountForm((current) => ({ ...current, password: "" }));
@@ -437,8 +497,8 @@ export default function Dashboard() {
       return;
     }
     const checkoutEmail = processorAccountEmail.trim().toLowerCase();
-    if (checkoutEmail && !isEmailLike(checkoutEmail)) {
-      setMessage("Enter a valid email address or leave it blank to enter it during checkout.");
+    if (!checkoutEmail || !isEmailLike(checkoutEmail)) {
+      setMessage("Enter a valid email address before purchasing processor credits.");
       return;
     }
 
@@ -447,7 +507,7 @@ export default function Dashboard() {
     try {
       const existingCustomerId = customer?.id || "";
       const existingCustomerName = customer?.name || "";
-      const response = await fetch("/api/processor/credits/checkout", {
+      const response = await fetchWithSamsarAuth("/api/processor/credits/checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -478,7 +538,7 @@ export default function Dashboard() {
     setBusy(`processor-${action}`);
     setMessage("");
     try {
-      const response = await fetch("/api/processor/account/action", {
+      const response = await fetchWithSamsarAuth("/api/processor/account/action", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -509,7 +569,7 @@ export default function Dashboard() {
     setBusy("agent-town");
     setMessage("");
     try {
-      const response = await fetch("/api/agents", {
+      const response = await fetchWithSamsarAuth("/api/agents", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -532,7 +592,7 @@ export default function Dashboard() {
     setBusy(`rollback-${id}`);
     setMessage("");
     try {
-      const response = await fetch(`/api/agents/${id}/rollback`, {
+      const response = await fetchWithSamsarAuth(`/api/agents/${id}/rollback`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ reason: "Operator requested rollback from customer console" })
@@ -648,7 +708,7 @@ export default function Dashboard() {
                   onChange={(amount) => setProcessorAmountUsd(Number(amount))}
                 />
                 <TextField
-                  label="Email (optional)"
+                  label="Account email"
                   value={processorAccountForm.email}
                   onChange={(email) => setProcessorAccountForm({ ...processorAccountForm, email })}
                 />
@@ -665,12 +725,6 @@ export default function Dashboard() {
               <div className="button-row">
                 <button className="btn" onClick={() => runProcessorAccountAction("refresh_credits")} disabled={busy === "processor-refresh_credits" || !hasProcessorAccountSession}>
                   <RefreshCw size={16} /> Refresh credits
-                </button>
-                <button className="btn" onClick={() => runProcessorAccountAction("create_password_link")} disabled={busy === "processor-create_password_link" || !hasProcessorAccountSession}>
-                  <KeyRound size={16} /> Create password setup link
-                </button>
-                <button className="btn" onClick={() => runProcessorAccountAction("create_login_link")} disabled={busy === "processor-create_login_link" || !hasProcessorAccountSession}>
-                  <ExternalLink size={16} /> Create account login link
                 </button>
               </div>
               <div className="account-wallet-link">
@@ -813,6 +867,23 @@ export default function Dashboard() {
                   <label>Processor credit value</label>
                   <div className="readonly-value">{customerForm.creditUnitUsd.toFixed(3)} USDC / credit</div>
                 </div>
+              </div>
+
+              <div className="pricing-table">
+                {paidINFTActions.map((action) => (
+                  <div className="pricing-row" key={action}>
+                    <div>
+                      <strong>{formatINFTActionLabel(action)}</strong>
+                      <p className="subtle">INFT page operation price</p>
+                    </div>
+                    <TextField
+                      label="USDC price"
+                      type="number"
+                      value={customerForm.inftActionPricesUsd[action] ?? defaultINFTActionPricesUsd[action]}
+                      onChange={(value) => updateINFTActionPrice(action, value)}
+                    />
+                  </div>
+                ))}
               </div>
 
               <div className="render-conditions-editor">
@@ -1105,6 +1176,12 @@ export default function Dashboard() {
       </main>
     </div>
   );
+}
+
+function formatINFTActionLabel(action: INFTPaidAction) {
+  return action
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function TextField({

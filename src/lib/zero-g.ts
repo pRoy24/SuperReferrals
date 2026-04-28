@@ -60,7 +60,7 @@ export async function publishDataAvailabilityCommitment(value: unknown): Promise
     };
   }
   if (!daEndpoint) {
-    throw new Error("OG_DA_URL is required when ZERO_G_MOCKS=false");
+    throw new Error("OG_DA_URL is required for live 0G DA submissions.");
   }
 
   const response = await fetch(daEndpoint, {
@@ -110,7 +110,7 @@ export async function uploadBufferToZeroG(
       !indexerRpc ? "OG_STORAGE_INDEXER_RPC" : "",
       !privateKey ? "OG_PRIVATE_KEY" : ""
     ].filter(Boolean);
-    throw new Error(`${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} required when ZERO_G_MOCKS=false`);
+    throw new Error(`${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} required for live 0G Storage requests.`);
   }
 
   const sdk = await import("@0gfoundation/0g-ts-sdk") as Record<string, any>;

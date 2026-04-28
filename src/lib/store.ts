@@ -5,7 +5,7 @@ import { appBaseUrl, env } from "./env";
 import { createId, makeReferrerCode, nowIso, normalizeWallet } from "./ids";
 import { recoverINFTFromChain } from "./inft";
 import { findPaymentToken, getTransactionChainId, settlementTokenForCurrency } from "./payment-tokens";
-import { defaultModelPricingConfigurations, defaultPricing } from "./pricing";
+import { defaultINFTActionPricesUsd, defaultModelPricingConfigurations, defaultPricing } from "./pricing";
 import { normalizeWalletList } from "./storefront-access";
 import { isUsableEvmAddress } from "./wallet-address";
 import type {
@@ -223,10 +223,14 @@ function normalizeStoreForRuntime(store: SuperReferralsStore) {
       customer.pricing = pricing;
       changed = true;
     }
+    if (!pricing.inftActionPricesUsd) {
+      pricing.inftActionPricesUsd = defaultINFTActionPricesUsd;
+      changed = true;
+    }
     const hasSamsarSession = Boolean(
+      customer.samsarAccount?.appKeyHash ||
       customer.samsarAccount?.authToken ||
-      customer.samsarAccount?.apiKey ||
-      (customer.samsarAccount?.externalUserId && env("SAMSAR_API_KEY"))
+      customer.samsarAccount?.apiKey
     );
     if (!hasSamsarSession && Number(customer.subscription?.creditsRemaining || 0) > 0) {
       customer.subscription = {
@@ -422,14 +426,14 @@ export function publicStore(store: SuperReferralsStore): SuperReferralsStore {
 }
 
 export function publicCustomer(customer: Customer): Customer {
-  const hasInternalApiKeySession = Boolean(customer.samsarAccount?.externalUserId && env("SAMSAR_API_KEY"));
   const samsarAccount = customer.samsarAccount
     ? {
       email: customer.samsarAccount.email,
       username: customer.samsarAccount.username,
       userId: customer.samsarAccount.userId,
-      hasSession: Boolean(customer.samsarAccount.authToken || customer.samsarAccount.apiKey || hasInternalApiKeySession),
-      hasApiKey: Boolean(customer.samsarAccount.apiKey || hasInternalApiKeySession),
+      hasSession: Boolean(customer.samsarAccount.appKeyHash || customer.samsarAccount.authToken || customer.samsarAccount.apiKey),
+      hasAppKey: Boolean(customer.samsarAccount.appKeyHash),
+      hasApiKey: Boolean(customer.samsarAccount.apiKey),
       externalProvider: customer.samsarAccount.externalProvider,
       externalUserId: customer.samsarAccount.externalUserId,
       walletAddress: customer.samsarAccount.walletAddress,
@@ -482,6 +486,9 @@ export function upsertCustomer(store: SuperReferralsStore, input: Partial<Custom
     pricing: {
       ...(existing?.pricing || defaultPricing),
       ...(input.pricing || {}),
+      inftActionPricesUsd: input.pricing?.inftActionPricesUsd ||
+        existing?.pricing.inftActionPricesUsd ||
+        defaultINFTActionPricesUsd,
       modelConfigurations: input.pricing?.modelConfigurations ||
         existing?.pricing.modelConfigurations ||
         defaultModelPricingConfigurations

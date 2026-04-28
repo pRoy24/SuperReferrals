@@ -1,9 +1,26 @@
 "use client";
 
-import { Bot, Cable, Clapperboard, Copy, Download, ImagePlus, Languages, Link2, MessageSquare, RefreshCw, Scissors, Send, Share2, Wallet } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Cable, Clapperboard, Copy, Download, ImagePlus, Languages, Link2, RefreshCw, Scissors, Send, Share2, Wallet } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
-import type { INFTRecord } from "@/lib/types";
+import {
+  requestWalletAccounts,
+  subscribeToBrowserWalletProviders,
+  type BrowserWalletProvider,
+  type EthereumProvider
+} from "@/lib/browser-wallets";
+import {
+  findPaymentToken,
+  getPaymentTokens,
+  getTransactionChainConfig,
+  normalizeTransactionChainIdForEnvironment,
+  settlementTokenForCurrency,
+  type PaymentToken,
+  type TransactionChainConfig
+} from "@/lib/payment-tokens";
+import { defaultINFTActionPricesUsd } from "@/lib/pricing";
+import { isUsableEvmAddress } from "@/lib/wallet-address";
+import type { Customer, INFTPaidAction, INFTRecord, PaymentCurrencySymbol, PaymentQuote, PaymentRail, SuperReferralsStore } from "@/lib/types";
 
 type ActionPollState = {
   action: string;
@@ -13,11 +30,15 @@ type ActionPollState = {
   errorMessage?: string;
 };
 
+type ActionPaymentFlow = {
+  status: "idle" | "payment" | "confirming" | "starting" | "started" | "failed";
+  message: string;
+  txHash?: string;
+};
+
 const terminalActionStatuses = new Set(["COMPLETED", "FAILED", "CANCELLED", "REFUNDED"]);
 
 export default function INFTPage({ inft }: { inft: INFTRecord }) {
-  const [question, setQuestion] = useState("What can this INFT do?");
-  const [answer, setAnswer] = useState("");
   const [actionResult, setActionResult] = useState("");
   const [busy, setBusy] = useState("");
   const [peerId, setPeerId] = useState("mock-peer-video-a");
@@ -37,9 +58,49 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [shareMessage, setShareMessage] = useState("");
   const [lastVideoOperation, setLastVideoOperation] = useState("");
   const [actionPoll, setActionPoll] = useState<ActionPollState | null>(null);
+  const [store, setStore] = useState<SuperReferralsStore | null>(null);
+  const [walletAddress, setWalletAddress] = useState(inft.ownerWallet || "");
+  const [walletProviders, setWalletProviders] = useState<BrowserWalletProvider[]>([]);
+  const [activeWalletProvider, setActiveWalletProvider] = useState<BrowserWalletProvider | null>(null);
+  const [paymentCurrency, setPaymentCurrency] = useState<PaymentCurrencySymbol>("USDC");
+  const [actionQuote, setActionQuote] = useState<PaymentQuote | null>(null);
+  const [actionPaymentFlow, setActionPaymentFlow] = useState<ActionPaymentFlow>({ status: "idle", message: "" });
   const publicInftPath = `/inft/${inft.id}`;
   const updateOutroRequiredValue = updateOutroMode === "cta" ? updateOutroCtaUrl.trim() : updateOutroImageUrl.trim();
 
+  async function loadStore() {
+    const response = await fetch("/api/bootstrap", { cache: "no-store" });
+    const data = await response.json();
+    setStore(data);
+  }
+
+  useEffect(() => {
+    loadStore().catch((error) => setActionPaymentFlow({
+      status: "failed",
+      message: error instanceof Error ? error.message : "Unable to load storefront payment settings."
+    }));
+  }, []);
+
+  useEffect(() => subscribeToBrowserWalletProviders(setWalletProviders), []);
+
+  const customer = useMemo(
+    () => store?.customers.find((item) => item.id === inft.customerId) || null,
+    [store, inft.customerId]
+  );
+  const transactionChain = useMemo(
+    () => getTransactionChainConfig(normalizeTransactionChainIdForEnvironment(customer?.pricing.chainId)),
+    [customer?.pricing.chainId]
+  );
+  const paymentTokens = useMemo(() => getPaymentTokens(transactionChain.id), [transactionChain.id]);
+  const selectablePaymentTokens = useMemo(() => {
+    const ethOrUsdc = paymentTokens.filter((token) => token.symbol === "USDC" || token.symbol === "ETH");
+    return ethOrUsdc.length ? ethOrUsdc : paymentTokens;
+  }, [paymentTokens]);
+  const selectedPaymentToken = selectablePaymentTokens.find((token) => token.symbol === paymentCurrency) || selectablePaymentTokens[0];
+  const settlementToken =
+    findPaymentToken(customer?.pricing.settlementTokenAddress || "", transactionChain.id) ||
+    settlementTokenForCurrency(customer?.pricing.currency || "USDC", transactionChain.id) ||
+    selectedPaymentToken;
   useEffect(() => {
     if (!actionPoll?.requestId || terminalActionStatuses.has(actionPoll.status.toUpperCase())) {
       return;
@@ -147,18 +208,40 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     window.open(shareUrl.toString(), "_blank", "noopener,noreferrer");
   }
 
-  async function ask() {
-    setBusy("ask");
+  function selectedEthereumProvider(walletProvider?: BrowserWalletProvider) {
+    const selected = walletProvider || activeWalletProvider || walletProviders[0] || null;
+    return {
+      walletProvider: selected,
+      provider: selected?.provider || window.ethereum
+    };
+  }
+
+  async function connectWallet(walletProvider?: BrowserWalletProvider) {
+    setBusy("wallet");
+    setActionPaymentFlow({ status: "idle", message: "" });
     try {
-      const response = await fetch(`/api/infts/${inft.id}/assistant`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ question })
+      const selected = selectedEthereumProvider(walletProvider);
+      if (!selected.provider) {
+        throw new Error("No injected wallet detected. Open this page in a wallet-enabled browser or enter a wallet address.");
+      }
+      const accounts = await requestWalletAccounts(selected.provider, { forceAccountSelection: true });
+      const firstAccount = accounts[0] || "";
+      if (!firstAccount) {
+        throw new Error("Wallet did not return an account.");
+      }
+      await ensureWalletNetwork(selected.provider, transactionChain);
+      setActiveWalletProvider(selected.walletProvider);
+      setWalletAddress(firstAccount);
+      setActionQuote(null);
+      setActionPaymentFlow({
+        status: "idle",
+        message: `Wallet connected on ${transactionChain.name}.`
       });
-      const data = await parseResponse(response);
-      setAnswer(data.answer?.output_text || JSON.stringify(data.answer, null, 2));
     } catch (error) {
-      setAnswer(error instanceof Error ? error.message : "Assistant failed");
+      setActionPaymentFlow({
+        status: "failed",
+        message: error instanceof Error ? error.message : "Wallet connection failed."
+      });
     } finally {
       setBusy("");
     }
@@ -189,6 +272,168 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       }
     } catch (error) {
       setActionResult(error instanceof Error ? error.message : "Action failed");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function quoteMatchesAction(activeQuote: PaymentQuote | null, action: INFTPaidAction, paymentToken: PaymentToken) {
+    return Boolean(
+      activeQuote &&
+      activeQuote.inftId === inft.id &&
+      activeQuote.operation === action &&
+      activeQuote.chainId === transactionChain.id &&
+      activeQuote.paymentTokenAddress?.toLowerCase() === paymentToken.address.toLowerCase()
+    );
+  }
+
+  async function requestActionQuote(action: INFTPaidAction, paymentToken: PaymentToken) {
+    if (!customer || !settlementToken) {
+      throw new Error("Storefront payment settings are not available.");
+    }
+    if (!isUsableEvmAddress(walletAddress)) {
+      throw new Error("Connect or enter a valid payer wallet before requesting an action quote.");
+    }
+    const requestedPaymentRail = resolveUserPaymentRail(paymentToken, settlementToken);
+    const response = await fetch("/api/payments/quote", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        customerId: customer.id,
+        subAccountId: inft.subAccountId,
+        inftId: inft.id,
+        action,
+        tokenIn: paymentToken.address,
+        tokenOut: settlementToken.address,
+        paymentCurrency: paymentToken.symbol,
+        settlementCurrency: settlementToken.symbol,
+        paymentRail: requestedPaymentRail,
+        swapper: walletAddress,
+        chainId: transactionChain.id
+      })
+    });
+    const data = await parseResponse(response);
+    setActionQuote(data.quote);
+    return data.quote as PaymentQuote;
+  }
+
+  async function executePaymentForAction(activeQuote: PaymentQuote) {
+    if (!customer || !selectedPaymentToken || !settlementToken) {
+      throw new Error("Storefront payment settings are not available.");
+    }
+    const walletProvider = selectedEthereumProvider();
+    if (!walletProvider.provider) {
+      throw new Error("A wallet transaction is required before running this INFT operation.");
+    }
+    if (!activeQuote.settlementAmountAtomic) {
+      throw new Error("Quote did not include a settlement amount.");
+    }
+    await ensureWalletNetwork(walletProvider.provider, transactionChain);
+    const paymentToken = findPaymentToken(activeQuote.paymentTokenAddress || "", transactionChain.id) || selectedPaymentToken;
+    const activeSettlementToken =
+      findPaymentToken(activeQuote.settlementTokenAddress || "", transactionChain.id) || settlementToken;
+    const sameToken = paymentToken.address.toLowerCase() === activeSettlementToken.address.toLowerCase();
+    const paymentAmountAtomic = activeQuote.paymentAmountAtomic || activeQuote.settlementAmountAtomic;
+    const paymentRecipient = activeQuote.paymentRecipientAddress || customer.ownerWallet;
+    if (!isUsableEvmAddress(paymentRecipient)) {
+      throw new Error("Quote did not include a valid payment recipient.");
+    }
+    if (!sameToken && activeQuote.paymentRail !== "keeperhub") {
+      throw new Error("Selected payment token differs from the settlement token. Choose ETH keeper settlement or pay directly with USDC.");
+    }
+
+    const transferToken = sameToken ? activeSettlementToken : paymentToken;
+    const transferAmount = sameToken ? activeQuote.settlementAmountAtomic : paymentAmountAtomic;
+    const label = sameToken ? "Payment transfer" : "KeeperHub payment";
+    setActionPaymentFlow({
+      status: "payment",
+      message: `Requesting ${transferToken.symbol} payment for ${formatActionLabel(activeQuote.operation || "operation")}.`
+    });
+    const txHash = await requestTokenTransfer({
+      provider: walletProvider.provider,
+      from: walletAddress,
+      token: transferToken,
+      recipient: paymentRecipient,
+      amountAtomic: transferAmount,
+      label,
+      chainName: transactionChain.name
+    });
+    setActionPaymentFlow({
+      status: "confirming",
+      message: `${label} ${shortHash(txHash)} submitted. Waiting for confirmation.`,
+      txHash
+    });
+    const receipt = await waitForWalletReceipt(walletProvider.provider, txHash, 120000);
+    if (!receipt) {
+      throw new Error("Timed out waiting for the payment transaction to mine.");
+    }
+    if (!isSuccessfulReceipt(receipt)) {
+      throw new Error("Payment transaction reverted; INFT operation was not started.");
+    }
+    return txHash;
+  }
+
+  async function runPaidAction(action: INFTPaidAction, payload: Record<string, unknown> = {}) {
+    setBusy(action);
+    setActionPaymentFlow({ status: "payment", message: "Preparing payment quote." });
+    try {
+      if (!selectedPaymentToken) {
+        throw new Error("No supported payment token is available.");
+      }
+      const activeQuote = quoteMatchesAction(actionQuote, action, selectedPaymentToken)
+        ? actionQuote as PaymentQuote
+        : await requestActionQuote(action, selectedPaymentToken);
+      const txHash = await executePaymentForAction(activeQuote);
+      setActionPaymentFlow({
+        status: "starting",
+        message: `Payment ${shortHash(txHash)} confirmed. Starting ${formatActionLabel(action)}.`,
+        txHash
+      });
+      const response = await fetch(`/api/infts/${inft.id}/actions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action,
+          payload: {
+            ...payload,
+            payment: {
+              quoteId: activeQuote.id,
+              txHash,
+              payerWallet: walletAddress,
+              amountUsd: activeQuote.totalUsd,
+              tokenAddress: activeQuote.paymentTokenAddress,
+              tokenSymbol: activeQuote.paymentCurrency,
+              paymentRail: activeQuote.paymentRail,
+              chainId: activeQuote.chainId
+            }
+          }
+        })
+      });
+      const data = await parseResponse(response);
+      setActionResult(JSON.stringify(data.result, null, 2));
+      setLastVideoOperation(action);
+      const requestId = extractActionRequestId(data.result);
+      if (requestId) {
+        setActionPoll({
+          action,
+          requestId,
+          status: extractActionStatus(data.result) || "QUEUED",
+          resultUrl: extractActionResultUrl(data.result),
+          errorMessage: extractActionError(data.result)
+        });
+      }
+      setActionPaymentFlow({
+        status: "started",
+        message: `${formatActionLabel(action)} started after ${shortHash(txHash)}.`,
+        txHash
+      });
+      await loadStore().catch(() => undefined);
+    } catch (error) {
+      setActionPaymentFlow({
+        status: "failed",
+        message: error instanceof Error ? error.message : "Paid INFT action failed."
+      });
+      setActionResult(error instanceof Error ? error.message : "Paid INFT action failed");
     } finally {
       setBusy("");
     }
@@ -231,7 +476,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       setActionResult(error instanceof Error ? error.message : "Invalid outro update input");
       return;
     }
-    runAction("update_outro", payload).catch(() => undefined);
+    runPaidAction("update_outro", payload).catch(() => undefined);
   }
 
   return (
@@ -269,23 +514,6 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
 
           <div className="panel">
             <div className="panel-header">
-              <h2>Assistant</h2>
-              <Bot size={18} />
-            </div>
-            <div className="field">
-              <label>Question</label>
-              <textarea value={question} onChange={(event) => setQuestion(event.target.value)} />
-            </div>
-            <div className="button-row">
-              <button className="btn primary" onClick={ask} disabled={busy === "ask"}>
-                <MessageSquare size={16} /> Ask
-              </button>
-            </div>
-            {answer && <pre className="item mono">{answer}</pre>}
-          </div>
-
-          <div className="panel">
-            <div className="panel-header">
               <h2>Agent Actions</h2>
               <Cable size={18} />
             </div>
@@ -294,22 +522,51 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
               <TextField label="Join with session id" value={joinSession} onChange={setJoinSession} />
               <TextField label="Add outro image URL" value={outroImageUrl} onChange={setOutroImageUrl} full />
               <TextField label="AXL peer id" value={peerId} onChange={setPeerId} full />
+              <TextField
+                label="Payer wallet"
+                value={walletAddress}
+                onChange={(value) => {
+                  setWalletAddress(value);
+                  setActionQuote(null);
+                }}
+                full
+              />
+              <SelectField
+                label="Pay with"
+                value={paymentCurrency}
+                options={selectablePaymentTokens.map((token) => ({ value: token.symbol, label: token.symbol }))}
+                onChange={(value) => {
+                  setPaymentCurrency(value as PaymentCurrencySymbol);
+                  setActionQuote(null);
+                }}
+              />
             </div>
             <div className="button-row">
-              <button className="btn" onClick={() => runAction("translate", { language })} disabled={busy === "translate"}>
-                <Languages size={16} /> Retranslate
+              <button className="btn" onClick={() => connectWallet()} disabled={busy === "wallet"}>
+                <Wallet size={16} /> Connect wallet
               </button>
-              <button className="btn" onClick={() => runAction("join", { session_id: joinSession, blend_scenes: true })} disabled={busy === "join" || !joinSession}>
-                <Clapperboard size={16} /> Join
+              {actionQuote && (
+                <span className="badge ok">
+                  {actionQuote.totalUsd.toFixed(2)} {actionQuote.settlementCurrency || "USDC"} quote · pay {formatQuotePaymentAmount(actionQuote, selectedPaymentToken)}
+                </span>
+              )}
+            </div>
+            {actionPaymentFlow.message && <p className="notice">{actionPaymentFlow.message}</p>}
+            <div className="button-row">
+              <button className="btn" onClick={() => runPaidAction("translate", { language })} disabled={busy === "translate"}>
+                <Languages size={16} /> Retranslate {formatActionPrice(customer, "translate")}
               </button>
-              <button className="btn" onClick={() => runAction("remove_subtitles")} disabled={busy === "remove_subtitles"}>
-                <Scissors size={16} /> Remove subtitles
+              <button className="btn" onClick={() => runPaidAction("join", { session_id: joinSession, blend_scenes: true })} disabled={busy === "join" || !joinSession}>
+                <Clapperboard size={16} /> Join {formatActionPrice(customer, "join")}
               </button>
-              <button className="btn" onClick={() => runAction("add_outro", { outro_image_url: outroImageUrl, add_outro_animation: true })} disabled={busy === "add_outro" || !outroImageUrl}>
-                <ImagePlus size={16} /> Add outro
+              <button className="btn" onClick={() => runPaidAction("remove_subtitles")} disabled={busy === "remove_subtitles"}>
+                <Scissors size={16} /> Remove subtitles {formatActionPrice(customer, "remove_subtitles")}
+              </button>
+              <button className="btn" onClick={() => runPaidAction("add_outro", { outro_image_url: outroImageUrl, add_outro_animation: true })} disabled={busy === "add_outro" || !outroImageUrl}>
+                <ImagePlus size={16} /> Add outro {formatActionPrice(customer, "add_outro")}
               </button>
               <button className="btn" onClick={() => setShowUpdateOutro((visible) => !visible)} disabled={busy === "update_outro"}>
-                <ImagePlus size={16} /> Update outro
+                <ImagePlus size={16} /> Update outro {formatActionPrice(customer, "update_outro")}
               </button>
               <button className="btn" onClick={() => runAction("message_peer", { peerId, message: "Can we compose a cross-referrer outro trade?" })} disabled={busy === "message_peer"}>
                 <Send size={16} /> AXL message
@@ -370,7 +627,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                     onClick={updateOutro}
                     disabled={busy === "update_outro" || !updateOutroRequiredValue}
                   >
-                    <ImagePlus size={16} /> Update outro
+                    <ImagePlus size={16} /> Update outro {formatActionPrice(customer, "update_outro")}
                   </button>
                   <button className="btn" onClick={() => setShowUpdateOutro(false)} disabled={busy === "update_outro"}>
                     Close
@@ -536,6 +793,235 @@ function SelectField({
       </select>
     </div>
   );
+}
+
+function resolveUserPaymentRail(paymentToken: PaymentToken, settlementToken: PaymentToken): PaymentRail {
+  return paymentToken.address.toLowerCase() === settlementToken.address.toLowerCase() ? "direct" : "keeperhub";
+}
+
+function formatActionPrice(customer: Customer | null, action: INFTPaidAction) {
+  const basePrice = customer?.pricing.inftActionPricesUsd?.[action] ?? defaultINFTActionPricesUsd[action];
+  const platformFee = (basePrice * Number(customer?.pricing.platformFeeBps || 0)) / 10_000;
+  return `${(Math.round((basePrice + platformFee) * 100) / 100).toFixed(2)} USDC`;
+}
+
+function formatActionLabel(action: string) {
+  return action
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatQuotePaymentAmount(quote: PaymentQuote, paymentToken?: PaymentToken) {
+  if (!quote.paymentAmountAtomic || !paymentToken) {
+    return quote.paymentCurrency || "selected token";
+  }
+  return `${formatAtomicAmount(BigInt(quote.paymentAmountAtomic), paymentToken.decimals)} ${quote.paymentCurrency || paymentToken.symbol}`;
+}
+
+async function requestTokenTransfer({
+  provider,
+  from,
+  token,
+  recipient,
+  amountAtomic,
+  label,
+  chainName
+}: {
+  provider: EthereumProvider;
+  from: string;
+  token: PaymentToken;
+  recipient: string;
+  amountAtomic: string;
+  label: string;
+  chainName: string;
+}) {
+  if (!isUsableEvmAddress(recipient)) {
+    throw new Error(`${label} recipient is missing or invalid.`);
+  }
+  await assertWalletBalance(provider, from, token, amountAtomic);
+  const tx = token.native
+    ? {
+      from,
+      to: recipient,
+      value: toRpcQuantity(amountAtomic),
+      gas: "0x5208"
+    }
+    : {
+      from,
+      to: token.address,
+      data: buildErc20TransferData(recipient, amountAtomic),
+      value: "0x0",
+      gas: "0x1d4c0"
+    };
+  return sendWalletTransaction(provider, tx, { label, chainName });
+}
+
+async function sendWalletTransaction(
+  provider: EthereumProvider,
+  transaction: Record<string, unknown>,
+  context: { label: string; chainName: string }
+) {
+  try {
+    return String(await provider.request({
+      method: "eth_sendTransaction",
+      params: [compactTransaction(transaction)]
+    }));
+  } catch (error) {
+    if (walletErrorCode(error) === 4001) {
+      throw new Error(`${context.label} was rejected in the wallet.`);
+    }
+    throw new Error(`${context.label} failed on ${context.chainName}: ${formatErrorMessage(error, "wallet transaction failed")}`);
+  }
+}
+
+async function assertWalletBalance(provider: EthereumProvider, owner: string, token: PaymentToken, amountAtomic: string) {
+  const requiredAmount = BigInt(amountAtomic || "0");
+  const balance = token.native
+    ? BigInt(String(await provider.request({ method: "eth_getBalance", params: [owner, "latest"] })))
+    : await readErc20Balance(provider, token.address, owner);
+  if (balance < requiredAmount) {
+    throw new Error(`Insufficient ${token.symbol} balance. Required ${formatAtomicAmount(requiredAmount, token.decimals)} ${token.symbol}, available ${formatAtomicAmount(balance, token.decimals)} ${token.symbol}.`);
+  }
+}
+
+async function readErc20Balance(provider: EthereumProvider, tokenAddress: string, owner: string) {
+  const result = await provider.request({
+    method: "eth_call",
+    params: [{
+      to: tokenAddress,
+      data: `0x70a08231${encodeAddressWord(owner)}`
+    }, "latest"]
+  });
+  return BigInt(String(result || "0x0"));
+}
+
+async function waitForWalletReceipt(provider: EthereumProvider, txHash: string, timeoutMs = 60000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const receipt = await provider.request({
+      method: "eth_getTransactionReceipt",
+      params: [txHash]
+    }).catch(() => null);
+    if (receipt) {
+      return receipt;
+    }
+    await delay(3000);
+  }
+  return null;
+}
+
+async function ensureWalletNetwork(provider: EthereumProvider, chain: TransactionChainConfig) {
+  const currentChainId = await provider.request({ method: "eth_chainId" }).catch(() => "");
+  if (String(currentChainId).toLowerCase() === chain.hexChainId.toLowerCase()) {
+    return;
+  }
+  try {
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: chain.hexChainId }]
+    });
+  } catch (error) {
+    if (walletErrorCode(error) !== 4902) {
+      throw new Error(`Switch wallet to ${chain.name} to continue.`);
+    }
+    await provider.request({
+      method: "wallet_addEthereumChain",
+      params: [{
+        chainId: chain.hexChainId,
+        chainName: chain.name,
+        nativeCurrency: chain.nativeCurrency,
+        rpcUrls: chain.rpcUrls,
+        blockExplorerUrls: chain.blockExplorerUrls
+      }]
+    });
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: chain.hexChainId }]
+    });
+  }
+}
+
+function buildErc20TransferData(recipient: string, amountAtomic: string) {
+  const cleanRecipient = encodeAddressWord(recipient);
+  const cleanAmount = BigInt(amountAtomic || "0").toString(16).padStart(64, "0");
+  return `0xa9059cbb${cleanRecipient}${cleanAmount}`;
+}
+
+function encodeAddressWord(address: string) {
+  const cleanAddress = address.toLowerCase().replace(/^0x/, "");
+  if (!/^[0-9a-f]{40}$/.test(cleanAddress)) {
+    throw new Error("Invalid wallet address");
+  }
+  return cleanAddress.padStart(64, "0");
+}
+
+function formatAtomicAmount(amount: bigint, decimals: number) {
+  const divisor = 10n ** BigInt(decimals);
+  const whole = amount / divisor;
+  const fraction = amount % divisor;
+  if (fraction === 0n) {
+    return whole.toString();
+  }
+  const fractionText = fraction.toString().padStart(decimals, "0").replace(/0+$/, "");
+  return `${whole.toString()}.${fractionText}`;
+}
+
+function toRpcQuantity(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (typeof value === "string" && value.startsWith("0x")) {
+    return `0x${BigInt(value).toString(16)}`;
+  }
+  return `0x${BigInt(String(value)).toString(16)}`;
+}
+
+function compactTransaction(tx: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(tx).filter(([, value]) => value !== undefined && value !== null && value !== ""));
+}
+
+function isSuccessfulReceipt(receipt: unknown) {
+  if (!receipt || typeof receipt !== "object") {
+    return false;
+  }
+  const status = (receipt as { status?: unknown }).status;
+  if (typeof status === "string") {
+    return status.toLowerCase() === "0x1" || status === "1";
+  }
+  if (typeof status === "number") {
+    return status === 1;
+  }
+  if (typeof status === "boolean") {
+    return status;
+  }
+  return false;
+}
+
+function walletErrorCode(error: unknown) {
+  return typeof error === "object" && error && "code" in error ? Number((error as { code?: unknown }).code) : 0;
+}
+
+function formatErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "object" && error) {
+    const record = error as Record<string, unknown>;
+    const nested = record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : undefined;
+    return String(record.message || nested?.message || fallback);
+  }
+  return fallback;
+}
+
+function shortHash(value?: string) {
+  if (!value) {
+    return "";
+  }
+  return value.length > 14 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value;
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function parseOutroFocusArea(raw: string) {

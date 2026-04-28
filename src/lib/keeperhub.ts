@@ -74,7 +74,7 @@ export async function createKeeperPaymentIntent({
     };
   }
   if (!apiKey) {
-    throw new Error("KEEPERHUB_API_KEY is required when KEEPERHUB_MOCKS=false");
+    throw new Error("KEEPERHUB_API_KEY is required for live KeeperHub requests.");
   }
 
   const baseUrl = env("KEEPERHUB_BASE_URL", "https://app.keeperhub.com/api").replace(/\/$/, "");
@@ -158,7 +158,7 @@ export async function confirmKeeperPaymentSettlement({
   }
   const apiKey = env("KEEPERHUB_API_KEY");
   if (!apiKey) {
-    throw new Error("KEEPERHUB_API_KEY is required when KEEPERHUB_MOCKS=false");
+    throw new Error("KEEPERHUB_API_KEY is required for live KeeperHub requests.");
   }
   const workflowId = getKeeperHubPaymentWorkflowId(chainId);
   if (!workflowId) {
@@ -210,7 +210,7 @@ export async function executeKeeperRefund({
     };
   }
   if (!apiKey) {
-    throw new Error("KEEPERHUB_API_KEY is required when KEEPERHUB_MOCKS=false");
+    throw new Error("KEEPERHUB_API_KEY is required for live KeeperHub requests.");
   }
   const response = await fetch(`${env("KEEPERHUB_BASE_URL", "https://app.keeperhub.com/api").replace(/\/$/, "")}/execute/transfer`, {
     method: "POST",
@@ -261,7 +261,7 @@ export async function executeKeeperDistribution({
     };
   }
   if (!apiKey) {
-    throw new Error("KEEPERHUB_API_KEY is required when KEEPERHUB_MOCKS=false");
+    throw new Error("KEEPERHUB_API_KEY is required for live KeeperHub requests.");
   }
 
   const executionIds: string[] = [];

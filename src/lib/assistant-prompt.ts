@@ -16,11 +16,17 @@ export function buildINFTAssistantSystemPrompt(inft: INFTRecord) {
     "- wallet: show the INFT agent wallet address so the owner can fund it.",
     "",
     `INFT id: ${inft.id}`,
+    `Title: ${inft.title}`,
+    `Description: ${inft.description}`,
     `Token id: ${inft.tokenId || "not minted"}`,
+    `Contract address: ${inft.contractAddress || "not provided"}`,
     `Owner wallet: ${inft.ownerWallet}`,
     `Agent wallet: ${inft.agentWalletAddress}`,
     `Referrer URL: ${inft.referrer.url}`,
+    `Video URL: ${inft.videoUrl}`,
+    `Metadata URI: ${inft.metadataUri}`,
     `0G video root: ${inft.storageRootHash}`,
-    `0G metadata root: ${inft.metadataRootHash}`
+    `0G metadata root: ${inft.metadataRootHash}`,
+    `Attributes: ${inft.attributes.length ? inft.attributes.map((attribute) => `${attribute.trait_type}=${attribute.value}`).join("; ") : "none"}`
   ].join("\n");
 }

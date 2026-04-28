@@ -18,6 +18,12 @@ export type ProcessorAccountCookieSession = {
   username?: string;
   userId?: string;
   authToken?: string;
+  refreshToken?: string;
+  expiryDate?: string;
+  refreshTokenExpiresAt?: string;
+  appKeyHash?: string;
+  appKeyPrefix?: string;
+  appKeyLast4?: string;
   apiKey?: string;
   externalProvider?: string;
   externalUserId?: string;
@@ -61,6 +67,12 @@ export function processorSessionFromCustomer(
     username: patch.username || customer.samsarAccount?.username,
     userId: patch.userId || customer.samsarAccount?.userId,
     authToken: patch.authToken || customer.samsarAccount?.authToken,
+    refreshToken: patch.refreshToken || customer.samsarAccount?.refreshToken,
+    expiryDate: patch.expiryDate || customer.samsarAccount?.expiryDate,
+    refreshTokenExpiresAt: patch.refreshTokenExpiresAt || customer.samsarAccount?.refreshTokenExpiresAt,
+    appKeyHash: patch.appKeyHash || customer.samsarAccount?.appKeyHash,
+    appKeyPrefix: patch.appKeyPrefix || customer.samsarAccount?.appKeyPrefix,
+    appKeyLast4: patch.appKeyLast4 || customer.samsarAccount?.appKeyLast4,
     apiKey: patch.apiKey || customer.samsarAccount?.apiKey,
     externalProvider: patch.externalProvider || customer.samsarAccount?.externalProvider,
     externalUserId: patch.externalUserId || customer.samsarAccount?.externalUserId,
@@ -89,6 +101,17 @@ export function readProcessorAccountSessionCookie(cookieHeader: string | null | 
 
 export function readPendingCreditCheckoutCookie(cookieHeader: string | null | undefined) {
   return decryptCookie<PendingCreditCheckoutCookie>(cookieHeader, PENDING_CREDIT_CHECKOUT_COOKIE);
+}
+
+export function processorAuthTokenFromRequest(request: Request) {
+  const authHeader = request.headers.get("authorization") || "";
+  const bearerToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+  return (
+    bearerToken ||
+    request.headers.get("x-samsar-auth-token")?.trim() ||
+    request.headers.get("x-superreferrals-auth-token")?.trim() ||
+    ""
+  );
 }
 
 export function setProcessorAccountSessionCookie(response: NextResponse, session: ProcessorAccountCookieSession | undefined) {
@@ -189,7 +212,6 @@ function sessionSecret() {
     env("AUTH_SECRET") ||
     env("NEXTAUTH_SECRET") ||
     env("SAMSAR_WEBHOOK_SECRET") ||
-    env("SAMSAR_API_KEY") ||
     "superreferrals-local-development-session-secret";
 }
 

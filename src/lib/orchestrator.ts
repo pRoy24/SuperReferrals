@@ -22,8 +22,16 @@ import {
   type PaymentToken
 } from "./payment-tokens";
 import { verifyRenderPaymentTransaction } from "./payment-verification";
-import { assertRenderConditions, countImages, priceGeneration, refundAmountForFailure } from "./pricing";
+import {
+  assertRenderConditions,
+  countImages,
+  normalizeINFTPaidAction,
+  priceGeneration,
+  priceINFTAction,
+  refundAmountForFailure
+} from "./pricing";
 import { assertStorefrontRenderAccess, assertStorefrontWalletAllowed } from "./storefront-access";
+import { hasStoredSamsarAppKey, samsarAppClientCredentials } from "./samsar-app-credentials";
 import {
   addGeneration,
   addINFT,
@@ -39,15 +47,17 @@ import {
 } from "./store";
 import {
   createExternalImageListVideo,
-  ensureExternalUserSession,
   fetchLatestVideoUrl,
   getSamsarStatus,
-  grantExternalUserCredits,
   normalizeSamsarVideoSessionId,
   publishSamsarSessionPublication,
   runSamsarSessionAction
 } from "./samsar";
-import { fetchSamsarProcessorCredits } from "./samsar-processor";
+import {
+  fetchSamsarProcessorCredits,
+  provisionSamsarProcessorAppKeyIfMissing,
+  verifySamsarProcessorAuthToken
+} from "./samsar-processor";
 import { createUniswapQuote } from "./uniswap";
 import { assertUsableEvmAddress, isUsableEvmAddress } from "./wallet-address";
 import { buildZeroGStorageGatewayUrl, persistJsonToZeroG, persistRemoteVideoToZeroG } from "./zero-g";
@@ -59,6 +69,7 @@ import type {
   Generation,
   GenerationInput,
   GenerationPayment,
+  INFTPaidAction,
   INFTAttribute,
   INFTRecord,
   PaymentQuote,
@@ -84,28 +95,42 @@ export async function restoreProcessorAccountSession(session?: ProcessorAccountC
     return undefined;
   }
   let creditsRemaining = Number(session.creditsRemaining || 0);
-  if (session.authToken) {
+  const store = await readStore();
+  const existing = findProcessorSessionCustomer(store.customers, session);
+  let existingCredential: string | ReturnType<typeof samsarAppClientCredentials> | undefined = session.authToken;
+  if (existing && hasStoredSamsarAppKey(existing)) {
     try {
-      const credits = await fetchSamsarProcessorCredits(session.authToken);
+      existingCredential = samsarAppClientCredentials(existing);
+    } catch {
+      existingCredential = session.authToken;
+    }
+  }
+  if (existingCredential) {
+    try {
+      const credits = await fetchSamsarProcessorCredits(existingCredential);
       creditsRemaining = credits.remainingCredits;
     } catch {
       // Keep the last known balance so the browser session can still restore.
     }
   }
-  const store = await readStore();
-  const existing = findProcessorSessionCustomer(store.customers, session);
   const existingOwnerWallet = isUsableEvmAddress(existing?.ownerWallet) ? existing?.ownerWallet : undefined;
-  return mutateStore((mutableStore) => upsertCustomer(mutableStore, {
+  const restored = await mutateStore((mutableStore) => upsertCustomer(mutableStore, {
     id: existing?.id || session.customerId,
     name: existing?.name || session.customerName || session.username || session.email.split("@")[0] || "SuperReferrals Account",
     ownerWallet: existingOwnerWallet || session.ownerWallet || session.walletAddress,
-    samsarApiKeyAlias: session.apiKey ? "samsar-user-api-key" : existing?.samsarApiKeyAlias,
+    samsarApiKeyAlias: existing?.samsarApiKeyAlias || (session.appKeyHash ? "samsar-user-app-key" : session.apiKey ? "samsar-user-api-key" : undefined),
     samsarAccount: {
       ...(existing?.samsarAccount || {}),
       email: session.email,
       username: session.username || existing?.samsarAccount?.username,
       userId: session.userId || existing?.samsarAccount?.userId,
       authToken: session.authToken || existing?.samsarAccount?.authToken,
+      refreshToken: session.refreshToken || existing?.samsarAccount?.refreshToken,
+      expiryDate: session.expiryDate || existing?.samsarAccount?.expiryDate,
+      refreshTokenExpiresAt: session.refreshTokenExpiresAt || existing?.samsarAccount?.refreshTokenExpiresAt,
+      appKeyHash: existing?.samsarAccount?.appKeyHash || session.appKeyHash,
+      appKeyPrefix: existing?.samsarAccount?.appKeyPrefix || session.appKeyPrefix,
+      appKeyLast4: existing?.samsarAccount?.appKeyLast4 || session.appKeyLast4,
       apiKey: session.apiKey || existing?.samsarAccount?.apiKey,
       externalProvider: session.externalProvider || existing?.samsarAccount?.externalProvider,
       externalUserId: session.externalUserId || existing?.samsarAccount?.externalUserId,
@@ -121,6 +146,41 @@ export async function restoreProcessorAccountSession(session?: ProcessorAccountC
       creditsRemaining
     }
   }));
+  const appKey = await provisionSamsarProcessorAppKeyIfMissing(restored, session.authToken);
+  if (!appKey) {
+    return restored;
+  }
+  return mutateStore((mutableStore) => upsertCustomer(mutableStore, {
+    id: restored.id,
+    samsarApiKeyAlias: "samsar-user-app-key",
+    samsarAccount: {
+      ...(restored.samsarAccount || {}),
+      ...appKey,
+      updatedAt: nowIso()
+    },
+    subscription: restored.subscription
+  }));
+}
+
+export async function restoreProcessorAuthTokenSession(authToken?: string) {
+  const cleanAuthToken = authToken?.trim();
+  if (!cleanAuthToken) {
+    return undefined;
+  }
+  const session = await verifySamsarProcessorAuthToken(cleanAuthToken);
+  return restoreProcessorAccountSession({
+    customerId: session.userId || createId("cus"),
+    email: session.email,
+    username: session.username,
+    userId: session.userId,
+    authToken: session.authToken,
+    refreshToken: session.refreshToken,
+    expiryDate: session.expiryDate,
+    refreshTokenExpiresAt: session.refreshTokenExpiresAt,
+    apiKey: session.apiKey,
+    creditsRemaining: session.creditsRemaining,
+    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+  });
 }
 
 export async function createOrUpdateCustomer(input: Partial<Customer> & { createNewStorefront?: boolean }) {
@@ -270,7 +330,10 @@ async function createZeroGUserRegistration(customer: Customer, account: SubAccou
 export async function quotePayment(input: {
   customerId: string;
   subAccountId?: string;
-  imageCount: number;
+  inftId?: string;
+  action?: string;
+  operation?: string;
+  imageCount?: number;
   durationSeconds?: number;
   videoModel?: VideoModel;
   aspectRatio?: VideoAspectRatio;
@@ -287,30 +350,45 @@ export async function quotePayment(input: {
   if (!customer) {
     throw new Error("customerId was not found");
   }
-  assertCustomerRenderServiceReady(customer);
-  if (!input.imageCount || input.imageCount < 1) {
-    throw new Error("imageCount must be greater than zero");
+  await ensureCustomerSamsarAppCredentials(customer);
+  const inftAction = normalizeINFTPaidAction(input.action || input.operation || "");
+  const quoteINFT = input.inftId
+    ? store.infts.find((item) => item.id === input.inftId && item.customerId === customer.id)
+    : undefined;
+  if (input.inftId && !quoteINFT) {
+    throw new Error("INFT does not belong to this storefront.");
+  }
+  if ((input.inftId || input.action || input.operation) && !inftAction) {
+    throw new Error("Unsupported paid INFT action.");
   }
   const quoteSubAccount = input.subAccountId
     ? store.subAccounts.find((item) => item.id === input.subAccountId && item.customerId === customer.id)
     : undefined;
-  const quoteWallet = quoteSubAccount?.wallet || input.swapper;
+  const quoteWallet = input.swapper || quoteSubAccount?.wallet;
   if (!isUsableEvmAddress(quoteWallet)) {
-    throw new Error("Connect a valid wallet before requesting a render quote.");
+    throw new Error("Connect a valid wallet before requesting a payment quote.");
   }
   assertStorefrontRenderAccess(customer, store, {
     wallet: quoteWallet
   });
-  assertRenderConditions(customer, {
-    imageCount: input.imageCount,
-    videoModel: input.videoModel,
-    aspectRatio: input.aspectRatio
-  });
-  const pricing = priceGeneration(customer, input.imageCount, {
-    video_model: input.videoModel,
-    aspect_ratio: input.aspectRatio,
-    duration_seconds: input.durationSeconds
-  });
+  const imageCount = Number(input.imageCount || 0);
+  const pricing = inftAction
+    ? priceINFTAction(customer, inftAction)
+    : (() => {
+      if (!imageCount || imageCount < 1) {
+        throw new Error("imageCount must be greater than zero");
+      }
+      assertRenderConditions(customer, {
+        imageCount,
+        videoModel: input.videoModel,
+        aspectRatio: input.aspectRatio
+      });
+      return priceGeneration(customer, imageCount, {
+        video_model: input.videoModel,
+        aspect_ratio: input.aspectRatio,
+        duration_seconds: input.durationSeconds
+      });
+    })();
   const chainId = normalizeTransactionChainIdForEnvironment(customer.pricing.chainId || getTransactionChainId());
   if (input.chainId && input.chainId !== chainId) {
     throw new Error(`Payment chain must match the customer account chain ${getTransactionChainConfig(chainId).name}.`);
@@ -389,7 +467,9 @@ export async function quotePayment(input: {
       settlementTokenAddress: settlementToken.address,
       settlementAmountAtomic,
       chainId,
-      reason: `SuperReferrals quote for ${pricing.durationSeconds} second render`
+      reason: inftAction
+        ? `SuperReferrals INFT ${inftAction.replaceAll("_", " ")} action`
+        : `SuperReferrals quote for ${pricing.durationSeconds} second render`
     })
     : undefined;
   const route = paymentRail === "keeperhub"
@@ -412,8 +492,10 @@ export async function quotePayment(input: {
   const quote: PaymentQuote = {
     id: createId("quote"),
     customerId: customer.id,
-    subAccountId: input.subAccountId,
-    imageCount: input.imageCount,
+    subAccountId: input.subAccountId || quoteINFT?.subAccountId,
+    inftId: quoteINFT?.id,
+    operation: inftAction || undefined,
+    imageCount,
     durationSeconds: pricing.durationSeconds,
     amountUsd: pricing.amountUsd,
     platformFeeUsd: pricing.platformFeeUsd,
@@ -535,8 +617,7 @@ export async function createGeneration(input: {
   if (!customer) {
     throw new Error("customerId was not found");
   }
-  assertCustomerRenderServiceReady(customer);
-  const samsarApiKey = customerSamsarApiKey(customer);
+  const customerCredentials = await ensureCustomerSamsarAppCredentials(customer);
 
   let subAccount = input.subAccountId
     ? store.subAccounts.find((item) => item.id === input.subAccountId && item.customerId === customer.id)
@@ -693,46 +774,20 @@ export async function createGeneration(input: {
 
   try {
     assertPaidRenderProviderCanFulfill(paymentConfirmation.status);
-    const renderSubAccount = await ensurePaidRenderExternalUserSession(subAccount, samsarApiKey);
-    const samsarCreditGrant = await grantExternalUserCredits({
-      externalUser: renderSubAccount.externalUser,
-      externalApiKey: renderSubAccount.externalApiKey,
-      apiKey: samsarApiKey,
-      credits: renderCreditsForPricedGeneration(priced),
-      metadata: {
-        generationId,
-        customerId: customer.id,
-        subAccountId: renderSubAccount.id,
-        quoteId: payment.quoteId,
-        txHash: payment.txHash,
-        paymentRail: payment.paymentRail,
-        paymentTokenSymbol: payment.tokenSymbol,
-        settlementTokenSymbol: payment.settlementTokenSymbol,
-        amountUsd: payment.amountUsd,
-        durationSeconds: priced.durationSeconds,
-        videoModel: generation.input.video_model,
-        aspectRatio: generation.input.aspect_ratio
-      }
-    });
-    const paymentWithCreditGrant = {
-      ...payment,
-      samsarCreditGrant
-    };
-    await mutateStore((mutableStore) => updateGeneration(mutableStore, generationId, {
-      payment: paymentWithCreditGrant
-    }));
     const response = await createExternalImageListVideo({
-      externalUser: renderSubAccount.externalUser,
-      externalApiKey: renderSubAccount.externalApiKey,
+      ...customerCredentials,
       input: generation.input,
-      apiKey: samsarApiKey,
       generationId
     });
+    const remainingCredits = firstNumber(response.raw, ["remainingCredits", "remaining_credits", "creditsRemaining"]);
+    if (remainingCredits !== null) {
+      await updateCustomerSamsarCreditBalance(customer.id, remainingCredits);
+    }
     return mutateStore((mutableStore) => updateGeneration(mutableStore, generationId, {
       status: "PROCESSING",
       samsarRequestId: response.requestId,
       samsarSessionId: response.sessionId,
-      payment: paymentWithCreditGrant
+      payment
     }));
   } catch (error) {
     await mutateStore((mutableStore) => updateGeneration(mutableStore, generationId, {
@@ -747,63 +802,7 @@ function assertPaidRenderProviderCanFulfill(paymentStatus: GenerationPayment["st
   if (paymentStatus === "mock_confirmed" || !isProviderMock("SAMSAR")) {
     return;
   }
-  throw new Error("SAMSAR_MOCKS must be false before accepting real render payments. The paid render was not submitted to Samsar.");
-}
-
-async function ensurePaidRenderExternalUserSession(subAccount: SubAccount, samsarApiKey?: string) {
-  if (hasUsableStoredExternalApiKey(subAccount.externalApiKey)) {
-    return subAccount;
-  }
-  const session = await ensureExternalUserSession(subAccount.externalUser, samsarApiKey);
-  const externalApiKey = session.externalApiKey || subAccount.externalApiKey;
-  if (!externalApiKey) {
-    throw new Error("Samsar external user session did not return an API key for this wallet.");
-  }
-  const updatedSubAccount = await mutateStore((mutableStore) => {
-    const current = mutableStore.subAccounts.find((item) => item.id === subAccount.id);
-    if (!current) {
-      throw new Error("Wallet user record was not found while preparing render authentication.");
-    }
-    current.externalApiKey = externalApiKey;
-    current.updatedAt = nowIso();
-    return current;
-  });
-  if (!updatedSubAccount) {
-    throw new Error("Wallet user record was not found while preparing render authentication.");
-  }
-  return updatedSubAccount;
-}
-
-function hasUsableStoredExternalApiKey(externalApiKey?: string) {
-  if (!externalApiKey) {
-    return false;
-  }
-  return isProviderMock("SAMSAR") || !externalApiKey.startsWith("mock_");
-}
-
-function renderCreditsForPricedGeneration(priced: ReturnType<typeof priceGeneration>) {
-  const modelCredits = Number(priced.durationSeconds) * Number(priced.baseCreditsPerSecond);
-  if (Number.isFinite(modelCredits) && modelCredits > 0) {
-    return Math.ceil(modelCredits);
-  }
-  const creditUnitUsd = Number(priced.creditUnitUsd);
-  if (Number.isFinite(creditUnitUsd) && creditUnitUsd > 0) {
-    return Math.ceil(Number(priced.amountUsd || 0) / creditUnitUsd);
-  }
-  return 1;
-}
-
-function paidRenderStatusContext(generation: Generation, subAccount: SubAccount): {
-  externalUser?: SubAccount["externalUser"];
-  externalApiKey?: string;
-} {
-  if (!generation.payment?.samsarCreditGrant && !hasUsableStoredExternalApiKey(subAccount.externalApiKey)) {
-    return {};
-  }
-  return {
-    externalUser: subAccount.externalUser,
-    externalApiKey: subAccount.externalApiKey
-  };
+  throw new Error("SUPERREFERRALS_MOCKS must be false before accepting real render payments. The paid render was not submitted to Samsar.");
 }
 
 export async function syncGeneration(id: string) {
@@ -817,7 +816,7 @@ export async function syncGeneration(id: string) {
   if (!customer || !subAccount) {
     throw new Error("generation is missing customer or sub-account");
   }
-  const samsarApiKey = customerSamsarApiKey(customer);
+  const samsarCredential = await ensureCustomerSamsarAppCredentials(customer);
 
   if (shouldRetryStoredResultFinalization(generation)) {
     try {
@@ -832,14 +831,8 @@ export async function syncGeneration(id: string) {
     return generation;
   }
   let status: Record<string, unknown>;
-  const statusContext = paidRenderStatusContext(generation, subAccount);
   try {
-    status = await getSamsarStatus(
-      requestId,
-      statusContext.externalUser,
-      statusContext.externalApiKey,
-      samsarApiKey
-    );
+    status = await getSamsarStatus(requestId, undefined, undefined, samsarCredential);
   } catch (error) {
     if (generation.resultUrl) {
       try {
@@ -867,7 +860,7 @@ export async function syncGeneration(id: string) {
         }));
       }
       try {
-        resultUrl = await fetchLatestVideoUrl(fallbackSessionId, samsarApiKey);
+        resultUrl = await fetchLatestVideoUrl(fallbackSessionId, samsarCredential);
       } catch (error) {
         return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
           status: "PROCESSING",
@@ -1212,7 +1205,6 @@ async function publishGenerationToSamsarGalleryIfNeeded(
       prompt: generation.input.prompt,
       language: generation.input.language,
       customer,
-      externalApiKey: hasUsableStoredExternalApiKey(subAccount.externalApiKey) ? subAccount.externalApiKey : undefined,
       idempotencyKey: `superreferrals:${generation.id}:samsar-publication`
     });
     return {
@@ -1248,36 +1240,22 @@ async function publishGenerationSamsarPublication(input: {
   prompt?: string;
   language?: string;
   customer: Customer;
-  externalApiKey?: string;
   idempotencyKey: string;
 }) {
-  const credentials = uniqueCleanStrings([
-    ...customerSamsarPublicationCredentials(input.customer),
-    input.externalApiKey
-  ]);
-  const attempts = credentials.length ? credentials : [undefined];
-  let lastError: unknown;
-  for (const apiKey of attempts) {
-    try {
-      return await publishSamsarSessionPublication({
-        sessionId: input.sessionId,
-        title: input.title,
-        description: input.description,
-        tags: input.tags,
-        creatorHandle: input.creatorHandle,
-        aspectRatio: input.aspectRatio,
-        videoModel: input.videoModel,
-        prompt: input.prompt,
-        language: input.language,
-        apiKey,
-        externalApiKey: input.externalApiKey,
-        idempotencyKey: input.idempotencyKey
-      });
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error("Unable to publish Samsar publication");
+  const credential = await ensureCustomerSamsarAppCredentials(input.customer);
+  return publishSamsarSessionPublication({
+    sessionId: input.sessionId,
+    title: input.title,
+    description: input.description,
+    tags: input.tags,
+    creatorHandle: input.creatorHandle,
+    aspectRatio: input.aspectRatio,
+    videoModel: input.videoModel,
+    prompt: input.prompt,
+    language: input.language,
+    ...credential,
+    idempotencyKey: input.idempotencyKey
+  });
 }
 
 async function saveGenerationFinalizationProgress(
@@ -1430,20 +1408,27 @@ export async function runINFTAction(id: string, action: string, payload: Record<
     throw new Error("INFT generation was not found in the local runtime store. The public view can be recovered from 0G/onchain metadata, but video mutation actions need the live generation session index.");
   }
   const customer = store.customers.find((item) => item.id === generation.customerId);
-  const samsarApiKey = customer ? customerSamsarApiKey(customer) : undefined;
-
+  if (!customer) {
+    throw new Error("INFT storefront customer was not found.");
+  }
   if (action === "action_status") {
     const requestId = String(payload.requestId || payload.request_id || payload.sessionId || payload.session_id || "");
     if (!requestId) {
       throw new Error("requestId is required");
     }
-    const status = await getSamsarStatus(requestId, undefined, undefined, samsarApiKey);
+    const statusContext = await ensureCustomerSamsarActionSession(customer);
+    const status = await getSamsarStatus(
+      requestId,
+      undefined,
+      undefined,
+      statusContext
+    );
     const normalizedStatus = String(status.status || "").toUpperCase();
     let resultUrl = extractSamsarResultUrl(status);
     if (!resultUrl && normalizedStatus === "COMPLETED") {
       const fallbackSessionId = firstInternalSamsarSessionId(extractSamsarInternalSessionId(status), requestId);
       if (fallbackSessionId) {
-        resultUrl = await fetchLatestVideoUrl(fallbackSessionId, samsarApiKey).catch(() => "");
+        resultUrl = await fetchLatestVideoUrl(fallbackSessionId, statusContext).catch(() => "");
       }
     }
     return {
@@ -1488,7 +1473,13 @@ export async function runINFTAction(id: string, action: string, payload: Record<
         updateInput.outro_focust_area = outroFocusArea;
       }
     }
-    return runSamsarSessionAction("update_outro", updateInput, samsarApiKey);
+    return runPaidINFTSamsarAction({
+      inft,
+      customer,
+      action: "update_outro",
+      actionInput: updateInput,
+      paymentPayload: paymentPayloadFromINFTAction(payload)
+    });
   }
 
   if (action === "add_outro") {
@@ -1500,7 +1491,11 @@ export async function runINFTAction(id: string, action: string, payload: Record<
     if (!outroImageUrl) {
       throw new Error("outroImageUrl is required");
     }
-    return runSamsarSessionAction("add_outro", {
+    return runPaidINFTSamsarAction({
+      inft,
+      customer,
+      action: "add_outro",
+      actionInput: {
       videoSessionId,
       outro_image_url: outroImageUrl,
       add_outro_animation: typeof payload.add_outro_animation === "boolean"
@@ -1508,7 +1503,9 @@ export async function runINFTAction(id: string, action: string, payload: Record<
         : payload.addOutroAnimation !== false,
       add_outro_focus_area: payload.addOutroFocusArea === true || payload.add_outro_focus_area === true,
       outro_focust_area: payload.outroFocusArea || payload.outro_focus_area || payload.outroFocustArea || payload.outro_focust_area
-    }, samsarApiKey);
+      },
+      paymentPayload: paymentPayloadFromINFTAction(payload)
+    });
   }
 
   if (action === "cancel_render") {
@@ -1516,9 +1513,10 @@ export async function runINFTAction(id: string, action: string, payload: Record<
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
+    const samsarSession = await ensureCustomerSamsarActionSession(customer);
     return runSamsarSessionAction("cancel_render", {
       videoSessionId
-    }, samsarApiKey);
+    }, samsarSession);
   }
 
   if (action === "translate") {
@@ -1526,10 +1524,16 @@ export async function runINFTAction(id: string, action: string, payload: Record<
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
-    return runSamsarSessionAction("translate", {
+    return runPaidINFTSamsarAction({
+      inft,
+      customer,
+      action: "translate",
+      actionInput: {
       videoSessionId,
       language: payload.language || "es"
-    }, samsarApiKey);
+      },
+      paymentPayload: paymentPayloadFromINFTAction(payload)
+    });
   }
 
   if (action === "join") {
@@ -1541,10 +1545,16 @@ export async function runINFTAction(id: string, action: string, payload: Record<
       videoSessionId,
       normalizeSamsarVideoSessionId(payload.sessionId || payload.session_id)
     ].filter(Boolean);
-    return runSamsarSessionAction("join", {
+    return runPaidINFTSamsarAction({
+      inft,
+      customer,
+      action: "join",
+      actionInput: {
       session_ids: sessionIds,
       blend_scenes: payload.blendScenes === true || payload.blend_scenes === true
-    }, samsarApiKey);
+      },
+      paymentPayload: paymentPayloadFromINFTAction(payload)
+    });
   }
 
   if (action === "remove_subtitles") {
@@ -1552,12 +1562,211 @@ export async function runINFTAction(id: string, action: string, payload: Record<
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
-    return runSamsarSessionAction("remove_subtitles", {
+    return runPaidINFTSamsarAction({
+      inft,
+      customer,
+      action: "remove_subtitles",
+      actionInput: {
       videoSessionId
-    }, samsarApiKey);
+      },
+      paymentPayload: paymentPayloadFromINFTAction(payload)
+    });
   }
 
   throw new Error(`Unsupported INFT action: ${action}`);
+}
+
+function paymentPayloadFromINFTAction(payload: Record<string, unknown>) {
+  return isRecord(payload.payment) ? payload.payment : payload;
+}
+
+async function runPaidINFTSamsarAction({
+  inft,
+  customer,
+  action,
+  actionInput,
+  paymentPayload
+}: {
+  inft: INFTRecord;
+  customer: Customer;
+  action: INFTPaidAction;
+  actionInput: Record<string, unknown>;
+  paymentPayload: Record<string, unknown>;
+}) {
+  const payment = await confirmINFTActionPayment({
+    inft,
+    customer,
+    action,
+    paymentPayload
+  });
+  if (payment.status === "pending") {
+    return {
+      status: "PAYMENT_PENDING",
+      action,
+      payment
+    };
+  }
+
+  assertPaidRenderProviderCanFulfill(payment.status);
+  const samsarSession = await ensureCustomerSamsarActionSession(customer);
+  const result = await runSamsarSessionAction(action, actionInput, {
+    appKey: samsarSession.appKey,
+    appSecret: samsarSession.appSecret,
+    idempotencyKey: `superreferrals:${inft.id}:${action}:${payment.quoteId || payment.txHash || "paid"}`
+  });
+  const remainingCredits = actionCreditsRemaining(result);
+  if (remainingCredits !== null) {
+    await updateCustomerSamsarCreditBalance(customer.id, remainingCredits);
+  }
+  return {
+    ...result,
+    action,
+    payment
+  };
+}
+
+async function confirmINFTActionPayment({
+  inft,
+  customer,
+  action,
+  paymentPayload
+}: {
+  inft: INFTRecord;
+  customer: Customer;
+  action: INFTPaidAction;
+  paymentPayload: Record<string, unknown>;
+}) {
+  const store = await readStore();
+  const quoteId = firstString(paymentPayload, ["quoteId", "quote_id"]);
+  const quote = quoteId ? store.quotes.find((item) => item.id === quoteId) : undefined;
+  if (!quote) {
+    throw new Error("Create and pay an INFT action quote before running this operation.");
+  }
+  if (quote.customerId !== customer.id || quote.inftId !== inft.id || quote.operation !== action) {
+    throw new Error("Payment quote does not match this INFT operation.");
+  }
+  const paymentChainId = normalizeTransactionChainIdForEnvironment(customer.pricing.chainId || quote.chainId || getTransactionChainId());
+  const expectedSettlementToken =
+    findPaymentToken(quote.settlementTokenAddress || customer.pricing.settlementTokenAddress || "", paymentChainId) ||
+    settlementTokenForCurrency(quote.settlementCurrency || customer.pricing.currency, paymentChainId);
+  if (!expectedSettlementToken) {
+    throw new Error("Unable to resolve INFT action settlement token for payment verification");
+  }
+  const expectedPaymentToken =
+    findPaymentToken(quote.paymentTokenAddress || firstString(paymentPayload, ["tokenAddress", "token_address"]) || "", paymentChainId) ||
+    expectedSettlementToken;
+  const expectedPaymentAmountAtomic = quote.paymentAmountAtomic ||
+    quote.settlementAmountAtomic ||
+    amountToAtomic(quote.totalUsd, expectedPaymentToken.decimals);
+  const expectedPaymentRecipient = assertUsableEvmAddress(
+    quote.paymentRecipientAddress || resolveRenderPaymentRecipientWallet(customer),
+    "Payment recipient wallet"
+  );
+  const payerWallet = assertUsableEvmAddress(
+    firstString(paymentPayload, ["payerWallet", "payer_wallet"]) || inft.ownerWallet,
+    "Action payer wallet"
+  );
+  const paymentRail = (firstString(paymentPayload, ["paymentRail", "payment_rail"]) || quote.paymentRail || "keeperhub") as GenerationPayment["paymentRail"];
+  const paymentConfirmation = await resolvePaymentConfirmation({
+    paymentRail,
+    txHash: firstString(paymentPayload, ["txHash", "tx_hash"]),
+    route: quote.route,
+    expectedPayment: {
+      chainId: paymentChainId,
+      payerWallet,
+      recipientWallet: expectedPaymentRecipient,
+      tokenAddress: expectedPaymentToken.address,
+      amountAtomic: expectedPaymentAmountAtomic
+    }
+  });
+  const keeperSettlement = paymentConfirmation.status === "confirmed" && shouldRunKeeperSettlement({
+    paymentRail,
+    quote,
+    expectedPaymentToken,
+    expectedSettlementToken,
+    expectedPaymentRecipient,
+    customer
+  })
+    ? await confirmKeeperPaymentSettlement({
+      payerAddress: payerWallet,
+      recipientAddress: resolveRenderPaymentRecipientWallet(customer),
+      amount: quote.totalUsd.toFixed(2),
+      amountUsd: quote.totalUsd,
+      paymentAmountAtomic: expectedPaymentAmountAtomic,
+      paymentRecipientAddress: expectedPaymentRecipient,
+      paymentTxHash: paymentConfirmation.txHash,
+      tokenAddress: expectedPaymentToken.address,
+      settlementTokenAddress: expectedSettlementToken.address,
+      settlementAmountAtomic: quote.settlementAmountAtomic || amountToAtomic(quote.totalUsd, expectedSettlementToken.decimals),
+      chainId: paymentChainId,
+      quoteId: quote.id,
+      generationId: inft.generationId,
+      reason: `Settle SuperReferrals INFT ${action.replaceAll("_", " ")} action`,
+      metadata: {
+        verification: paymentConfirmation.verification,
+        customerId: customer.id,
+        subAccountId: inft.subAccountId,
+        inftId: inft.id,
+        action
+      }
+    })
+    : undefined;
+  const keeperExecutionId = paymentConfirmation.keeperExecutionId ||
+    firstString(isRecord(keeperSettlement) ? keeperSettlement : undefined, ["executionId", "execution_id", "id", "runId"]);
+  return {
+    amountUsd: quote.totalUsd,
+    payerWallet,
+    txHash: firstString(paymentPayload, ["txHash", "tx_hash"]) || paymentConfirmation.txHash,
+    quoteId: quote.id,
+    tokenAddress: expectedPaymentToken.address,
+    tokenSymbol: quote.paymentCurrency || expectedPaymentToken.symbol,
+    paymentAmountAtomic: expectedPaymentAmountAtomic,
+    settlementTokenAddress: expectedSettlementToken.address,
+    settlementTokenSymbol: quote.settlementCurrency || customer.pricing.currency || expectedSettlementToken.symbol,
+    settlementAmountAtomic: quote.settlementAmountAtomic || amountToAtomic(quote.totalUsd, expectedSettlementToken.decimals),
+    paymentRail,
+    chainId: paymentChainId,
+    status: paymentConfirmation.status,
+    keeperExecutionId,
+    route: keeperSettlement
+      ? {
+        ...(isRecord(quote.route) ? quote.route : { route: quote.route }),
+        keeperSettlement
+      }
+      : quote.route,
+    verification: paymentConfirmation.verification
+  } satisfies GenerationPayment;
+}
+
+async function ensureCustomerSamsarActionSession(customer: Customer): Promise<{
+  appKey?: string;
+  appSecret?: string;
+}> {
+  return ensureCustomerSamsarAppCredentials(customer);
+}
+
+async function updateCustomerSamsarCreditBalance(customerId: string, creditsRemaining: number) {
+  return mutateStore((mutableStore) => {
+    const current = mutableStore.customers.find((item) => item.id === customerId);
+    if (!current) {
+      return null;
+    }
+    current.subscription = {
+      ...(current.subscription || { status: "not_started" }),
+      status: creditsRemaining > 0 ? "active" : "not_started",
+      creditsRemaining
+    };
+    current.samsarAccount = {
+      ...(current.samsarAccount || {}),
+      updatedAt: nowIso()
+    };
+    current.updatedAt = nowIso();
+    return current;
+  });
+}
+
+function actionCreditsRemaining(result: Record<string, unknown>) {
+  return firstNumber(result, ["remainingCredits", "remaining_credits", "creditsRemaining"]);
 }
 
 function resolveGenerationVideoSessionId(generation: Pick<Generation, "samsarRequestId" | "samsarSessionId">) {
@@ -1725,48 +1934,59 @@ function assertReachableUrlShape(rawUrl: string, label: string) {
   }
 }
 
-function customerSamsarApiKey(customer: Customer) {
-  return env("SAMSAR_API_KEY") || customer.samsarAccount?.apiKey || undefined;
+function customerSamsarAuthToken(customer: Customer) {
+  const authToken = customer.samsarAccount?.authToken?.trim();
+  return authToken || undefined;
 }
 
-function customerSamsarPublicationCredentials(customer: Customer) {
-  return uniqueCleanStrings([
-    customer.samsarAccount?.apiKey,
-    customer.samsarAccount?.authToken,
-    customerSamsarApiKey(customer)
-  ]);
+function customerSamsarAppCredentials(customer: Customer) {
+  return hasStoredSamsarAppKey(customer) ? samsarAppClientCredentials(customer) : {};
 }
 
-function uniqueCleanStrings(values: Array<string | undefined>) {
-  const seen = new Set<string>();
-  const cleanValues: string[] = [];
-  for (const value of values) {
-    const clean = value?.trim();
-    if (!clean || seen.has(clean)) {
-      continue;
-    }
-    seen.add(clean);
-    cleanValues.push(clean);
+async function ensureCustomerSamsarAppCredentials(customer: Customer): Promise<{
+  appKey?: string;
+  appSecret?: string;
+}> {
+  if (isProviderMock("SAMSAR")) {
+    return {};
   }
-  return cleanValues;
+
+  const existingCredentials = customerSamsarAppCredentials(customer);
+  if (existingCredentials.appKey) {
+    return existingCredentials;
+  }
+
+  const provisioned = await provisionSamsarProcessorAppKeyIfMissing(customer, customerSamsarAuthToken(customer));
+  if (!provisioned) {
+    throw new Error("Connect a Samsar account before running storefront video operations. Storefront operations require a generated APP_KEY and APP_SECRET.");
+  }
+
+  const updated = await mutateStore((mutableStore) => upsertCustomer(mutableStore, {
+    id: customer.id,
+    samsarApiKeyAlias: "samsar-user-app-key",
+    samsarAccount: {
+      ...(customer.samsarAccount || {}),
+      ...provisioned,
+      updatedAt: nowIso()
+    },
+    subscription: customer.subscription
+  }));
+  const credentials = customerSamsarAppCredentials(updated);
+  if (!credentials.appKey || !credentials.appSecret) {
+    throw new Error("Stored Samsar APP_KEY could not be loaded for storefront video operations.");
+  }
+  return credentials;
 }
 
 function assertCustomerProcessorReady(customer: Customer) {
   const hasProcessorAccountSession = Boolean(
+    customer.samsarAccount?.appKeyHash ||
     customer.samsarAccount?.authToken ||
-    customer.samsarAccount?.apiKey ||
-    (customer.samsarAccount?.externalUserId && env("SAMSAR_API_KEY"))
+    customer.samsarAccount?.apiKey
   );
   if (!hasProcessorAccountSession || Number(customer.subscription.creditsRemaining || 0) <= 0) {
     throw new Error("Sign in to a credited SuperReferrals account before using storefront setup.");
   }
-}
-
-function assertCustomerRenderServiceReady(customer: Customer) {
-  if (isProviderMock("SAMSAR") || customerSamsarApiKey(customer)) {
-    return;
-  }
-  throw new Error("Video render service is not configured. Set SAMSAR_API_KEY or connect a Samsar API key before accepting wallet-paid renders.");
 }
 
 function resolveRenderPaymentRecipientWallet(customer: Customer) {
@@ -1887,6 +2107,23 @@ function firstString(record: Record<string, unknown> | undefined, keys: string[]
     }
   }
   return "";
+}
+
+function firstNumber(record: Record<string, unknown> | undefined, keys: string[]) {
+  if (!record) {
+    return null;
+  }
+  for (const key of keys) {
+    const value = record[key];
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+  }
+  return null;
 }
 
 function optionalBooleanField(key: string, ...values: unknown[]) {

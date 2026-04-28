@@ -50,36 +50,36 @@ export const SAMSAR_AGENT_CAPABILITIES: AgentCapability[] = [
   {
     id: "image_list_to_video",
     label: "Image list to video",
-    description: "Create a wallet-attributed marketing video from images, prompt, metadata, model, aspect, and CTA outro fields.",
-    samsarEndpoint: "external_users/image_list_to_video",
+    description: "Create a storefront-owner authenticated marketing video from images, prompt, metadata, model, aspect, and CTA outro fields.",
+    samsarEndpoint: "/v2/image_list_to_video",
     requiredPillars: ["compute", "storage", "chain", "da", "service_marketplace"]
   },
   {
     id: "translate_video",
     label: "Translate video",
     description: "Clone a completed SuperReferrals video session into a translated session.",
-    samsarEndpoint: "video/translate_video",
+    samsarEndpoint: "/v2/translate_video",
     requiredPillars: ["compute", "storage", "chain"]
   },
   {
     id: "join_videos",
     label: "Join videos",
     description: "Append multiple completed SuperReferrals sessions into one composed video.",
-    samsarEndpoint: "video/join_videos",
+    samsarEndpoint: "/v2/join_videos",
     requiredPillars: ["compute", "storage", "chain"]
   },
   {
     id: "outro_mutation",
     label: "Outro mutation",
     description: "Add or update a CTA outro image for an existing video session.",
-    samsarEndpoint: "video/add_outro_image | video/update_outro_image",
+    samsarEndpoint: "/v2/add_outro_image | /v2/update_outro_image",
     requiredPillars: ["compute", "storage", "chain"]
   },
   {
     id: "remove_subtitles",
     label: "Remove subtitles",
     description: "Clone a session without subtitle or transcript overlays.",
-    samsarEndpoint: "video/remove_subtitles",
+    samsarEndpoint: "/v2/remove_subtitles",
     requiredPillars: ["compute", "storage"]
   },
   {
@@ -479,12 +479,12 @@ function buildHeuristicPlan({
   estimatedChargeUsd: number;
 }) {
   const samsarEndpointByType: Record<AgentJobType, string> = {
-    generate_video: "external_users/image_list_to_video",
-    remix_inft: "video/add_outro_image",
-    translate: "video/translate_video",
-    join: "video/join_videos",
-    brand_review: "assistant/completion",
-    simulation: "assistant/completion"
+    generate_video: "/v2/image_list_to_video",
+    remix_inft: "/v2/add_outro_image",
+    translate: "/v2/translate_video",
+    join: "/v2/join_videos",
+    brand_review: "/v2/assistant/completion",
+    simulation: "/v2/assistant/completion"
   };
   return {
     objective,
@@ -547,7 +547,7 @@ async function publishServiceMarketplaceIntent(payload: Record<string, unknown>)
     };
   }
   if (!endpoint) {
-    throw new Error("OG_SERVICE_MARKETPLACE_URL is required when OG_SERVICE_MARKETPLACE_MOCKS=false");
+    throw new Error("OG_SERVICE_MARKETPLACE_URL is required for live 0G service marketplace requests.");
   }
   const response = await fetch(endpoint, {
     method: "POST",
@@ -609,7 +609,7 @@ async function anchorAgentJobOnZeroGChain({
     };
   }
   if (!contractAddress || !privateKey) {
-    throw new Error("AGENT_REGISTRY_CONTRACT_ADDRESS and OG_PRIVATE_KEY are required when AGENT_REGISTRY_MOCKS=false");
+    throw new Error("AGENT_REGISTRY_CONTRACT_ADDRESS and OG_PRIVATE_KEY are required for live agent registry writes.");
   }
 
   const account = privateKeyToAccount(privateKey);

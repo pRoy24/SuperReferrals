@@ -1,9 +1,6 @@
-import { env } from "./env";
 import { createId, nowIso } from "./ids";
-import {
-  buildCustomerSamsarExternalUser,
-  ensureSamsarProcessorSubAccount
-} from "./samsar-processor";
+import { hasStoredSamsarAppKey } from "./samsar-app-credentials";
+import { provisionSamsarProcessorAppKeyIfMissing } from "./samsar-processor";
 import { mutateStore, upsertCustomer } from "./store";
 import type { Customer, SuperReferralsStore } from "./types";
 
@@ -20,7 +17,15 @@ type WebhookDetails = {
   username?: string;
   userId?: string;
   authToken?: string;
+  refreshToken?: string;
+  expiryDate?: string;
+  refreshTokenExpiresAt?: string;
   apiKey?: string;
+  loginUrl?: string;
+  passwordSetupUrl?: string;
+  returnOrigin?: string;
+  authRedirectUrl?: string;
+  storefrontPortalUrl?: string;
   creditsPurchased: number;
   remainingCredits?: number;
 };
@@ -32,9 +37,12 @@ export type ProcessorCreditWebhookResult = {
   customer?: Customer;
   createdCustomer?: boolean;
   linkedExternalUser?: boolean;
+  firstClassUser?: boolean;
   email?: string;
   checkoutSessionId?: string;
   creditsRemaining?: number;
+  authRedirectUrl?: string;
+  storefrontPortalUrl?: string;
   warning?: string;
 };
 
@@ -68,16 +76,14 @@ export async function reconcileProcessorCreditWebhook(payload: Record<string, un
     const target = findTargetCustomer(store, details);
     createdCustomer = !target;
     const customerId = target?.id || details.customerId || createId("cus");
-    const internalApiKey = env("SAMSAR_API_KEY") || undefined;
     const storedAccountApiKey = details.apiKey || target?.samsarAccount?.apiKey;
-    const parentApiKey = internalApiKey || storedAccountApiKey;
     const currentCredits = Number(target?.subscription.creditsRemaining || 0);
     return upsertCustomer(store, {
       id: customerId,
       name: target?.name || deriveAccountName(details.email) || "SuperReferrals Account",
       ownerWallet: target?.ownerWallet,
-      samsarApiKeyAlias: parentApiKey
-        ? internalApiKey ? target?.samsarApiKeyAlias || "samsar-internal-api-key" : target?.samsarApiKeyAlias || "samsar-user-api-key"
+      samsarApiKeyAlias: storedAccountApiKey
+        ? target?.samsarApiKeyAlias || "samsar-user-api-key"
         : target?.samsarApiKeyAlias,
       samsarAccount: {
         ...(target?.samsarAccount || {}),
@@ -85,9 +91,10 @@ export async function reconcileProcessorCreditWebhook(payload: Record<string, un
         username: details.username || target?.samsarAccount?.username || deriveAccountName(details.email),
         userId: details.userId || target?.samsarAccount?.userId || customerId,
         authToken: details.authToken || target?.samsarAccount?.authToken,
+        refreshToken: details.refreshToken || target?.samsarAccount?.refreshToken,
+        expiryDate: details.expiryDate || target?.samsarAccount?.expiryDate,
+        refreshTokenExpiresAt: details.refreshTokenExpiresAt || target?.samsarAccount?.refreshTokenExpiresAt,
         apiKey: storedAccountApiKey,
-        externalProvider: target?.samsarAccount?.externalProvider,
-        externalUserId: target?.samsarAccount?.externalUserId,
         checkoutSessionId: details.checkoutSessionId || target?.samsarAccount?.checkoutSessionId,
         checkoutUrl: details.checkoutUrl || target?.samsarAccount?.checkoutUrl,
         paymentStatusEndpoint: details.paymentStatusEndpoint || target?.samsarAccount?.paymentStatusEndpoint,
@@ -102,9 +109,22 @@ export async function reconcileProcessorCreditWebhook(payload: Record<string, un
     });
   });
 
-  const linkResult = await linkCustomerExternalUser(customer, details);
-  if (!linkResult.linkedExternalUser) {
-    throw new Error(linkResult.warning || "Unable to link the SuperReferrals account after credit checkout.");
+  let linkResult = await creditFirstClassCheckoutCustomer(customer, details);
+  if (details.authToken && !hasStoredSamsarAppKey(linkResult.customer)) {
+    const appKey = await provisionSamsarProcessorAppKeyIfMissing(linkResult.customer, details.authToken);
+    if (appKey) {
+      const updated = await mutateStore((store) => upsertCustomer(store, {
+        id: linkResult.customer.id,
+        samsarApiKeyAlias: "samsar-user-app-key",
+        samsarAccount: {
+          ...(linkResult.customer.samsarAccount || {}),
+          ...appKey,
+          updatedAt: nowIso()
+        },
+        subscription: linkResult.customer.subscription
+      }));
+      linkResult = { ...linkResult, customer: updated };
+    }
   }
 
   return {
@@ -112,71 +132,69 @@ export async function reconcileProcessorCreditWebhook(payload: Record<string, un
     customer: linkResult.customer,
     createdCustomer,
     linkedExternalUser: linkResult.linkedExternalUser,
-    warning: linkResult.warning,
+    firstClassUser: "firstClassUser" in linkResult ? linkResult.firstClassUser === true : false,
+    warning: "warning" in linkResult ? linkResult.warning : undefined,
     email: details.email || linkResult.customer.samsarAccount?.email,
     checkoutSessionId: details.checkoutSessionId,
-    creditsRemaining: linkResult.customer.subscription.creditsRemaining
+    creditsRemaining: linkResult.customer.subscription.creditsRemaining,
+    authRedirectUrl: buildStorefrontAuthRedirectUrl(details),
+    storefrontPortalUrl: details.storefrontPortalUrl || buildStorefrontPortalUrl(details.returnOrigin)
   };
 }
 
-async function linkCustomerExternalUser(customer: Customer, details: WebhookDetails) {
-  const internalApiKey = env("SAMSAR_API_KEY") || undefined;
-  const parentApiKey = internalApiKey || customer.samsarAccount?.apiKey || undefined;
-  if (!parentApiKey) {
-    return {
-      customer,
-      linkedExternalUser: false,
-      warning: "No parent API key is configured for external user linking."
-    };
-  }
-
-  try {
-    const externalUser = buildCustomerSamsarExternalUser(customer, details.email || customer.samsarAccount?.email);
-    const externalSession = await ensureSamsarProcessorSubAccount(externalUser, parentApiKey);
-    const updated = await mutateStore((store) => {
-      const current = store.customers.find((item) => item.id === customer.id);
-      if (!current) {
-        throw new Error("customer disappeared while linking the external account");
+async function creditFirstClassCheckoutCustomer(customer: Customer, details: WebhookDetails) {
+  const updated = await mutateStore((store) => {
+    const current = store.customers.find((item) => item.id === customer.id);
+    if (!current) {
+      throw new Error("customer disappeared while crediting the account");
+    }
+    const currentCredits = Number(current.subscription.creditsRemaining || 0);
+    const existingProcessedIds = current.samsarAccount?.processedCheckoutSessionIds || [];
+    const paymentRecordId = getPaymentRecordId(details);
+    const alreadyProcessed = Boolean(paymentRecordId && existingProcessedIds.includes(paymentRecordId));
+    const checkoutSessionIds = paymentRecordId && !existingProcessedIds.includes(paymentRecordId)
+      ? [...existingProcessedIds, paymentRecordId]
+      : existingProcessedIds;
+    const creditedBalance = alreadyProcessed
+      ? currentCredits
+      : currentCredits + details.creditsPurchased;
+    const nextCredits = details.remainingCredits ?? creditedBalance;
+    return upsertCustomer(store, {
+      id: current.id,
+      samsarApiKeyAlias: details.apiKey
+        ? current.samsarApiKeyAlias || "samsar-user-api-key"
+        : current.samsarApiKeyAlias,
+      samsarAccount: {
+        ...(current.samsarAccount || {}),
+        email: details.email || current.samsarAccount?.email,
+        username: details.username || current.samsarAccount?.username || deriveAccountName(details.email),
+        userId: details.userId || current.samsarAccount?.userId || current.id,
+        authToken: details.authToken || current.samsarAccount?.authToken,
+        refreshToken: details.refreshToken || current.samsarAccount?.refreshToken,
+        expiryDate: details.expiryDate || current.samsarAccount?.expiryDate,
+        refreshTokenExpiresAt: details.refreshTokenExpiresAt || current.samsarAccount?.refreshTokenExpiresAt,
+        apiKey: details.apiKey || current.samsarAccount?.apiKey,
+        checkoutSessionId: details.checkoutSessionId || current.samsarAccount?.checkoutSessionId,
+        checkoutUrl: details.checkoutUrl || current.samsarAccount?.checkoutUrl,
+        paymentStatusEndpoint: details.paymentStatusEndpoint || current.samsarAccount?.paymentStatusEndpoint,
+        externalPaymentId: details.externalPaymentId || current.samsarAccount?.externalPaymentId,
+        processedCheckoutSessionIds: checkoutSessionIds,
+        loginUrl: details.loginUrl || current.samsarAccount?.loginUrl,
+        passwordSetupUrl: details.passwordSetupUrl || current.samsarAccount?.passwordSetupUrl,
+        updatedAt: nowIso()
+      },
+      subscription: {
+        status: nextCredits > 0 ? "active" : "not_started",
+        creditsRemaining: nextCredits
       }
-      const currentCredits = Number(current.subscription.creditsRemaining || 0);
-      const refreshedCredits = Number(externalSession.creditsRemaining || 0);
-      const existingProcessedIds = current.samsarAccount?.processedCheckoutSessionIds || [];
-      const paymentRecordId = getPaymentRecordId(details);
-      const alreadyProcessed = Boolean(paymentRecordId && existingProcessedIds.includes(paymentRecordId));
-      const checkoutSessionIds = paymentRecordId && !existingProcessedIds.includes(paymentRecordId)
-        ? [...existingProcessedIds, paymentRecordId]
-        : existingProcessedIds;
-      const creditedBalance = alreadyProcessed
-        ? currentCredits
-        : currentCredits + details.creditsPurchased;
-      const nextCredits = details.remainingCredits ?? Math.max(creditedBalance, refreshedCredits);
-      return upsertCustomer(store, {
-        id: current.id,
-        samsarApiKeyAlias: internalApiKey
-          ? current.samsarApiKeyAlias || "samsar-internal-api-key"
-          : current.samsarApiKeyAlias || "samsar-user-api-key",
-        samsarAccount: {
-          ...(current.samsarAccount || {}),
-          apiKey: current.samsarAccount?.apiKey,
-          externalProvider: externalUser.provider,
-          externalUserId: String(externalUser.external_user_id || externalUser.externalUserId || current.id),
-          processedCheckoutSessionIds: checkoutSessionIds,
-          updatedAt: nowIso()
-        },
-        subscription: {
-          status: nextCredits > 0 ? "active" : "not_started",
-          creditsRemaining: nextCredits
-        }
-      });
     });
-    return { customer: updated, linkedExternalUser: true };
-  } catch (error) {
-    return {
-      customer,
-      linkedExternalUser: false,
-      warning: error instanceof Error ? error.message : "Unable to link external user to the parent account."
-    };
-  }
+  });
+  return {
+    customer: updated,
+    linkedExternalUser: false,
+    firstClassUser: true,
+    warning: undefined
+  };
 }
 
 function findTargetCustomer(store: SuperReferralsStore, details: WebhookDetails) {
@@ -291,8 +309,47 @@ function extractWebhookDetails(payload: Record<string, unknown>): WebhookDetails
     ]) || stringFromUnknown(metadata.superreferralsAccountEmail || metadata.customerEmail || metadata.email)),
     username: firstString(payload, [["username"], ["user", "username"], ["account", "username"]]),
     userId: firstString(payload, [["userId"], ["user_id"], ["user", "id"], ["account", "id"]]),
-    authToken: firstString(payload, [["authToken"], ["auth_token"], ["token"], ["account", "authToken"]]),
+    authToken: firstString(payload, [["authToken"], ["auth_token"], ["accessToken"], ["access_token"], ["token"], ["account", "authToken"]]),
+    refreshToken: firstString(payload, [["refreshToken"], ["refresh_token"], ["account", "refreshToken"], ["account", "refresh_token"]]),
+    expiryDate: firstString(payload, [["expiryDate"], ["expiry_date"], ["expiresAt"], ["expires_at"], ["account", "expiryDate"], ["account", "expiresAt"]]),
+    refreshTokenExpiresAt: firstString(payload, [
+      ["refreshTokenExpiresAt"],
+      ["refresh_token_expires_at"],
+      ["account", "refreshTokenExpiresAt"],
+      ["account", "refresh_token_expires_at"]
+    ]),
     apiKey: extractApiKey(payload),
+    loginUrl: firstString(payload, [["loginUrl"], ["login_url"], ["account", "loginUrl"], ["data", "object", "loginUrl"]]),
+    passwordSetupUrl: firstString(payload, [
+      ["passwordSetupUrl"],
+      ["password_setup_url"],
+      ["passwordSetupURL"],
+      ["account", "passwordSetupUrl"],
+      ["data", "object", "passwordSetupUrl"],
+      ["data", "object", "password_setup_url"]
+    ]),
+    returnOrigin: firstString(payload, [
+      ["returnOrigin"],
+      ["return_origin"],
+      ["metadata", "returnOrigin"],
+      ["data", "object", "metadata", "returnOrigin"]
+    ]) || stringFromUnknown(metadata.returnOrigin || metadata.return_origin),
+    authRedirectUrl: firstString(payload, [
+      ["authRedirectUrl"],
+      ["auth_redirect_url"],
+      ["welcomeRedirectUrl"],
+      ["welcome_redirect_url"],
+      ["metadata", "authRedirectUrl"],
+      ["metadata", "welcomeRedirectUrl"],
+      ["data", "object", "metadata", "authRedirectUrl"],
+      ["data", "object", "metadata", "welcomeRedirectUrl"]
+    ]) || stringFromUnknown(metadata.authRedirectUrl || metadata.auth_redirect_url || metadata.welcomeRedirectUrl || metadata.welcome_redirect_url),
+    storefrontPortalUrl: firstString(payload, [
+      ["storefrontPortalUrl"],
+      ["storefront_portal_url"],
+      ["metadata", "storefrontPortalUrl"],
+      ["data", "object", "metadata", "storefrontPortalUrl"]
+    ]) || stringFromUnknown(metadata.storefrontPortalUrl),
     creditsPurchased: Math.max(0, Math.round(creditsPurchased)),
     remainingCredits: firstNumber(payload, [
       ["remainingCredits"],
@@ -302,6 +359,59 @@ function extractWebhookDetails(payload: Record<string, unknown>): WebhookDetails
       ["data", "object", "generationCredits"]
     ]) ?? numberFromUnknown(metadata.remainingCredits || metadata.remaining_credits)
   };
+}
+
+function buildStorefrontAuthRedirectUrl(details: WebhookDetails) {
+  if (!details.authToken) {
+    return undefined;
+  }
+  const portalUrl = details.authRedirectUrl || buildStorefrontAuthCallbackUrl(details.returnOrigin);
+  if (!portalUrl) {
+    return undefined;
+  }
+  try {
+    const url = new URL(portalUrl);
+    url.searchParams.set("authToken", details.authToken);
+    if (details.refreshToken) {
+      url.searchParams.set("refreshToken", details.refreshToken);
+    }
+    if (details.expiryDate) {
+      url.searchParams.set("expiryDate", details.expiryDate);
+    }
+    if (details.refreshTokenExpiresAt) {
+      url.searchParams.set("refreshTokenExpiresAt", details.refreshTokenExpiresAt);
+    }
+    if (details.checkoutSessionId) {
+      url.searchParams.set("checkoutSessionId", details.checkoutSessionId);
+    }
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function buildStorefrontAuthCallbackUrl(returnOrigin?: string) {
+  const origin = returnOrigin?.replace(/\/+$/, "");
+  if (!origin) {
+    return undefined;
+  }
+  try {
+    return new URL("/samsar/callback", origin).toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function buildStorefrontPortalUrl(returnOrigin?: string) {
+  const origin = returnOrigin?.replace(/\/+$/, "");
+  if (!origin) {
+    return undefined;
+  }
+  try {
+    return new URL("/dashboard", origin).toString();
+  } catch {
+    return undefined;
+  }
 }
 
 function isSuccessfulCheckout(details: WebhookDetails) {

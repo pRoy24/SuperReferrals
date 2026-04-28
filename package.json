@@ -22,13 +22,14 @@
   },
   "dependencies": {
     "@0gfoundation/0g-ts-sdk": "latest",
+    "@0glabs/0g-serving-broker": "^0.7.5",
     "@openzeppelin/contracts": "latest",
     "ethers": "latest",
     "lucide-react": "latest",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "samsar-js": "0.48.18",
+    "samsar-js": "^0.48.21",
     "viem": "latest"
   },
   "devDependencies": {

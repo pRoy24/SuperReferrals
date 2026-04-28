@@ -91,14 +91,12 @@ Configure the draft nodes as:
 Local/dev/staging:
 
 ```bash
-KEEPERHUB_MOCKS=false
+SUPERREFERRALS_MOCKS=false
 KEEPERHUB_API_KEY=<keeperhub_api_key>
-KEEPERHUB_PAYMENT_NETWORK=sepolia
 TRANSACTION_CHAIN_ID=11155111
 NEXT_PUBLIC_TRANSACTION_CHAIN_ID=11155111
-KEEPERHUB_PAYMENT_WORKFLOW_ID=replace_with_keeperhub_sepolia_workflow_id
 KEEPERHUB_PAYMENT_WORKFLOW_ID_SEPOLIA=replace_with_keeperhub_sepolia_workflow_id
-KEEPERHUB_PLATFORM_WALLET_ADDRESS=<funded KeeperHub organization wallet>
+KEEPERHUB_WALLET_ADDRESS=<funded KeeperHub organization wallet>
 ```
 
 Production Ethereum mainnet:
@@ -109,7 +107,7 @@ DEPLOYMENT_ENV=production
 TRANSACTION_CHAIN_ID=1
 NEXT_PUBLIC_TRANSACTION_CHAIN_ID=1
 KEEPERHUB_PAYMENT_WORKFLOW_ID_ETHEREUM=replace_with_keeperhub_ethereum_workflow_id
-KEEPERHUB_PLATFORM_WALLET_ADDRESS=<funded KeeperHub organization wallet>
+KEEPERHUB_WALLET_ADDRESS=<funded KeeperHub organization wallet>
 ```
 
 Production Base mainnet:
@@ -122,10 +120,10 @@ TRANSACTION_CHAIN_ID=8453
 NEXT_PUBLIC_TRANSACTION_NETWORK=base
 NEXT_PUBLIC_TRANSACTION_CHAIN_ID=8453
 KEEPERHUB_PAYMENT_WORKFLOW_ID_BASE=replace_with_keeperhub_base_workflow_id
-KEEPERHUB_PLATFORM_WALLET_ADDRESS=<funded KeeperHub organization wallet>
+KEEPERHUB_WALLET_ADDRESS=<funded KeeperHub organization wallet>
 ```
 
-KeeperHub wallet creation is not exposed by the public REST API used here. The docs describe creating a shared organization wallet from the KeeperHub Organization Wallet dialog with Turnkey. Keep one `KEEPERHUB_PLATFORM_WALLET_ADDRESS`; balances and funding are still per network.
+KeeperHub wallet creation is not exposed by the public REST API used here. The docs describe creating a shared organization wallet from the KeeperHub Organization Wallet dialog with Turnkey. Keep one `KEEPERHUB_WALLET_ADDRESS`; balances and funding are still per network.
 
 ## References
 

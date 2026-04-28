@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 if [ ! -f .env.local ]; then
   cp .env.staging.example .env.local
-  echo "Created .env.local from .env.staging.example. Add SAMSAR_API_KEY before running live Samsar."
+  echo "Created .env.local from .env.staging.example. Storefront owners connect their own Samsar credentials in the app."
 fi
 
 if [ ! -d node_modules ]; then

@@ -13,6 +13,12 @@ export type VideoModel = "VEO3.1I2V" | "SEEDANCEI2V" | "KLING3.0" | "RUNWAYML";
 export type PaymentRail = "direct" | "uniswap" | "keeperhub";
 export type PaymentCurrencySymbol = "USD" | "USDC" | "USDT" | "ETH" | "WETH";
 export type VideoAspectRatio = "16:9" | "9:16";
+export type INFTPaidAction =
+  | "translate"
+  | "join"
+  | "remove_subtitles"
+  | "add_outro"
+  | "update_outro";
 
 export interface ModelPricingConfiguration {
   id: string;
@@ -31,6 +37,7 @@ export interface CustomerPricing {
   currency: PaymentCurrencySymbol;
   pricePerImageUsd?: number;
   pricePerSecondUsd?: number;
+  inftActionPricesUsd?: Partial<Record<INFTPaidAction, number>>;
   creditUnitUsd?: number;
   customerMultiplier?: number;
   modelConfigurations?: ModelPricingConfiguration[];
@@ -69,9 +76,21 @@ export interface Customer {
     username?: string;
     userId?: string;
     authToken?: string;
+    refreshToken?: string;
+    expiryDate?: string;
+    refreshTokenExpiresAt?: string;
+    appKeyHash?: string;
+    appKeyEncrypted?: string;
+    appKeyPrefix?: string;
+    appKeyLast4?: string;
+    appKeyCreatedAt?: string;
+    appKeyUpdatedAt?: string;
+    appKeyExpiresAt?: string;
     apiKey?: string;
+    externalApiKey?: string;
     hasSession?: boolean;
     hasApiKey?: boolean;
+    hasAppKey?: boolean;
     externalProvider?: string;
     externalUserId?: string;
     walletAddress?: string;
@@ -148,6 +167,8 @@ export interface PaymentQuote {
   id: string;
   customerId: string;
   subAccountId?: string;
+  inftId?: string;
+  operation?: INFTPaidAction | string;
   imageCount: number;
   durationSeconds?: number;
   amountUsd: number;

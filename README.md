@@ -93,32 +93,13 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-For a no-key demo, set the mock flags in `.env.local`:
+For a no-key demo, keep the global mock switch on:
 
 ```bash
 SUPERREFERRALS_MOCKS=true
-SAMSAR_MOCKS=true
-UNISWAP_MOCKS=true
-KEEPERHUB_MOCKS=true
-ZERO_G_MOCKS=true
-AGENT_REGISTRY_MOCKS=true
-USER_REGISTRY_MOCKS=true
-OG_SERVICE_MARKETPLACE_MOCKS=true
-INFT_MOCKS=true
-OG_COMPUTE_MOCKS=true
-AXL_MOCKS=true
 ```
 
-To test one live service at a time, leave global mocks on and set only that provider to live, for example:
-
-```bash
-SUPERREFERRALS_MOCKS=true
-SAMSAR_MOCKS=false
-SAMSAR_API_URL=https://api.samsar.one
-SAMSAR_API_KEY=replace_with_samsar_api_key
-```
-
-For staging with live Samsar, KeeperHub Sepolia payments, and 0G Galileo records:
+For staging with live Samsar, KeeperHub Sepolia payments, 0G Galileo records, and live 0G Compute:
 
 ```bash
 cp .env.staging.example .env.local
@@ -131,6 +112,14 @@ cp .env.production.example .env.local
 ```
 
 Use private RPC providers for production reliability.
+
+Vercel KV/Upstash env vars are normally injected by the deploy setup. Only put `KV_REST_API_URL` and `KV_REST_API_TOKEN` in a local env file when deliberately running against local or manually managed Redis.
+
+0G Compute does not require endpoint, model, or API-key env vars. The server uses the 0G serving broker with `OG_PRIVATE_KEY`, discovers live inference providers, and selects the top documented chatbot model for the current 0G environment: `qwen-2.5-7b-instruct` on Galileo/testnet and `GLM-5-FP8` on mainnet.
+
+```bash
+cp .env.production.example .env.local
+```
 
 ## Vercel Environment Sync
 
@@ -200,20 +189,18 @@ For staging previews, Vercel needs a Git event it can deploy. Push a new commit 
 ## Key Environment Variables
 
 - `SUPERREFERRALS_MOCKS`: global mock switch. Defaults to mocked behavior when unset.
-- `KV_REST_API_URL`, `KV_REST_API_TOKEN`: required Upstash/Vercel KV store for mutable app state.
-- `<PROVIDER>_MOCKS`: per-provider overrides such as `SAMSAR_MOCKS`, `KEEPERHUB_MOCKS`, `ZERO_G_MOCKS`, `INFT_MOCKS`, `OG_COMPUTE_MOCKS`, and `AXL_MOCKS`.
-- `SAMSAR_API_URL`: production Samsar API origin. Defaults to `https://api.samsar.one`.
-- `SAMSAR_API_KEY`: required for live Samsar generation when a logged-in customer account does not provide its own API key.
-- `NEXT_PUBLIC_HACKATHON_STAGING_URL`: optional production banner link for ETHGlobal hackathon testing. Defaults to the develop staging deployment.
+- `SUPERREFERRALS_MOCKS=false`: live mode for all providers. Provider-specific mock overrides are no longer needed in the minimal staging/production env files.
+- `KV_REST_API_URL`, `KV_REST_API_TOKEN`: injected by Vercel/Upstash setup. Add them manually only for local Redis testing.
+- `SAMSAR_APP_SECRET`: server-only secret, at least 32 characters, used to generate Samsar long-lived storefront APP_KEY credentials and to encrypt/hash stored APP_KEY values.
+- Samsar credentials are connected per storefront owner through Stripe checkout or account sign-in. The app uses the returned auth token only to provision a long-lived APP_KEY, stores an HMAC hash plus encrypted APP_KEY server-side, and sends APP_KEY + `SAMSAR_APP_SECRET` to `/v2` Samsar routes for generation and edit operations.
 - `TRANSACTION_NETWORK`, `TRANSACTION_CHAIN_ID`, `TRANSACTION_RPC_URL`: payment and wallet network.
 - `NEXT_PUBLIC_TRANSACTION_NETWORK`, `NEXT_PUBLIC_TRANSACTION_CHAIN_ID`, `NEXT_PUBLIC_TRANSACTION_RPC_URL`: browser wallet prompts.
-- `KEEPERHUB_API_KEY`, `KEEPERHUB_WALLET_ADDRESS`, `KEEPERHUB_PAYMENT_WORKFLOW_ID`: live KeeperHub payment and settlement.
+- `KEEPERHUB_API_KEY`, `KEEPERHUB_WALLET_ADDRESS`, `KEEPERHUB_PAYMENT_WORKFLOW_ID_<NETWORK>`: live KeeperHub payment and settlement.
 - `UNISWAP_API_KEY`: live Uniswap quote and swap transaction data.
-- `OG_NETWORK`, `OG_CHAIN_ID`, `OG_RPC_URL`, `OG_STORAGE_INDEXER_RPC`, `OG_PRIVATE_KEY`: 0G Chain, Storage, registry, and INFT signer.
-- `OG_COMPUTE_MOCKS`, `OG_COMPUTE_TESTNET_URL`, `OG_COMPUTE_MAINNET_URL`, `OG_COMPUTE_TESTNET_MODEL`, `OG_COMPUTE_MAINNET_MODEL`, `OG_COMPUTE_API_KEY`: 0G Compute assistant routing. Testnet defaults to `qwen-2.5-7b-instruct`; mainnet defaults to `gpt-oss-120b`. Runtime calls use the configured service URL and optional bearer token, not a private key.
+- `OG_NETWORK`, `OG_CHAIN_ID`, `OG_RPC_URL`, `OG_STORAGE_INDEXER_RPC`, `OG_PRIVATE_KEY`: 0G Chain, Storage, registry, INFT signer, and 0G Compute broker signer.
+- `OG_DA_URL`, `OG_SERVICE_MARKETPLACE_URL`: live 0G DA and service marketplace endpoints.
 - `USER_REGISTRY_CONTRACT_ADDRESS`: deployed `SuperReferralsUserRegistry` address.
 - `INFT_CONTRACT_ADDRESS`: deployed INFT collection. Minting uses `OG_PRIVATE_KEY`.
-- `INFT_RECOVERY_SCAN_LIMIT`: maximum number of recent INFT tokens scanned when rebuilding a public `/inft/:id` view from onchain token metadata.
 - `AXL_BASE_URL`: local Gensyn AXL node API, default `http://localhost:9002`.
 
 ## Contracts

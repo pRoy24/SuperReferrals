@@ -46,7 +46,7 @@ export async function registerZeroGUserProfile(input: {
     };
   }
   if (!contractAddress || !privateKey) {
-    throw new Error("USER_REGISTRY_CONTRACT_ADDRESS and OG_PRIVATE_KEY are required when USER_REGISTRY_MOCKS=false");
+    throw new Error("USER_REGISTRY_CONTRACT_ADDRESS and OG_PRIVATE_KEY are required for live user registry writes.");
   }
 
   const account = privateKeyToAccount(privateKey);
