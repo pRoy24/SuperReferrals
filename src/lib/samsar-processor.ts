@@ -1,3 +1,4 @@
+import SamsarClient from "samsar-js";
 import { appBaseUrl, isProviderMock } from "./env";
 import { nowIso } from "./ids";
 import {
@@ -456,10 +457,6 @@ async function samsarSdkClient(credential: string | SamsarClientCredentialOption
   const options = typeof credential === "string"
     ? { apiKey: credential.trim() }
     : credential;
-  const dynamicImport = new Function("specifier", "return import(specifier)") as (
-    specifier: string
-  ) => Promise<{ default: new (options: { apiKey?: string; appKey?: string; appSecret?: string; baseUrl: string }) => SamsarSdkClient }>;
-  const { default: SamsarClient } = await dynamicImport("samsar-js");
   return new SamsarClient({
     apiKey: options.apiKey?.trim() || undefined,
     appKey: options.appKey?.trim() || undefined,

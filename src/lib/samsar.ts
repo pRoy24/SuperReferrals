@@ -1,3 +1,4 @@
+import SamsarClient from "samsar-js";
 import { appBaseUrl, isProviderMock } from "./env";
 import { createId, nowIso } from "./ids";
 import { samsarApiV2Url } from "./samsar-api";
@@ -41,10 +42,6 @@ type SamsarClientResult = {
   creditsRemaining?: number;
   headers?: Record<string, string>;
 };
-
-const dynamicImport = new Function("specifier", "return import(specifier)") as (
-  specifier: string
-) => Promise<{ default: new (options: Record<string, unknown>) => unknown }>;
 
 type SamsarCredentialOptions = Pick<SamsarSessionActionOptions, "apiKey" | "authToken" | "appKey" | "appSecret">;
 
@@ -320,7 +317,6 @@ async function samsarVideoActionClient(options: SamsarSessionActionOptions): Pro
   if (!appSecret) {
     throw new Error("A Samsar APP_SECRET is required when using APP_KEY authentication.");
   }
-  const { default: SamsarClient } = await dynamicImport("samsar-js");
   return new SamsarClient({
     apiKey: undefined,
     appKey,
@@ -452,7 +448,6 @@ export async function publishSamsarSessionPublication(input: {
 }
 
 async function samsarPublicationClient(options: SamsarCredentialOptions & { externalApiKey?: string }) {
-  const { default: SamsarClient } = await dynamicImport("samsar-js");
   return new SamsarClient({
     apiKey: options.appKey ? undefined : options.apiKey,
     appKey: options.appKey,
