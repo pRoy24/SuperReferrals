@@ -44,6 +44,7 @@ import {
   getSamsarStatus,
   grantExternalUserCredits,
   normalizeSamsarVideoSessionId,
+  publishSamsarSessionPublication,
   runSamsarSessionAction
 } from "./samsar";
 import { fetchSamsarProcessorCredits } from "./samsar-processor";
@@ -524,6 +525,7 @@ export async function createGeneration(input: {
   generation: GenerationInput;
   feed?: {
     published?: boolean;
+    samsarGalleryPublished?: boolean;
     tags?: unknown;
   };
   payment?: Partial<GenerationPayment>;
@@ -910,9 +912,30 @@ function shouldRetryStoredResultFinalization(generation: Generation) {
       generation.status === "FAILED" ||
       !generation.inftId ||
       !generation.storage?.video ||
-      !generation.storage?.metadata
+      !generation.storage?.metadata ||
+      needsSamsarGalleryPublication(generation)
     )
   );
+}
+
+function needsSamsarGalleryPublication(generation: Generation) {
+  if (!generation.feed || generation.feed.samsarGalleryPublished === false) {
+    return false;
+  }
+  return !isSuccessfulSamsarPublication(
+    generation.feed.samsarPublication,
+    resolveGenerationVideoSessionId(generation)
+  );
+}
+
+function isSuccessfulSamsarPublication(
+  publication: { status?: string; sessionId?: string } | undefined,
+  sessionId?: string
+) {
+  if (!publication || !["published", "mock_published"].includes(publication.status || "")) {
+    return false;
+  }
+  return !sessionId || normalizeSamsarVideoSessionId(publication.sessionId) === sessionId;
 }
 
 function extractSamsarResultUrl(status: Record<string, unknown>) {
@@ -1042,7 +1065,13 @@ async function finalizeGenerationUnlocked(
   const latestGeneration = await getGeneration(generation.id) || generation;
   const existingInft = await findExistingINFTForGeneration(generation.id);
   if (latestGeneration.inftId || existingInft) {
-    return markGenerationFinalizedFromExistingINFT(latestGeneration, resultUrl, existingInft);
+    const feed = await publishGenerationToSamsarGalleryIfNeeded(
+      latestGeneration,
+      customer,
+      subAccount,
+      existingInft?.title
+    );
+    return markGenerationFinalizedFromExistingINFT(latestGeneration, resultUrl, existingInft, feed);
   }
 
   const videoArtifact = latestGeneration.storage?.video || await persistRemoteVideoToZeroG(resultUrl);
@@ -1052,8 +1081,9 @@ async function finalizeGenerationUnlocked(
   });
   const generationForMetadata = generationWithVideo || latestGeneration;
   const attributes = buildINFTAttributes(generationForMetadata, customer, subAccount);
+  const inftTitle = resolveINFTTitle(generationForMetadata, subAccount);
   const metadata = {
-    name: `SuperReferrals Video ${generationForMetadata.id}`,
+    name: inftTitle,
     description: "Marketing video INFT generated from a referrer image-list-to-video request.",
     animation_url: resultUrl,
     external_url: `${appBaseUrl()}/inft/${generationForMetadata.id}`,
@@ -1063,6 +1093,8 @@ async function finalizeGenerationUnlocked(
       generationId: generationForMetadata.id,
       customerId: customer.id,
       subAccountId: subAccount.id,
+      title: inftTitle,
+      samsarRequestId: generationForMetadata.samsarRequestId,
       samsarSessionId: generationForMetadata.samsarSessionId,
       referrerCode: subAccount.referrerCode,
       referrerUrl: `${customer.referrerBaseUrl}/r/${subAccount.referrerCode}`,
@@ -1074,7 +1106,7 @@ async function finalizeGenerationUnlocked(
       video: videoArtifact
     }
   };
-  const metadataArtifact = generationForMetadata.storage?.metadata || await persistJsonToZeroG(metadata);
+  const metadataArtifact = await persistJsonToZeroG(metadata);
   await saveGenerationFinalizationProgress(generationForMetadata.id, resultUrl, {
     video: videoArtifact,
     metadata: metadataArtifact
@@ -1098,7 +1130,7 @@ async function finalizeGenerationUnlocked(
     customerId: customer.id,
     subAccountId: subAccount.id,
     ownerWallet,
-    title: String(generationForMetadata.input.metadata?.title || `Video INFT ${generationForMetadata.id}`),
+    title: inftTitle,
     description: String(generationForMetadata.input.prompt || "Generated marketing video"),
     videoUrl: resultUrl,
     storageRootHash: videoArtifact.rootHash,
@@ -1117,10 +1149,16 @@ async function finalizeGenerationUnlocked(
     createdAt: timestamp,
     updatedAt: timestamp
   };
+  const feed = await publishGenerationToSamsarGalleryIfNeeded(
+    generationForMetadata,
+    customer,
+    subAccount,
+    inftTitle
+  );
 
   return mutateStore((mutableStore) => {
     addINFT(mutableStore, inft);
-    return updateGeneration(mutableStore, generationForMetadata.id, {
+    const patch: Partial<Generation> = {
       status: "COMPLETED",
       resultUrl,
       storage: {
@@ -1129,8 +1167,117 @@ async function finalizeGenerationUnlocked(
       },
       inftId: inft.id,
       errorMessage: undefined
-    });
+    };
+    if (feed) {
+      patch.feed = feed;
+    }
+    return updateGeneration(mutableStore, generationForMetadata.id, patch);
   });
+}
+
+async function publishGenerationToSamsarGalleryIfNeeded(
+  generation: Generation,
+  customer: Customer,
+  subAccount: SubAccount,
+  title?: string
+) {
+  if (!generation.feed || generation.feed.samsarGalleryPublished === false) {
+    return undefined;
+  }
+  const sessionId = resolveGenerationVideoSessionId(generation);
+  if (!sessionId) {
+    return {
+      ...generation.feed,
+      samsarPublication: {
+        status: "failed" as const,
+        sessionId: "",
+        submittedAt: nowIso(),
+        errorMessage: "Completed generation does not have a Samsar session id to publish."
+      }
+    };
+  }
+  if (isSuccessfulSamsarPublication(generation.feed.samsarPublication, sessionId)) {
+    return generation.feed;
+  }
+
+  try {
+    const publication = await publishGenerationSamsarPublication({
+      sessionId,
+      title: title || resolveINFTTitle(generation, subAccount),
+      description: String(generation.input.prompt || "Generated marketing video"),
+      tags: generation.feed.tags,
+      creatorHandle: subAccount.username || subAccount.referrerCode,
+      aspectRatio: generation.input.aspect_ratio,
+      videoModel: generation.input.video_model,
+      prompt: generation.input.prompt,
+      language: generation.input.language,
+      customer,
+      externalApiKey: hasUsableStoredExternalApiKey(subAccount.externalApiKey) ? subAccount.externalApiKey : undefined,
+      idempotencyKey: `superreferrals:${generation.id}:samsar-publication`
+    });
+    return {
+      ...generation.feed,
+      samsarPublication: publication
+    };
+  } catch (error) {
+    console.warn("Unable to publish Samsar feed publication", {
+      generationId: generation.id,
+      sessionId,
+      error: formatErrorText(error)
+    });
+    return {
+      ...generation.feed,
+      samsarPublication: {
+        status: "failed" as const,
+        sessionId,
+        submittedAt: nowIso(),
+        errorMessage: formatErrorText(error)
+      }
+    };
+  }
+}
+
+async function publishGenerationSamsarPublication(input: {
+  sessionId: string;
+  title: string;
+  description: string;
+  tags: string[];
+  creatorHandle: string;
+  aspectRatio: VideoAspectRatio;
+  videoModel: VideoModel;
+  prompt?: string;
+  language?: string;
+  customer: Customer;
+  externalApiKey?: string;
+  idempotencyKey: string;
+}) {
+  const credentials = uniqueCleanStrings([
+    ...customerSamsarPublicationCredentials(input.customer),
+    input.externalApiKey
+  ]);
+  const attempts = credentials.length ? credentials : [undefined];
+  let lastError: unknown;
+  for (const apiKey of attempts) {
+    try {
+      return await publishSamsarSessionPublication({
+        sessionId: input.sessionId,
+        title: input.title,
+        description: input.description,
+        tags: input.tags,
+        creatorHandle: input.creatorHandle,
+        aspectRatio: input.aspectRatio,
+        videoModel: input.videoModel,
+        prompt: input.prompt,
+        language: input.language,
+        apiKey,
+        externalApiKey: input.externalApiKey,
+        idempotencyKey: input.idempotencyKey
+      });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Unable to publish Samsar publication");
 }
 
 async function saveGenerationFinalizationProgress(
@@ -1154,7 +1301,8 @@ async function findExistingINFTForGeneration(generationId: string) {
 async function markGenerationFinalizedFromExistingINFT(
   generation: Generation,
   resultUrl: string,
-  inft?: INFTRecord
+  inft?: INFTRecord,
+  feed?: Generation["feed"]
 ) {
   const storage = generation.storage || (inft ? {
     video: {
@@ -1173,13 +1321,19 @@ async function markGenerationFinalizedFromExistingINFT(
     }
   } : undefined);
 
-  return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
-    status: "COMPLETED",
-    resultUrl,
-    storage,
-    inftId: generation.inftId || inft?.id,
-    errorMessage: undefined
-  }));
+  return mutateStore((mutableStore) => {
+    const patch: Partial<Generation> = {
+      status: "COMPLETED",
+      resultUrl,
+      storage,
+      inftId: generation.inftId || inft?.id,
+      errorMessage: undefined
+    };
+    if (feed) {
+      patch.feed = feed;
+    }
+    return updateGeneration(mutableStore, generation.id, patch);
+  });
 }
 
 async function markGenerationFinalizationFailed(
@@ -1410,6 +1564,35 @@ function resolveGenerationVideoSessionId(generation: Pick<Generation, "samsarReq
   return firstInternalSamsarSessionId(generation.samsarSessionId, generation.samsarRequestId);
 }
 
+function resolveINFTTitle(generation: Generation, subAccount: SubAccount) {
+  const metadata = isRecord(generation.input.metadata) ? generation.input.metadata : undefined;
+  return cleanTitle(firstString(metadata, ["title", "name", "inftTitle", "inft_title"])) ||
+    titleFromSlug(firstString(metadata, ["slug", "campaignSlug", "campaign_slug", "referrerSlug", "referrer_slug"])) ||
+    titleFromSlug(subAccount.referrerCode) ||
+    "SuperReferrals Video";
+}
+
+function cleanTitle(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function titleFromSlug(value: string) {
+  const slug = value
+    .trim()
+    .split(/[/?#]/)[0]
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!slug) {
+    return "";
+  }
+  return slug
+    .split(" ")
+    .map((part) => part ? part[0]!.toUpperCase() + part.slice(1) : "")
+    .join(" ");
+}
+
 function normalizeGenerationInput(input: GenerationInput): GenerationInput {
   const hasProvidedOutro = Boolean(input.outro_image_url);
   const generatesOutroFromUrl = !hasProvidedOutro && (input.generate_outro_image === true || Boolean(input.cta_url));
@@ -1544,6 +1727,28 @@ function assertReachableUrlShape(rawUrl: string, label: string) {
 
 function customerSamsarApiKey(customer: Customer) {
   return env("SAMSAR_API_KEY") || customer.samsarAccount?.apiKey || undefined;
+}
+
+function customerSamsarPublicationCredentials(customer: Customer) {
+  return uniqueCleanStrings([
+    customer.samsarAccount?.apiKey,
+    customer.samsarAccount?.authToken,
+    customerSamsarApiKey(customer)
+  ]);
+}
+
+function uniqueCleanStrings(values: Array<string | undefined>) {
+  const seen = new Set<string>();
+  const cleanValues: string[] = [];
+  for (const value of values) {
+    const clean = value?.trim();
+    if (!clean || seen.has(clean)) {
+      continue;
+    }
+    seen.add(clean);
+    cleanValues.push(clean);
+  }
+  return cleanValues;
 }
 
 function assertCustomerProcessorReady(customer: Customer) {
@@ -1710,6 +1915,7 @@ function buildINFTAttributes(
     { trait_type: "aspect_ratio", value: generation.input.aspect_ratio },
     { trait_type: "image_count", value: countImages(generation.input) },
     { trait_type: "payment_amount_usd", value: generation.payment.amountUsd },
+    { trait_type: "samsar_request_id", value: generation.samsarRequestId || "" },
     { trait_type: "samsar_session_id", value: generation.samsarSessionId || "" }
   ];
 }

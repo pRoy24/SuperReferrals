@@ -46,6 +46,7 @@ import type {
 
 type GenerationFormState = {
   imageUrls: string;
+  inftTitle: string;
   metadata: string;
   prompt: string;
   videoModel: VideoModel;
@@ -57,6 +58,7 @@ type GenerationFormState = {
   outroFocusArea: string;
   ctaUrl: string;
   publishToFeed: boolean;
+  publishToSamsarGallery: boolean;
   feedTags: string;
   txHash: string;
 };
@@ -122,7 +124,8 @@ const starterImages = [
 
 const starterImageMetadata = JSON.stringify(starterImages, null, 2);
 
-const starterCampaignMetadata = JSON.stringify({ title: "Tech lifestyle launch", campaign: "customer-store" }, null, 2);
+const starterCampaignTitle = "Tech lifestyle launch";
+const starterCampaignMetadata = JSON.stringify({ campaign: "customer-store" }, null, 2);
 const starterPrompt = [
   "Create a polished tech lifestyle ad with smooth cinematic motion and clean transitions.",
   "Make each scene feel premium, useful, and aspirational.",
@@ -152,6 +155,7 @@ const supportedRenditionLanguageCodes = new Set<string>(supportedRenditionLangua
 function createDefaultGenerationForm(modelSelection?: Pick<GenerationFormState, "videoModel" | "aspectRatio">): GenerationFormState {
   return {
     imageUrls: starterImageMetadata,
+    inftTitle: starterCampaignTitle,
     metadata: starterCampaignMetadata,
     prompt: starterPrompt,
     videoModel: modelSelection?.videoModel || ("RUNWAYML" as VideoModel),
@@ -163,6 +167,7 @@ function createDefaultGenerationForm(modelSelection?: Pick<GenerationFormState, 
     outroFocusArea: defaultOutroFocusArea,
     ctaUrl: "https://www.pexels.com/search/technology%20lifestyle/",
     publishToFeed: true,
+    publishToSamsarGallery: true,
     feedTags: "tech, lifestyle, product",
     txHash: ""
   };
@@ -175,7 +180,12 @@ function restorePersistedGenerationForm(
   const next = createDefaultGenerationForm();
   if (persisted && typeof persisted === "object" && !Array.isArray(persisted)) {
     const persistedRecord = persisted as Record<string, unknown>;
+    let restoredInftTitle = false;
     if (typeof persisted.imageUrls === "string") next.imageUrls = sanitizeImageUrlsForForm(persisted.imageUrls);
+    if (typeof persisted.inftTitle === "string") {
+      next.inftTitle = persisted.inftTitle;
+      restoredInftTitle = true;
+    }
     if (typeof persisted.metadata === "string") next.metadata = persisted.metadata;
     if (typeof persisted.prompt === "string") next.prompt = persisted.prompt;
     if (typeof persisted.videoModel === "string") next.videoModel = persisted.videoModel as VideoModel;
@@ -191,8 +201,12 @@ function restorePersistedGenerationForm(
     if (typeof persisted.outroFocusArea === "string") next.outroFocusArea = persisted.outroFocusArea;
     if (typeof persisted.ctaUrl === "string") next.ctaUrl = persisted.ctaUrl;
     if (typeof persisted.publishToFeed === "boolean") next.publishToFeed = persisted.publishToFeed;
+    if (typeof persisted.publishToSamsarGallery === "boolean") next.publishToSamsarGallery = persisted.publishToSamsarGallery;
     if (typeof persisted.feedTags === "string") next.feedTags = persisted.feedTags;
     if (typeof persisted.txHash === "string") next.txHash = persisted.txHash;
+    if (!restoredInftTitle) {
+      next.inftTitle = extractMetadataTitle(next.metadata) || next.inftTitle;
+    }
   }
   return {
     ...next,
@@ -1011,6 +1025,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
           generation: generationPayload,
           feed: {
             published: generationForm.publishToFeed,
+            samsarGalleryPublished: generationForm.publishToSamsarGallery,
             tags: generationForm.feedTags
           },
           payment: {
@@ -1428,6 +1443,8 @@ function SimpleRenderForm({
 
   return (
     <div className="form-grid render-wizard-grid">
+      <TextField label="INFT title" value={form.inftTitle} onChange={(inftTitle) => onPatch({ inftTitle })} full />
+
       <WizardSection
         title="Image scenes"
         badge={`${imageCount} ready`}
@@ -1562,14 +1579,7 @@ function SimpleRenderForm({
         </div>
       </WizardSection>
 
-      <label className="toggle-row">
-        <input
-          type="checkbox"
-          checked={form.publishToFeed}
-          onChange={(event) => onPatch({ publishToFeed: event.target.checked })}
-        />
-        Publish video to feed
-      </label>
+      <PublishTargets form={form} onPatch={onPatch} />
       <TextField label="Feed tags" value={form.feedTags} onChange={(feedTags) => onPatch({ feedTags })} />
 
       <WizardSection
@@ -1770,6 +1780,38 @@ function ImageUrlPreview({ rawUrl, title }: { rawUrl: string; title: string }) {
   );
 }
 
+function PublishTargets({
+  form,
+  onPatch
+}: {
+  form: GenerationFormState;
+  onPatch: (patch: RenderFormPatch) => void;
+}) {
+  return (
+    <div className="field full publish-targets">
+      <label>Publish to</label>
+      <div className="publish-target-options">
+        <label className="toggle-row" title="Publishes to the application feed">
+          <input
+            type="checkbox"
+            checked={form.publishToFeed}
+            onChange={(event) => onPatch({ publishToFeed: event.target.checked })}
+          />
+          Feed
+        </label>
+        <label className="toggle-row" title="Publishes to the samsar-js gallery">
+          <input
+            type="checkbox"
+            checked={form.publishToSamsarGallery}
+            onChange={(event) => onPatch({ publishToSamsarGallery: event.target.checked })}
+          />
+          Public gallery
+        </label>
+      </div>
+    </div>
+  );
+}
+
 function AdvancedRenderForm({
   form,
   generationPayloadPreview,
@@ -1781,6 +1823,7 @@ function AdvancedRenderForm({
 }) {
   return (
     <div className="form-grid">
+      <TextField label="INFT title" value={form.inftTitle} onChange={(inftTitle) => onPatch({ inftTitle })} full />
       <div className="field full">
         <label>Image URL metadata JSON array</label>
         <textarea value={form.imageUrls} onChange={(event) => onPatch({ imageUrls: event.target.value })} />
@@ -1789,14 +1832,7 @@ function AdvancedRenderForm({
         <label>JSON payload metadata</label>
         <textarea value={form.metadata} onChange={(event) => onPatch({ metadata: event.target.value })} />
       </div>
-      <label className="toggle-row">
-        <input
-          type="checkbox"
-          checked={form.publishToFeed}
-          onChange={(event) => onPatch({ publishToFeed: event.target.checked })}
-        />
-        Publish video to feed
-      </label>
+      <PublishTargets form={form} onPatch={onPatch} />
       <TextField label="Feed tags" value={form.feedTags} onChange={(feedTags) => onPatch({ feedTags })} />
       <div className="field full">
         <label>Prompt</label>
@@ -2674,17 +2710,31 @@ function parseJsonObject(raw: string) {
   return parsed as Record<string, unknown>;
 }
 
+function extractMetadataTitle(raw: string) {
+  try {
+    const metadata = parseJsonObject(raw);
+    return typeof metadata.title === "string" ? metadata.title.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
 function buildGenerationPayload(form: GenerationFormState): GenerationInput {
   const imageInputs = parseImageInputs(form.imageUrls).map((item) => applySampleImageProcessingFlags(item, form.aspectRatio));
   const ctaUrl = form.ctaUrl.trim();
   const addOutroFocusArea = form.addOutroFocusArea !== false;
+  const metadata = parseJsonObject(form.metadata);
+  const inftTitle = form.inftTitle.trim();
   if (!ctaUrl) {
     throw new Error("cta_url is required for the server-generated CTA outro image");
+  }
+  if (inftTitle) {
+    metadata.title = inftTitle;
   }
 
   const payload: GenerationInput = {
     image_urls: imageInputs,
-    metadata: parseJsonObject(form.metadata),
+    metadata,
     prompt: form.prompt,
     video_model: form.videoModel,
     aspect_ratio: form.aspectRatio,

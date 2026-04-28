@@ -45,12 +45,14 @@ export function normalizeFeedTags(input: unknown): string[] {
 
 export function buildGenerationFeedSettings(input?: {
   published?: unknown;
+  samsarGalleryPublished?: unknown;
   tags?: unknown;
 }, metadata?: Record<string, unknown>): GenerationFeedSettings {
   return {
     published: input?.published !== false,
     tags: normalizeFeedTags(input?.tags ?? metadata?.tags),
-    publishedAt: input?.published === false ? undefined : nowIso()
+    publishedAt: input?.published === false ? undefined : nowIso(),
+    samsarGalleryPublished: input?.samsarGalleryPublished !== false
   };
 }
 
@@ -299,8 +301,9 @@ function searchableText(item: PublicFeedItem) {
 
 function feedTitle(generation: Generation, inft?: INFTRecord) {
   return cleanText(generation.input.metadata?.title) ||
+    titleFromSlug(cleanText(generation.input.metadata?.slug)) ||
     inft?.title ||
-    `Video ${generation.id}`;
+    "SuperReferrals Video";
 }
 
 function feedDescription(generation: Generation, inft?: INFTRecord) {
@@ -314,6 +317,23 @@ function creatorName(subAccount?: SubAccount) {
   return cleanText(subAccount?.username) ||
     cleanText(subAccount?.email?.split("@")[0]) ||
     "SuperReferrals creator";
+}
+
+function titleFromSlug(value: string) {
+  const slug = value
+    .trim()
+    .split(/[/?#]/)[0]
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!slug) {
+    return "";
+  }
+  return slug
+    .split(" ")
+    .map((part) => part ? part[0]!.toUpperCase() + part.slice(1) : "")
+    .join(" ");
 }
 
 function firstImageUrl(input: GenerationInput) {

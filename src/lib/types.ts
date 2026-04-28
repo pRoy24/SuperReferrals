@@ -211,6 +211,16 @@ export interface GenerationFeedSettings {
   published: boolean;
   tags: string[];
   publishedAt?: string;
+  samsarGalleryPublished?: boolean;
+  samsarPublication?: SamsarPublicationRecord;
+}
+
+export interface SamsarPublicationRecord {
+  status: "published" | "mock_published" | "failed";
+  sessionId: string;
+  publicationId?: string;
+  submittedAt: string;
+  errorMessage?: string;
 }
 
 export interface GenerationPayment {

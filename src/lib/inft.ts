@@ -203,6 +203,9 @@ async function recoverINFTToken(
     ? metadata.attributes.filter(isINFTAttribute)
     : [];
   const timestamp = new Date().toISOString();
+  const title = stringValue(metadata.name) ||
+    titleFromSlug(stringValue(superreferrals.referrerCode) || stringValue(superreferrals.referrer_code)) ||
+    "SuperReferrals Video";
 
   return {
     id: generationId,
@@ -210,7 +213,7 @@ async function recoverINFTToken(
     customerId: stringValue(superreferrals.customerId) || stringValue(superreferrals.customer_id),
     subAccountId: stringValue(superreferrals.subAccountId) || stringValue(superreferrals.sub_account_id),
     ownerWallet,
-    title: stringValue(metadata.name) || `SuperReferrals Video ${generationId}`,
+    title,
     description: stringValue(metadata.description) || "Generated marketing video",
     videoUrl: stringValue(metadata.animation_url) || stringValue(metadata.animationUrl) || stringValue(videoStorage.uri),
     storageRootHash: videoRootHash,
@@ -291,6 +294,23 @@ function recordValue(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function titleFromSlug(value: string) {
+  const slug = value
+    .trim()
+    .split(/[/?#]/)[0]
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!slug) {
+    return "";
+  }
+  return slug
+    .split(" ")
+    .map((part) => part ? part[0]!.toUpperCase() + part.slice(1) : "")
+    .join(" ");
 }
 
 function isINFTAttribute(value: unknown): value is INFTAttribute {

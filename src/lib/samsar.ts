@@ -1,9 +1,23 @@
 import { appBaseUrl, env, isProviderMock } from "./env";
 import { createId, nowIso } from "./ids";
 import { samsarApiV1Url } from "./samsar-api";
-import type { ExternalCreditGrant, ExternalUserIdentity, GenerationInput } from "./types";
+import type {
+  ExternalCreditGrant,
+  ExternalUserIdentity,
+  GenerationInput,
+  SamsarPublicationRecord,
+  VideoAspectRatio,
+  VideoModel
+} from "./types";
 
 const MOCK_VIDEO_URL = "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4";
+
+type SamsarPublicationClient = {
+  publishPublication(
+    input: Record<string, unknown>,
+    options?: { idempotencyKey?: string; externalUserApiKey?: string }
+  ): Promise<{ data: Record<string, unknown> }>;
+};
 
 function shouldMockSamsar(apiKeyOverride?: string) {
   if (isProviderMock("SAMSAR")) {
@@ -402,6 +416,125 @@ function normalizeSamsarSessionActionPayload(payload: Record<string, unknown>) {
     }
   }
   return normalized;
+}
+
+export async function publishSamsarSessionPublication(input: {
+  sessionId: string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  creatorHandle?: string;
+  aspectRatio?: VideoAspectRatio;
+  videoModel?: VideoModel;
+  prompt?: string;
+  language?: string;
+  apiKey?: string;
+  externalApiKey?: string;
+  idempotencyKey?: string;
+}): Promise<SamsarPublicationRecord> {
+  const sessionId = normalizeSamsarVideoSessionId(input.sessionId);
+  if (!sessionId) {
+    throw new Error("sessionId is required to publish a Samsar publication");
+  }
+
+  const credential = input.apiKey?.trim() || input.externalApiKey?.trim() || env("SAMSAR_API_KEY");
+  if (isProviderMock("SAMSAR") || sessionId.startsWith("mock_samsar_")) {
+    return {
+      status: "mock_published",
+      sessionId,
+      publicationId: createId("mock_pub"),
+      submittedAt: nowIso()
+    };
+  }
+  if (!credential) {
+    throw new Error("A Samsar API key or auth token is required to publish a Samsar publication");
+  }
+
+  const client = await samsarPublicationClient(credential, input.externalApiKey);
+  const response = await client.publishPublication(
+    {
+      session_id: sessionId,
+      title: input.title,
+      description: input.description,
+      tags: input.tags,
+      creator_handle: input.creatorHandle,
+      aspect_ratio: input.aspectRatio,
+      video_model: input.videoModel,
+      original_prompt: input.prompt,
+      session_language: input.language,
+      language: input.language
+    },
+    {
+      idempotencyKey: input.idempotencyKey || `superreferrals-publication:${sessionId}`,
+      externalUserApiKey: usableExternalApiKey(input.externalApiKey)
+    }
+  );
+  const data = response.data || {};
+  return {
+    status: "published",
+    sessionId: publicationSessionId(data) || sessionId,
+    publicationId: publicationId(data) || undefined,
+    submittedAt: nowIso()
+  };
+}
+
+async function samsarPublicationClient(apiKey: string, externalApiKey?: string) {
+  const dynamicImport = new Function("specifier", "return import(specifier)") as (
+    specifier: string
+  ) => Promise<{ default: new (options: {
+    apiKey: string;
+    baseUrl: string;
+    externalUserApiKey?: string;
+  }) => SamsarPublicationClient }>;
+  const { default: SamsarClient } = await dynamicImport("samsar-js");
+  return new SamsarClient({
+    apiKey,
+    baseUrl: samsarApiV1Url(),
+    externalUserApiKey: usableExternalApiKey(externalApiKey)
+  });
+}
+
+function usableExternalApiKey(value?: string) {
+  const clean = value?.trim();
+  return clean && !clean.startsWith("mock_") ? clean : undefined;
+}
+
+function publicationId(data: Record<string, unknown>) {
+  const publication = recordValue(data.publication);
+  return firstStringValue(
+    data.publication_id,
+    data.publicationId,
+    data.id,
+    publication.publication_id,
+    publication.publicationId,
+    publication.id
+  );
+}
+
+function publicationSessionId(data: Record<string, unknown>) {
+  const publication = recordValue(data.publication);
+  const session = recordValue(data.session);
+  return normalizeSamsarVideoSessionId(firstStringValue(
+    data.session_id,
+    data.sessionId,
+    publication.session_id,
+    publication.sessionId,
+    session.session_id,
+    session.sessionId
+  ));
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function firstStringValue(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
 }
 
 export async function createSamsarAssistantCompletion(payload: Record<string, unknown>) {
