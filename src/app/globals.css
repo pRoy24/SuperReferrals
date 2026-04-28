@@ -2392,6 +2392,16 @@ button.item {
   border-color: rgba(244, 253, 255, 0.92);
 }
 
+.feed-assistant-toggle {
+  width: auto;
+  min-width: 118px;
+  grid-auto-flow: column;
+  gap: 7px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .feed-controls {
   position: fixed;
   top: 78px;
@@ -3068,7 +3078,11 @@ button.item {
   }
 
   .feed-toolbar {
-    max-width: 150px;
+    max-width: 182px;
+  }
+
+  .feed-assistant-toggle {
+    min-width: 126px;
   }
 
   .feed-controls {
@@ -3245,6 +3259,21 @@ button.item {
   display: grid;
   justify-items: end;
   gap: 12px;
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.page-assistant.feed-page {
+  z-index: 28;
+}
+
+.page-assistant.feed-page.feed-hidden {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.page-assistant.feed-page.feed-hidden .page-assistant-launcher,
+.page-assistant.feed-page.feed-hidden .page-assistant-panel {
   pointer-events: none;
 }
 

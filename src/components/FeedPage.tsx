@@ -32,6 +32,7 @@ const sortOptions: Array<{ value: FeedSortOption; label: string }> = [
   { value: "most_commented", label: "Most commented" },
   { value: "most_viewed", label: "Most viewed" }
 ];
+const PAGE_ASSISTANT_COMMAND_EVENT = "superreferrals:page-assistant";
 
 export default function FeedPage() {
   const [items, setItems] = useState<PublicFeedItem[]>([]);
@@ -272,6 +273,11 @@ export default function FeedPage() {
     }
   }
 
+  function openAssistant() {
+    setControlsVisible(true);
+    window.dispatchEvent(new CustomEvent(PAGE_ASSISTANT_COMMAND_EVENT, { detail: { action: "open" } }));
+  }
+
   const feedClass = `feed-shell ${viewMode === "mobile" ? "is-mobile" : "is-desktop"} ${controlsVisible ? "controls-visible" : ""}`;
 
   return (
@@ -296,6 +302,10 @@ export default function FeedPage() {
           </button>
           <button className="icon-toggle" onClick={() => loadFeed().catch((error) => setMessage(error.message))} title="Refresh feed">
             <RefreshCw size={18} />
+          </button>
+          <button className="icon-toggle feed-assistant-toggle" onClick={openAssistant} title="Open assistant">
+            <MessageCircle size={18} />
+            <span>Assistant</span>
           </button>
         </div>
       </header>

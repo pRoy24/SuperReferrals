@@ -14,7 +14,7 @@ import {
   X
 } from "lucide-react";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type MutableRefObject } from "react";
 import { samsarAuthHeaders } from "@/lib/storefront-auth-client";
 
 type AssistantRole = "user" | "assistant";
@@ -37,6 +37,8 @@ type AssistantThread = {
 };
 
 const ASSISTANT_USER_STORAGE_KEY = "superreferrals:page-assistant-user";
+const PAGE_ASSISTANT_COMMAND_EVENT = "superreferrals:page-assistant";
+const FEED_ASSISTANT_HIDE_DELAY = 1400;
 
 export default function PageAssistant() {
   const pathname = usePathname() || "/";
@@ -47,12 +49,21 @@ export default function PageAssistant() {
   const [busy, setBusy] = useState<"load" | "send" | "clear" | "">("");
   const [error, setError] = useState("");
   const [copiedMessageId, setCopiedMessageId] = useState("");
+  const [feedAssistantVisible, setFeedAssistantVisible] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const assistantUserIdRef = useRef("");
+  const feedAssistantHideTimer = useRef<number | null>(null);
 
+  const isFeedPage = pathname === "/feed";
   const messages = useMemo(() => thread?.messages || [], [thread?.messages]);
   const pageTitle = thread?.pageTitle || pageLabelFromPath(pathname);
   const hasActivity = messages.length > 0 || busy === "send";
+  const assistantClass = [
+    "page-assistant",
+    isExpanded ? "expanded" : "",
+    isFeedPage ? "feed-page" : "",
+    isFeedPage && !feedAssistantVisible && !isOpen ? "feed-hidden" : ""
+  ].filter(Boolean).join(" ");
 
   useEffect(() => {
     assistantUserIdRef.current = getOrCreateAssistantUserId();
@@ -87,6 +98,65 @@ export default function PageAssistant() {
 
     return () => controller.abort();
   }, [pathname]);
+
+  useEffect(() => {
+    if (!isFeedPage) {
+      clearFeedAssistantHideTimer(feedAssistantHideTimer);
+      setFeedAssistantVisible(false);
+      return;
+    }
+    setIsOpen(false);
+    setIsExpanded(false);
+    setFeedAssistantVisible(false);
+    clearFeedAssistantHideTimer(feedAssistantHideTimer);
+  }, [isFeedPage]);
+
+  useEffect(() => {
+    function handleAssistantCommand(event: Event) {
+      const action = (event as CustomEvent<{ action?: "open" | "toggle" | "close" }>).detail?.action || "open";
+      clearFeedAssistantHideTimer(feedAssistantHideTimer);
+      setFeedAssistantVisible(true);
+      if (action === "close") {
+        setIsOpen(false);
+        return;
+      }
+      if (action === "toggle") {
+        setIsOpen((current) => !current);
+        return;
+      }
+      setIsOpen(true);
+    }
+
+    window.addEventListener(PAGE_ASSISTANT_COMMAND_EVENT, handleAssistantCommand);
+    return () => window.removeEventListener(PAGE_ASSISTANT_COMMAND_EVENT, handleAssistantCommand);
+  }, []);
+
+  useEffect(() => {
+    if (!isFeedPage || isOpen) {
+      return;
+    }
+
+    function revealTemporarily() {
+      setFeedAssistantVisible(true);
+      clearFeedAssistantHideTimer(feedAssistantHideTimer);
+      feedAssistantHideTimer.current = window.setTimeout(() => {
+        setFeedAssistantVisible(false);
+        feedAssistantHideTimer.current = null;
+      }, FEED_ASSISTANT_HIDE_DELAY);
+    }
+
+    window.addEventListener("pointermove", revealTemporarily, { passive: true });
+    window.addEventListener("scroll", revealTemporarily, { capture: true, passive: true });
+    return () => {
+      window.removeEventListener("pointermove", revealTemporarily);
+      window.removeEventListener("scroll", revealTemporarily, { capture: true });
+      clearFeedAssistantHideTimer(feedAssistantHideTimer);
+    };
+  }, [isFeedPage, isOpen]);
+
+  useEffect(() => {
+    return () => clearFeedAssistantHideTimer(feedAssistantHideTimer);
+  }, []);
 
   useEffect(() => {
     if (!isOpen) {
@@ -182,6 +252,25 @@ export default function PageAssistant() {
     }
   }
 
+  function holdFeedAssistant() {
+    if (!isFeedPage) {
+      return;
+    }
+    clearFeedAssistantHideTimer(feedAssistantHideTimer);
+    setFeedAssistantVisible(true);
+  }
+
+  function releaseFeedAssistant() {
+    if (!isFeedPage || isOpen) {
+      return;
+    }
+    clearFeedAssistantHideTimer(feedAssistantHideTimer);
+    feedAssistantHideTimer.current = window.setTimeout(() => {
+      setFeedAssistantVisible(false);
+      feedAssistantHideTimer.current = null;
+    }, FEED_ASSISTANT_HIDE_DELAY);
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -190,7 +279,7 @@ export default function PageAssistant() {
   }
 
   return (
-    <div className={`page-assistant ${isExpanded ? "expanded" : ""}`}>
+    <div className={assistantClass} onPointerEnter={holdFeedAssistant} onPointerLeave={releaseFeedAssistant}>
       <button
         type="button"
         className="page-assistant-launcher"
@@ -283,6 +372,13 @@ export default function PageAssistant() {
       )}
     </div>
   );
+}
+
+function clearFeedAssistantHideTimer(timerRef: MutableRefObject<number | null>) {
+  if (timerRef.current !== null) {
+    window.clearTimeout(timerRef.current);
+    timerRef.current = null;
+  }
 }
 
 function TypingIndicator() {
