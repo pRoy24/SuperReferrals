@@ -1880,8 +1880,8 @@ button.item {
 
 .image-url-preview {
   display: grid;
-  grid-template-columns: 112px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 8px;
   align-items: center;
   min-width: 0;
 }
@@ -1895,7 +1895,7 @@ button.item {
 
 .image-url-preview-frame {
   position: relative;
-  width: 112px;
+  width: 88px;
   aspect-ratio: 16 / 9;
   display: grid;
   place-items: center;
@@ -1905,7 +1905,7 @@ button.item {
   background:
     linear-gradient(135deg, rgba(239, 246, 255, 0.92), rgba(255, 247, 237, 0.88));
   color: #64748b;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 800;
 }
 
