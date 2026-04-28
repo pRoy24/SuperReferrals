@@ -47,6 +47,7 @@ const BLOCKED_KEYS = new Set([
 const PLACEHOLDER_PATTERNS = [
   /^replace_with_/i,
   /^your-domain\.example$/i,
+  /your[-\w.]*\.example/i,
   /^<.*>$/,
   /paste[_-]?/,
   /todo/i
@@ -77,14 +78,16 @@ function main() {
   const variables = parseEnvFile(readFileSync(sourcePath, "utf8"), target.sourceFile);
   validateVariables(variables, targetName, options);
 
-  const hashes = Object.fromEntries(variables.map(({ key, value }) => [key, hashValue(key, value)]));
+  const skippedEmpty = options.includeEmpty ? [] : variables.filter(({ value }) => value === "");
+  const uploadVariables = options.includeEmpty ? variables : variables.filter(({ value }) => value !== "");
+  const hashes = Object.fromEntries(uploadVariables.map(({ key, value }) => [key, hashValue(key, value)]));
   const previousState = loadState(statePath, target);
   const previousHashes = previousState.hashes || {};
-  const changed = variables.filter(({ key }) => options.forceAll || previousHashes[key] !== hashes[key]);
+  const changed = uploadVariables.filter(({ key }) => options.forceAll || previousHashes[key] !== hashes[key]);
   const removed = Object.keys(previousHashes)
     .filter((key) => !(key in hashes))
     .sort();
-  const unchangedCount = variables.length - changed.length;
+  const unchangedCount = uploadVariables.length - changed.length;
 
   printPlan({
     targetName,
@@ -95,6 +98,7 @@ function main() {
     changed,
     removed,
     unchangedCount,
+    skippedEmpty,
     deleteRemoved: options.deleteRemoved,
     dryRun: options.dryRun
   });
@@ -150,7 +154,8 @@ function parseArgs(args) {
     branch: undefined,
     scope: "",
     project: "",
-    verbose: false
+    verbose: false,
+    includeEmpty: false
   };
 
   let targetName = "";
@@ -197,6 +202,12 @@ function parseArgs(args) {
         break;
       case "verbose":
         options.verbose = true;
+        break;
+      case "include-empty":
+        options.includeEmpty = true;
+        break;
+      case "skip-empty":
+        options.includeEmpty = false;
         break;
       case "file":
         options.file = readValue();
@@ -504,6 +515,7 @@ function printPlan({
   changed,
   removed,
   unchangedCount,
+  skippedEmpty,
   deleteRemoved,
   dryRun
 }) {
@@ -514,6 +526,7 @@ function printPlan({
   console.log(`source: ${sourceFile}`);
   console.log(`changed: ${changed.length}, unchanged: ${unchangedCount}, removed locally: ${removed.length}`);
   if (changed.length) console.log(`will set: ${changed.map(({ key }) => key).join(", ")}`);
+  if (skippedEmpty.length) console.log(`skipped empty: ${skippedEmpty.map(({ key }) => key).join(", ")}`);
   if (removed.length) {
     const action = deleteRemoved ? "will remove" : "remote removals disabled";
     console.log(`${action}: ${removed.join(", ")}`);
@@ -533,6 +546,7 @@ Options:
   --scope <team>               Override Vercel team/scope slug
   --project <name>             Override Vercel project name for first-time link
   --use-global-token           Use the active Vercel CLI login instead of requiring VERCEL_TOKEN
+  --include-empty              Upload empty values instead of skipping them
   --allow-placeholders         Permit obvious placeholder values
   --allow-local-app-base-url   Permit APP_BASE_URL=http://localhost...
   --verbose                    Print non-secret Vercel CLI output

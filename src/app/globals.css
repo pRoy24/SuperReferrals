@@ -1500,6 +1500,71 @@ button.item {
   margin: 6px 0 8px;
 }
 
+.render-warning-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(10px);
+}
+
+.render-warning-dialog {
+  width: min(450px, 100%);
+  display: grid;
+  gap: 14px;
+  border: 1px solid rgba(249, 115, 22, 0.28);
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  padding: 18px;
+}
+
+.render-warning-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.render-warning-title svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.render-warning-title h3 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.render-warning-dialog p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.render-warning-details {
+  border: 1px solid rgba(249, 115, 22, 0.2);
+  border-radius: 8px;
+  background: var(--soft-orange);
+  color: #9a3412;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.render-warning-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .rating-form {
   display: grid;
   gap: 10px;

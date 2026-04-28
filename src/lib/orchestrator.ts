@@ -1807,6 +1807,7 @@ function normalizeGenerationInput(input: GenerationInput): GenerationInput {
   const generatesOutroFromUrl = !hasProvidedOutro && (input.generate_outro_image === true || Boolean(input.cta_url));
   const addOutroAnimation = input.add_outro_animation ?? generatesOutroFromUrl;
   const addOutroFocusArea = input.add_outro_focus_area ?? generatesOutroFromUrl;
+  const addFooterAnimation = !hasProvidedOutro && input.add_footer_animation === true;
   const aspectRatio = input.aspect_ratio || "16:9";
   const normalizedInput: GenerationInput = {
     ...input,
@@ -1822,11 +1823,27 @@ function normalizeGenerationInput(input: GenerationInput): GenerationInput {
     cta_text_top: hasProvidedOutro ? undefined : input.cta_text_top,
     cta_text_bottom: hasProvidedOutro ? undefined : input.cta_text_bottom,
     cta_logo: hasProvidedOutro ? undefined : input.cta_logo,
+    add_footer_animation: addFooterAnimation,
+    footer_metadata: addFooterAnimation ? normalizeFooterMetadata(input.footer_metadata, input.cta_url) : undefined,
     image_urls: normalizeGenerationImageInputs(input.image_urls || [], aspectRatio)
   };
-  delete normalizedInput.add_footer_animation;
-  delete normalizedInput.footer_metadata;
   return normalizedInput;
+}
+
+function normalizeFooterMetadata(
+  footerMetadata: GenerationInput["footer_metadata"],
+  fallbackUrl?: string
+): GenerationInput["footer_metadata"] {
+  if (Array.isArray(footerMetadata) && footerMetadata.length > 0) {
+    return footerMetadata
+      .map((item) => ({
+        url: String(item?.url || fallbackUrl || "").trim(),
+        ...(item?.title ? { title: String(item.title).trim() } : {})
+      }))
+      .filter((item) => item.url);
+  }
+  const ctaUrl = String(fallbackUrl || "").trim();
+  return ctaUrl ? [{ url: ctaUrl }] : undefined;
 }
 
 function normalizeGenerationImageInputs(imageUrls: GenerationInput["image_urls"], aspectRatio: VideoAspectRatio): GenerationInput["image_urls"] {
@@ -1916,6 +1933,14 @@ function validateGenerationAssetUrls(input: GenerationInput) {
   }
   if (input.cta_logo) {
     assertReachableUrlShape(input.cta_logo, "cta_logo");
+  }
+  if (input.cta_url) {
+    assertReachableUrlShape(input.cta_url, "cta_url");
+  }
+  for (const [index, item] of (input.footer_metadata || []).entries()) {
+    if (item?.url) {
+      assertReachableUrlShape(item.url, `footer_metadata item ${index + 1}`);
+    }
   }
 }
 

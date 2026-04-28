@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Bot, ChevronDown, CircleDollarSign, Code2, ExternalLink, GripVertical, ListChecks, Play, Plus, RefreshCw, Store, Trash2, Undo2, Upload, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Bot, ChevronDown, CircleDollarSign, Code2, ExternalLink, GripVertical, ListChecks, Play, Plus, RefreshCw, Store, Trash2, Undo2, Upload, Wallet } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from "react";
 import { UserStoreCreatorSkeleton } from "@/components/FormLoadingSkeletons";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
@@ -57,6 +57,10 @@ type GenerationFormState = {
   addOutroFocusArea: boolean;
   outroFocusArea: string;
   ctaUrl: string;
+  ctaTextTop: string;
+  ctaTextBottom: string;
+  ctaLogo: string;
+  addFooterAnimation: boolean;
   publishToFeed: boolean;
   publishToSamsarGallery: boolean;
   feedTags: string;
@@ -89,6 +93,16 @@ type RenderFlowState = {
   message: string;
   txHash?: string;
   generationId?: string;
+};
+
+type ImageOrientation = "portrait" | "landscape";
+
+type RenderOrientationWarning = {
+  imageOrientation: ImageOrientation;
+  renderOrientation: ImageOrientation;
+  detectedCount: number;
+  majorityCount: number;
+  skippedCount: number;
 };
 
 const activeGenerationStatuses = new Set<GenerationStatus>([
@@ -166,6 +180,10 @@ function createDefaultGenerationForm(modelSelection?: Pick<GenerationFormState, 
     addOutroFocusArea: true,
     outroFocusArea: defaultOutroFocusArea,
     ctaUrl: "https://www.pexels.com/search/technology%20lifestyle/",
+    ctaTextTop: "Scan to learn more",
+    ctaTextBottom: "Open the offer",
+    ctaLogo: "",
+    addFooterAnimation: true,
     publishToFeed: true,
     publishToSamsarGallery: true,
     feedTags: "tech, lifestyle, product",
@@ -200,6 +218,15 @@ function restorePersistedGenerationForm(
     if (typeof persisted.addOutroFocusArea === "boolean") next.addOutroFocusArea = persisted.addOutroFocusArea;
     if (typeof persisted.outroFocusArea === "string") next.outroFocusArea = persisted.outroFocusArea;
     if (typeof persisted.ctaUrl === "string") next.ctaUrl = persisted.ctaUrl;
+    if (typeof persistedRecord.cta_url === "string" && !persisted.ctaUrl) next.ctaUrl = persistedRecord.cta_url;
+    if (typeof persisted.ctaTextTop === "string") next.ctaTextTop = persisted.ctaTextTop;
+    if (typeof persistedRecord.cta_text_top === "string") next.ctaTextTop = persistedRecord.cta_text_top;
+    if (typeof persisted.ctaTextBottom === "string") next.ctaTextBottom = persisted.ctaTextBottom;
+    if (typeof persistedRecord.cta_text_bottom === "string") next.ctaTextBottom = persistedRecord.cta_text_bottom;
+    if (typeof persisted.ctaLogo === "string") next.ctaLogo = persisted.ctaLogo;
+    if (typeof persistedRecord.cta_logo === "string") next.ctaLogo = persistedRecord.cta_logo;
+    if (typeof persisted.addFooterAnimation === "boolean") next.addFooterAnimation = persisted.addFooterAnimation;
+    if (typeof persistedRecord.add_footer_animation === "boolean") next.addFooterAnimation = persistedRecord.add_footer_animation;
     if (typeof persisted.publishToFeed === "boolean") next.publishToFeed = persisted.publishToFeed;
     if (typeof persisted.publishToSamsarGallery === "boolean") next.publishToSamsarGallery = persisted.publishToSamsarGallery;
     if (typeof persisted.feedTags === "string") next.feedTags = persisted.feedTags;
@@ -258,7 +285,9 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const [autoPolling, setAutoPolling] = useState(false);
   const [renderFlow, setRenderFlow] = useState<RenderFlowState>({ status: "idle", message: "" });
   const [renderSessionLocked, setRenderSessionLocked] = useState(false);
+  const [renderOrientationWarning, setRenderOrientationWarning] = useState<RenderOrientationWarning | null>(null);
   const generationSubmitInFlightRef = useRef(false);
+  const pendingRenderCurrencyRef = useRef<PaymentCurrencySymbol | null>(null);
 
   async function load() {
     const response = await fetch("/api/bootstrap", { cache: "no-store" });
@@ -370,7 +399,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     () => previewGenerationPayload(generationForm),
     [generationForm]
   );
-  const renderSubmitDisabled = busy === "generation" || renderSessionLocked || imageCount === 0;
+  const renderSubmitDisabled = busy === "generation" || busy === "orientation" || renderSessionLocked || imageCount === 0;
 
   function updateGenerationForm(patch: RenderFormPatch) {
     const nextPatch = {
@@ -1080,6 +1109,47 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     }
   }
 
+  async function startRenderWithOrientationCheck(currency = paymentCurrency) {
+    if (!customer) return;
+    if (generationSubmitInFlightRef.current || renderSessionLocked || renderConditionError || renderAccessError) {
+      await runGeneration(currency);
+      return;
+    }
+    setBusy("orientation");
+    setMessage("Checking image dimensions before starting the render.");
+    try {
+      const warning = await detectRenderOrientationWarning(generationForm);
+      if (warning) {
+        pendingRenderCurrencyRef.current = currency;
+        setRenderOrientationWarning(warning);
+        setMessage("");
+        return;
+      }
+    } catch {
+      // Continue to the normal render flow; payload validation there will surface actionable errors.
+    } finally {
+      setBusy("");
+    }
+    await runGeneration(currency);
+  }
+
+  async function continueRenderAfterOrientationWarning() {
+    const currency = pendingRenderCurrencyRef.current || paymentCurrency;
+    pendingRenderCurrencyRef.current = null;
+    setRenderOrientationWarning(null);
+    await runGeneration(currency);
+  }
+
+  function cancelRenderAfterOrientationWarning() {
+    pendingRenderCurrencyRef.current = null;
+    setRenderOrientationWarning(null);
+    if (renderFormMode !== "simple") {
+      syncRenderWizardState(generationForm);
+      setRenderFormMode("simple");
+    }
+    setMessage("Render paused. Adjust the image scenes or choose a matching render aspect ratio.");
+  }
+
   async function syncGeneration(id: string) {
     setBusy(id);
     setMessage("");
@@ -1192,6 +1262,14 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
               {pricingOptions.length === 0 && <p className="subtle">This storefront has no enabled pricing options.</p>}
             </div>
           </div>
+          {renderOrientationWarning && (
+            <RenderOrientationWarningDialog
+              warning={renderOrientationWarning}
+              aspectRatio={generationForm.aspectRatio}
+              onCancel={cancelRenderAfterOrientationWarning}
+              onContinue={() => continueRenderAfterOrientationWarning().catch(() => undefined)}
+            />
+          )}
         </section>
 
         <section className="stack">
@@ -1267,10 +1345,11 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
                 selectedSymbol={paymentCurrency}
                 settlementToken={settlementToken}
                 disabled={renderSubmitDisabled}
-                busy={busy === "generation"}
+                busy={busy === "generation" || busy === "orientation"}
                 locked={renderSessionLocked}
                 onSelect={setPaymentCurrency}
-                onPay={() => runGeneration(paymentCurrency)}
+                onPay={() => startRenderWithOrientationCheck(paymentCurrency)}
+                busyLabel={busy === "orientation" ? "Checking..." : undefined}
               />
               {quote?.checkoutUrl && quote.paymentRail === "uniswap" && (
                 <a className="btn" href={quote.checkoutUrl} target="_blank" rel="noreferrer">
@@ -1590,6 +1669,22 @@ function SimpleRenderForm({
           <TextField label="CTA outro URL" value={form.ctaUrl} onChange={(ctaUrl) => onPatch({ ctaUrl })} />
           {usesServerGeneratedOutro && (
             <>
+              <TextField
+                label="CTA top text"
+                value={form.ctaTextTop}
+                onChange={(ctaTextTop) => onPatch({ ctaTextTop })}
+              />
+              <TextField
+                label="CTA bottom text"
+                value={form.ctaTextBottom}
+                onChange={(ctaTextBottom) => onPatch({ ctaTextBottom })}
+              />
+              <TextField
+                label="CTA logo URL"
+                value={form.ctaLogo}
+                onChange={(ctaLogo) => onPatch({ ctaLogo })}
+                full
+              />
               <label className="toggle-row">
                 <input
                   type="checkbox"
@@ -1605,6 +1700,14 @@ function SimpleRenderForm({
                   onChange={(event) => onPatch({ addOutroFocusArea: event.target.checked })}
                 />
                 Animate outro image focus area
+              </label>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={form.addFooterAnimation}
+                  onChange={(event) => onPatch({ addFooterAnimation: event.target.checked })}
+                />
+                Animate per-scene CTA footer
               </label>
             </>
           )}
@@ -1853,6 +1956,9 @@ function AdvancedRenderForm({
         Enable subtitles
       </label>
       <TextField label="CTA outro URL" value={form.ctaUrl} onChange={(ctaUrl) => onPatch({ ctaUrl })} />
+      <TextField label="CTA top text" value={form.ctaTextTop} onChange={(ctaTextTop) => onPatch({ ctaTextTop })} />
+      <TextField label="CTA bottom text" value={form.ctaTextBottom} onChange={(ctaTextBottom) => onPatch({ ctaTextBottom })} />
+      <TextField label="CTA logo URL" value={form.ctaLogo} onChange={(ctaLogo) => onPatch({ ctaLogo })} full />
       <TextField label="Payment tx hash (manual fallback)" value={form.txHash} onChange={(txHash) => onPatch({ txHash })} full />
       <label className="toggle-row">
         <input
@@ -1869,6 +1975,14 @@ function AdvancedRenderForm({
           onChange={(event) => onPatch({ addOutroFocusArea: event.target.checked })}
         />
         Animate outro image focus area
+      </label>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={form.addFooterAnimation}
+          onChange={(event) => onPatch({ addFooterAnimation: event.target.checked })}
+        />
+        Animate per-scene CTA footer
       </label>
       <div className="field full">
         <label>Outro focus area JSON</label>
@@ -1943,6 +2057,51 @@ function RenderFlowNotice({ state }: { state: RenderFlowState }) {
   );
 }
 
+function RenderOrientationWarningDialog({
+  warning,
+  aspectRatio,
+  onCancel,
+  onContinue
+}: {
+  warning: RenderOrientationWarning;
+  aspectRatio: VideoAspectRatio;
+  onCancel: () => void;
+  onContinue: () => void;
+}) {
+  const imageLabel = orientationLabel(warning.imageOrientation);
+  const renderLabel = orientationLabel(warning.renderOrientation);
+  return (
+    <div className="render-warning-backdrop" role="presentation">
+      <div
+        className="render-warning-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="render-orientation-warning-title"
+      >
+        <div className="render-warning-title">
+          <AlertTriangle size={22} aria-hidden="true" />
+          <h3 id="render-orientation-warning-title">Dimension mismatch</h3>
+        </div>
+        <p>
+          Image height and width don't match dimensions of result video. Quality may be affected.
+        </p>
+        <div className="render-warning-details">
+          Most detected images are {imageLabel} ({warning.majorityCount} of {warning.detectedCount}), but the result video is {renderLabel} ({aspectRatio}).
+          {warning.skippedCount > 0 && ` ${warning.skippedCount} image${warning.skippedCount === 1 ? "" : "s"} could not be checked.`}
+        </div>
+        <div className="render-warning-actions">
+          <button type="button" className="btn" onClick={onCancel}>
+            No
+          </button>
+          <button type="button" className="btn primary" onClick={onContinue}>
+            Yes, continue
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PricingOption({
   item,
   customer,
@@ -1978,6 +2137,7 @@ function PaymentActionControl({
   settlementToken,
   disabled,
   busy,
+  busyLabel,
   locked,
   onSelect,
   onPay
@@ -1987,6 +2147,7 @@ function PaymentActionControl({
   settlementToken: PaymentToken;
   disabled: boolean;
   busy: boolean;
+  busyLabel?: string;
   locked: boolean;
   onSelect: (symbol: PaymentCurrencySymbol) => void;
   onPay: () => void;
@@ -1999,7 +2160,7 @@ function PaymentActionControl({
   return (
     <div className="payment-action-control" title={currencyTooltip}>
       <button className="btn primary payment-action-main" disabled={disabled} onClick={onPay} type="button">
-        <Play size={16} /> {busy ? "Starting..." : locked ? "Reset session first" : `Pay ${selectedSymbol} & start render`}
+        <Play size={16} /> {busy ? busyLabel || "Starting..." : locked ? "Reset session first" : `Pay ${selectedSymbol} & start render`}
       </button>
       <span className="payment-action-currency">
         <select
@@ -2722,6 +2883,9 @@ function extractMetadataTitle(raw: string) {
 function buildGenerationPayload(form: GenerationFormState): GenerationInput {
   const imageInputs = parseImageInputs(form.imageUrls).map((item) => applySampleImageProcessingFlags(item, form.aspectRatio));
   const ctaUrl = form.ctaUrl.trim();
+  const ctaTextTop = form.ctaTextTop.trim();
+  const ctaTextBottom = form.ctaTextBottom.trim();
+  const ctaLogo = form.ctaLogo.trim();
   const addOutroFocusArea = form.addOutroFocusArea !== false;
   const metadata = parseJsonObject(form.metadata);
   const inftTitle = form.inftTitle.trim();
@@ -2743,13 +2907,145 @@ function buildGenerationPayload(form: GenerationFormState): GenerationInput {
     generate_outro_image: true,
     cta_url: ctaUrl,
     add_outro_animation: form.addOutroAnimation,
-    add_outro_focus_area: addOutroFocusArea
+    add_outro_focus_area: addOutroFocusArea,
+    add_footer_animation: form.addFooterAnimation
   };
+
+  if (ctaTextTop) {
+    payload.cta_text_top = ctaTextTop;
+  }
+  if (ctaTextBottom) {
+    payload.cta_text_bottom = ctaTextBottom;
+  }
+  if (ctaLogo) {
+    payload.cta_logo = ctaLogo;
+  }
+  if (form.addFooterAnimation) {
+    payload.footer_metadata = buildFooterMetadata(imageInputs, ctaUrl);
+  }
 
   if (addOutroFocusArea) {
     payload.outro_focust_area = parseOutroFocusArea(form.outroFocusArea);
   }
   return payload;
+}
+
+function buildFooterMetadata(imageInputs: Array<string | Record<string, unknown>>, ctaUrl: string): NonNullable<GenerationInput["footer_metadata"]> {
+  return imageInputs.map((item, index) => {
+    const record = typeof item === "object" && item && !Array.isArray(item) ? item as Record<string, unknown> : undefined;
+    const title = String(record?.title || record?.image_text || record?.imageText || `Scene ${index + 1}`).trim();
+    return {
+      url: ctaUrl,
+      ...(title ? { title } : {})
+    };
+  });
+}
+
+async function detectRenderOrientationWarning(form: GenerationFormState): Promise<RenderOrientationWarning | null> {
+  const imageUrls = parseImageInputs(form.imageUrls)
+    .map((item) => getEffectiveRenderImageUrl(item, form.aspectRatio))
+    .filter(Boolean);
+  if (imageUrls.length === 0) {
+    return null;
+  }
+
+  const dimensions = await Promise.all(imageUrls.map((imageUrl) =>
+    loadImageDimensions(imageUrl).catch(() => null)
+  ));
+  let portraitCount = 0;
+  let landscapeCount = 0;
+  for (const dimension of dimensions) {
+    if (!dimension) {
+      continue;
+    }
+    const orientation = imageOrientationFromDimensions(dimension.width, dimension.height);
+    if (orientation === "portrait") {
+      portraitCount += 1;
+    }
+    if (orientation === "landscape") {
+      landscapeCount += 1;
+    }
+  }
+
+  const detectedCount = portraitCount + landscapeCount;
+  if (detectedCount === 0 || portraitCount === landscapeCount) {
+    return null;
+  }
+
+  const imageOrientation = portraitCount > landscapeCount ? "portrait" : "landscape";
+  const majorityCount = imageOrientation === "portrait" ? portraitCount : landscapeCount;
+  const renderOrientation = orientationFromAspectRatio(form.aspectRatio);
+  if (majorityCount <= detectedCount / 2 || imageOrientation === renderOrientation) {
+    return null;
+  }
+
+  return {
+    imageOrientation,
+    renderOrientation,
+    detectedCount,
+    majorityCount,
+    skippedCount: imageUrls.length - detectedCount
+  };
+}
+
+function getEffectiveRenderImageUrl(item: string | Record<string, unknown>, aspectRatio: VideoAspectRatio) {
+  const effective = applySampleImageProcessingFlags(item, aspectRatio);
+  return typeof effective === "string" ? effective : getImageInputUrl(effective);
+}
+
+function loadImageDimensions(imageUrl: string) {
+  return new Promise<{ width: number; height: number }>((resolve, reject) => {
+    const image = new Image();
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Image dimension check timed out."));
+    }, 8000);
+
+    function cleanup() {
+      window.clearTimeout(timeout);
+      image.onload = null;
+      image.onerror = null;
+    }
+
+    function complete() {
+      cleanup();
+      if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+        resolve({ width: image.naturalWidth, height: image.naturalHeight });
+        return;
+      }
+      reject(new Error("Image dimensions were unavailable."));
+    }
+
+    image.onload = complete;
+    image.onerror = () => {
+      cleanup();
+      reject(new Error("Image dimension check failed."));
+    };
+    image.decoding = "async";
+    image.src = imageUrl;
+    if (image.complete) {
+      complete();
+    }
+  });
+}
+
+function imageOrientationFromDimensions(width: number, height: number): ImageOrientation | "" {
+  if (height > width) {
+    return "portrait";
+  }
+  if (width > height) {
+    return "landscape";
+  }
+  return "";
+}
+
+function orientationFromAspectRatio(aspectRatio: VideoAspectRatio): ImageOrientation {
+  const [width, height] = aspectRatio.split(":").map((value) => Number(value));
+  return width > height ? "landscape" : "portrait";
+}
+
+function orientationLabel(orientation: ImageOrientation) {
+  return orientation === "portrait" ? "vertical" : "landscape";
 }
 
 function applySampleImageProcessingFlags(item: string | Record<string, unknown>, aspectRatio: VideoAspectRatio): string | Record<string, unknown> {
