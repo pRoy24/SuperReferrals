@@ -260,18 +260,27 @@ function buildMetrics(store: SuperReferralsStore, generation: Generation): FeedM
 
 function compareFeedItems(left: PublicFeedItem, right: PublicFeedItem, sort: FeedSortOption) {
   if (sort === "newest") {
-    return Date.parse(right.publishedAt) - Date.parse(left.publishedAt);
+    return feedCreatedTime(right) - feedCreatedTime(left);
   }
   if (sort === "most_liked") {
-    return right.metrics.likes - left.metrics.likes || Date.parse(right.publishedAt) - Date.parse(left.publishedAt);
+    return right.metrics.likes - left.metrics.likes || feedCreatedTime(right) - feedCreatedTime(left);
   }
   if (sort === "most_commented") {
-    return right.metrics.comments - left.metrics.comments || Date.parse(right.publishedAt) - Date.parse(left.publishedAt);
+    return right.metrics.comments - left.metrics.comments || feedCreatedTime(right) - feedCreatedTime(left);
   }
   if (sort === "most_viewed") {
-    return right.metrics.views - left.metrics.views || Date.parse(right.publishedAt) - Date.parse(left.publishedAt);
+    return right.metrics.views - left.metrics.views || feedCreatedTime(right) - feedCreatedTime(left);
   }
-  return right.metrics.score - left.metrics.score || Date.parse(right.publishedAt) - Date.parse(left.publishedAt);
+  return right.metrics.score - left.metrics.score || feedCreatedTime(right) - feedCreatedTime(left);
+}
+
+function feedCreatedTime(item: PublicFeedItem) {
+  const createdAt = Date.parse(item.createdAt);
+  if (Number.isFinite(createdAt)) {
+    return createdAt;
+  }
+  const publishedAt = Date.parse(item.publishedAt);
+  return Number.isFinite(publishedAt) ? publishedAt : 0;
 }
 
 function collectFeedTags(items: PublicFeedItem[]) {
@@ -357,10 +366,10 @@ function uniqueTags(tags: string[]) {
 }
 
 function normalizeSort(sort?: string): FeedSortOption {
-  if (sort === "newest" || sort === "most_liked" || sort === "most_commented" || sort === "most_viewed") {
+  if (sort === "ranked" || sort === "newest" || sort === "most_liked" || sort === "most_commented" || sort === "most_viewed") {
     return sort;
   }
-  return "ranked";
+  return "newest";
 }
 
 function normalizeLimit(limit?: number) {

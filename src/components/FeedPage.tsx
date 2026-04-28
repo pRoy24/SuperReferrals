@@ -26,8 +26,8 @@ type FeedResponse = {
 };
 
 const sortOptions: Array<{ value: FeedSortOption; label: string }> = [
-  { value: "ranked", label: "Ranked" },
   { value: "newest", label: "Newest" },
+  { value: "ranked", label: "Ranked" },
   { value: "most_liked", label: "Most liked" },
   { value: "most_commented", label: "Most commented" },
   { value: "most_viewed", label: "Most viewed" }
@@ -36,7 +36,7 @@ const sortOptions: Array<{ value: FeedSortOption; label: string }> = [
 export default function FeedPage() {
   const [items, setItems] = useState<PublicFeedItem[]>([]);
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<FeedSortOption>("ranked");
+  const [sort, setSort] = useState<FeedSortOption>("newest");
   const [viewMode, setViewMode] = useState<FeedViewMode>("mobile");
   const [viewerId, setViewerId] = useState("");
   const [authorName, setAuthorName] = useState("");
@@ -104,22 +104,15 @@ export default function FeedPage() {
       video.muted = muted;
       video.volume = volume;
       if (id === current && playing) {
+        if (video.ended) {
+          video.currentTime = 0;
+        }
         video.play().catch(() => undefined);
       } else {
         video.pause();
       }
     }
   }, [activeItem?.id, muted, playing, volume, items, viewMode]);
-
-  useEffect(() => {
-    if (viewMode !== "desktop" || visibleItems.length < 2 || !playing) {
-      return;
-    }
-    const interval = window.setInterval(() => {
-      setActiveIndex((index) => (index + 1) % visibleItems.length);
-    }, 9500);
-    return () => window.clearInterval(interval);
-  }, [visibleItems.length, playing, viewMode]);
 
   useEffect(() => {
     if (viewMode !== "mobile") {
@@ -374,7 +367,14 @@ export default function FeedPage() {
       ) : (
         <section className="desktop-feed-layout">
           <div className="desktop-player-stage">
-            <FeedVideo key={activeItem.id} item={activeItem} active muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => selectItem(activeIndex + 1)} />
+            {visibleItems.map((item, index) => (
+              <article
+                className={`desktop-feed-card ${index === activeIndex ? "active" : ""}`}
+                key={item.id}
+              >
+                <FeedVideo item={item} active={index === activeIndex} muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => selectItem(index + 1)} />
+              </article>
+            ))}
             <DesktopMinimalControls
               item={activeItem}
               activeIndex={activeIndex}

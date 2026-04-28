@@ -2498,11 +2498,11 @@ button.item {
 }
 
 .is-desktop .feed-video {
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .is-mobile .feed-video.portrait {
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .mobile-feed-overlay {
@@ -2618,15 +2618,29 @@ button.item {
   height: 100svh;
   min-height: 100svh;
   overflow: hidden;
+  isolation: isolate;
   border: 0;
   border-radius: 0;
   background: #000;
 }
 
+.desktop-feed-card {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 580ms ease;
+}
+
+.desktop-feed-card.active {
+  opacity: 1;
+  pointer-events: auto;
+  z-index: 1;
+}
+
 .desktop-player-stage .feed-video {
   position: absolute;
   inset: 0;
-  animation: feed-video-fade 580ms ease both;
 }
 
 .feed-minimal-ui {
@@ -2830,17 +2844,6 @@ button.item {
 
 .comment-form textarea {
   min-height: 76px;
-}
-
-@keyframes feed-video-fade {
-  from {
-    opacity: 0;
-    transform: scale(1.012);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
 }
 
 .skeleton-shell .skeleton-line,
@@ -3164,7 +3167,7 @@ button.item {
   }
 
   .feed-shell.is-mobile .feed-video.portrait {
-    object-fit: cover;
+    object-fit: contain;
   }
 }
 
@@ -3230,7 +3233,7 @@ button.item {
   }
 
   .feed-shell.is-desktop .feed-video {
-    object-fit: cover;
+    object-fit: contain;
   }
 }
 
