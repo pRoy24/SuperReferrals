@@ -37,7 +37,7 @@ export default function FeedPage() {
   const [items, setItems] = useState<PublicFeedItem[]>([]);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<FeedSortOption>("ranked");
-  const [viewMode, setViewMode] = useState<FeedViewMode>("desktop");
+  const [viewMode, setViewMode] = useState<FeedViewMode>("mobile");
   const [viewerId, setViewerId] = useState("");
   const [authorName, setAuthorName] = useState("");
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
@@ -52,6 +52,7 @@ export default function FeedPage() {
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const mobileCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const viewedItems = useRef(new Set<string>());
+  const controlsHideTimer = useRef<number | null>(null);
 
   const visibleItems = useMemo(
     () => items.filter((item) => isVisibleInFeedMode(item, viewMode)),
@@ -156,6 +157,14 @@ export default function FeedPage() {
     return () => window.clearTimeout(timeout);
   }, [activeItem?.id, viewerId]);
 
+  useEffect(() => {
+    return () => {
+      if (controlsHideTimer.current !== null) {
+        window.clearTimeout(controlsHideTimer.current);
+      }
+    };
+  }, []);
+
   async function loadFeed() {
     setLoading(true);
     try {
@@ -246,23 +255,34 @@ export default function FeedPage() {
     setMuted(normalized === 0);
   }
 
-  function toggleControls(event: PointerEvent<HTMLElement>) {
+  function revealControls(event: PointerEvent<HTMLElement>) {
     const target = event.target as HTMLElement;
-    if (target.closest("button, a, input, textarea, select, form, .feed-comment-drawer")) {
+    if (target.closest(".feed-comment-drawer")) {
       return;
     }
-    setControlsVisible((value) => !value);
+    setControlsVisible(true);
+    if (controlsHideTimer.current !== null) {
+      window.clearTimeout(controlsHideTimer.current);
+    }
+    controlsHideTimer.current = window.setTimeout(() => {
+      setControlsVisible(false);
+      controlsHideTimer.current = null;
+    }, 1600);
   }
 
   function openComments(item: PublicFeedItem) {
     setCommentItemId(item.id);
     setControlsVisible(true);
+    if (controlsHideTimer.current !== null) {
+      window.clearTimeout(controlsHideTimer.current);
+      controlsHideTimer.current = null;
+    }
   }
 
   const feedClass = `feed-shell ${viewMode === "mobile" ? "is-mobile" : "is-desktop"} ${controlsVisible ? "controls-visible" : ""}`;
 
   return (
-    <main className={feedClass}>
+    <main className={feedClass} onPointerDown={revealControls} onPointerMove={revealControls}>
       <header className="feed-topbar">
         <div>
           <div className="eyebrow">SuperReferrals</div>
@@ -317,7 +337,6 @@ export default function FeedPage() {
               className={`mobile-feed-card ${index === activeIndex ? "active" : ""}`}
               data-feed-id={item.id}
               key={item.id}
-              onPointerDown={toggleControls}
               ref={(node) => {
                 mobileCardRefs.current[item.id] = node;
               }}
@@ -354,7 +373,7 @@ export default function FeedPage() {
         </section>
       ) : (
         <section className="desktop-feed-layout">
-          <div className="desktop-player-stage" onPointerDown={toggleControls}>
+          <div className="desktop-player-stage">
             <FeedVideo key={activeItem.id} item={activeItem} active muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => selectItem(activeIndex + 1)} />
             <DesktopMinimalControls
               item={activeItem}

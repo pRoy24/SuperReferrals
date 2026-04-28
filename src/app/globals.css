@@ -2283,7 +2283,6 @@ button.item {
   transition: opacity 180ms ease, transform 180ms ease;
 }
 
-.feed-shell:hover .feed-topbar,
 .feed-shell.controls-visible .feed-topbar,
 .feed-topbar:focus-within {
   opacity: 1;
@@ -2339,7 +2338,6 @@ button.item {
   transition: opacity 180ms ease, transform 180ms ease;
 }
 
-.feed-shell:hover .feed-controls,
 .feed-shell.controls-visible .feed-controls,
 .feed-controls:focus-within {
   opacity: 1;
@@ -2449,7 +2447,6 @@ button.item {
   transition: background 180ms ease;
 }
 
-.mobile-feed-card:hover .mobile-feed-overlay,
 .mobile-feed-overlay.visible {
   background: linear-gradient(180deg, transparent 54%, rgba(0, 0, 0, 0.46) 100%);
 }
@@ -2467,7 +2464,6 @@ button.item {
   transition: opacity 180ms ease, transform 180ms ease;
 }
 
-.mobile-feed-card:hover .mobile-feed-meta,
 .mobile-feed-overlay.visible .mobile-feed-meta {
   opacity: 1;
   pointer-events: auto;
@@ -2486,7 +2482,6 @@ button.item {
   transition: opacity 180ms ease, transform 180ms ease;
 }
 
-.mobile-feed-card:hover .mobile-action-rail,
 .mobile-feed-overlay.visible .mobile-action-rail {
   opacity: 1;
   pointer-events: auto;
@@ -2499,7 +2494,6 @@ button.item {
   transition: opacity 180ms ease, transform 180ms ease;
 }
 
-.mobile-feed-card:hover .feed-timeline,
 .mobile-feed-overlay.visible .feed-timeline {
   opacity: 1;
   pointer-events: auto;
@@ -2582,7 +2576,6 @@ button.item {
   transition: opacity 180ms ease, transform 180ms ease;
 }
 
-.desktop-player-stage:hover .feed-minimal-ui,
 .feed-shell.controls-visible .feed-minimal-ui,
 .feed-minimal-ui:focus-within {
   opacity: 1;
