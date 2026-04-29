@@ -63,7 +63,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (!current) {
         throw new Error("generation not found");
       }
-      if (burnResult?.burned) {
+      if (burnResult?.burned || burnResult?.cleanupOnly) {
         if (burnResult.audit) {
           addAgentTownEvent(store, {
             id: createId("evt"),
@@ -81,12 +81,29 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
             createdAt: nowIso()
           });
         }
+        if (burnResult.cleanupOnly) {
+          addAgentTownEvent(store, {
+            id: createId("evt"),
+            fromAgentId: "superreferrals-platform",
+            channel: "system",
+            eventType: "receipt",
+            content: `INFT ${burnResult.inftId || current.inftId || id} uses a legacy contract without burnAgent(uint256). Local video, feed, and INFT records were removed and tombstoned.`,
+            payload: {
+              generationId: id,
+              inftId: burnResult.inftId || current.inftId,
+              tokenId: burnResult.tokenId,
+              contractAddress: burnResult.contractAddress,
+              warning: burnResult.warning
+            },
+            createdAt: nowIso()
+          });
+        }
         const cleanup = removeGenerationVideoReferences(store, {
           generationId: id,
           inftId: burnResult.inftId || current.inftId,
           tokenId: burnResult.tokenId,
           contractAddress: burnResult.contractAddress,
-          reason: "burned",
+          reason: burnResult.burned ? "burned" : "deleted",
           txHash: burnResult.txHash
         });
         return {
@@ -182,8 +199,22 @@ async function burnGenerationINFT(generation: Generation, body: Record<string, u
       recorded: true
     };
   }
+  try {
+    await preflightINFTBurn({ tokenId: inft.tokenId, contractAddress: inft.contractAddress });
+  } catch (error) {
+    if (isLegacyNonBurnableContractError(error)) {
+      return {
+        burned: false,
+        cleanupOnly: true,
+        inftId: inft.id,
+        tokenId: inft.tokenId,
+        contractAddress: inft.contractAddress,
+        warning: error instanceof Error ? error.message : String(error)
+      };
+    }
+    throw error;
+  }
   const authorization = await verifyBurnAuthorization(body.burnAuthorization, generation, inft);
-  await preflightINFTBurn({ tokenId: inft.tokenId, contractAddress: inft.contractAddress });
   const audit = await persistBurnAuditToZeroG({
     generation,
     inft,
@@ -200,6 +231,12 @@ async function burnGenerationINFT(generation: Generation, body: Record<string, u
     authorizedBy: authorization.signer,
     audit
   };
+}
+
+function isLegacyNonBurnableContractError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return message.includes("does not expose burnAgent(uint256)") ||
+    message.includes("This deployed contract cannot burn existing tokens on-chain");
 }
 
 function buildBurnAuthorization({

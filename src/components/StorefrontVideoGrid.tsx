@@ -138,9 +138,9 @@ export default function StorefrontVideoGrid({
     setBusyAction(`${action}:${item.generationId}`);
     setMessage("");
     try {
-      await sendGenerationAction(item, action);
+      const result = await sendGenerationAction(item, action);
       await onRefresh?.();
-      setMessage(actionMessage(action));
+      setMessage(actionMessage(action, result));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Video update failed.");
     } finally {
@@ -164,9 +164,9 @@ export default function StorefrontVideoGrid({
           burnAuthorization
         });
       }
-      await sendGenerationAction(item, action, { burnAuthorization });
+      const result = await sendGenerationAction(item, action, { burnAuthorization });
       await onRefresh?.();
-      setMessage(actionMessage(action));
+      setMessage(actionMessage(action, result));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Video update failed.");
     } finally {
@@ -320,7 +320,13 @@ function VideoActions({
   );
 }
 
-function actionMessage(action: StorefrontVideoAction) {
+function actionMessage(action: StorefrontVideoAction, result?: Record<string, unknown>) {
+  const burn = result?.burn && typeof result.burn === "object" && !Array.isArray(result.burn)
+    ? result.burn as Record<string, unknown>
+    : {};
+  if (burn.cleanupOnly) {
+    return "This legacy INFT contract cannot burn on-chain, so the video, feed, and INFT records were removed locally.";
+  }
   if (action === "publish") {
     return "INFT published to the video feed.";
   }
