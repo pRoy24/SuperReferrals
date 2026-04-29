@@ -27,8 +27,7 @@ const INFT_TRANSACTION_RETRY_COUNT = 3;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 function getINFTChain() {
-  const configuredChainId = Number(env("INFT_CHAIN_ID") || env("OG_CHAIN_ID") || "");
-  const chain = getZeroGChainConfig(Number.isFinite(configuredChainId) && configuredChainId > 0 ? configuredChainId : undefined);
+  const chain = getINFTChainConfig();
   const rpcUrl = env("INFT_RPC_URL") || chain.rpcUrl;
   return {
     id: chain.id,
@@ -38,6 +37,39 @@ function getINFTChain() {
       default: { http: [rpcUrl] }
     }
   } as const;
+}
+
+export function getINFTChainConfig() {
+  const configuredChainId = Number(env("INFT_CHAIN_ID") || env("OG_CHAIN_ID") || "");
+  return getZeroGChainConfig(Number.isFinite(configuredChainId) && configuredChainId > 0 ? configuredChainId : undefined);
+}
+
+export function buildINFTBurnRequest({ tokenId, contractAddress }: { tokenId?: string; contractAddress?: string }) {
+  const resolvedContractAddress = (contractAddress || env("INFT_CONTRACT_ADDRESS")) as `0x${string}`;
+  const chain = getINFTChainConfig();
+  const rpcUrl = env("INFT_RPC_URL") || chain.rpcUrl;
+  const mock = isProviderMock("INFT");
+
+  if (!mock && !resolvedContractAddress) {
+    throw new Error("INFT_CONTRACT_ADDRESS is required for live INFT burns.");
+  }
+  if (!mock && (!tokenId || !/^\d+$/.test(tokenId))) {
+    throw new Error("A numeric token id is required to burn this INFT.");
+  }
+
+  return {
+    tokenId,
+    contractAddress: resolvedContractAddress,
+    mock,
+    chain: {
+      id: chain.id,
+      hexChainId: `0x${chain.id.toString(16)}`,
+      name: chain.name,
+      nativeCurrency: chain.nativeCurrency,
+      rpcUrls: [rpcUrl],
+      blockExplorerUrls: [chain.blockExplorerUrl]
+    }
+  };
 }
 
 export async function mintINFT({
@@ -250,6 +282,73 @@ export async function burnINFT({ tokenId }: { tokenId?: string }) {
     txHash,
     mock: false
   };
+}
+
+export async function verifyINFTBurnTransaction({
+  txHash,
+  tokenId,
+  contractAddress
+}: {
+  txHash: string;
+  tokenId?: string;
+  contractAddress?: string;
+}) {
+  if (isProviderMock("INFT")) {
+    return { verified: true, mock: true };
+  }
+  const resolvedContractAddress = (contractAddress || env("INFT_CONTRACT_ADDRESS")) as `0x${string}`;
+  if (!resolvedContractAddress) {
+    throw new Error("INFT_CONTRACT_ADDRESS is required to verify an INFT burn.");
+  }
+  if (!tokenId || !/^\d+$/.test(tokenId)) {
+    throw new Error("A numeric token id is required to verify an INFT burn.");
+  }
+  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
+    throw new Error("A valid INFT burn transaction hash is required.");
+  }
+
+  const chain = getINFTChain();
+  const publicClient = createPublicClient({
+    chain,
+    transport: http(chain.rpcUrls.default.http[0])
+  });
+  const receipt = await publicClient.waitForTransactionReceipt({
+    hash: txHash as `0x${string}`,
+    timeout: parsePositiveIntegerEnv("INFT_BURN_RECEIPT_TIMEOUT_MS", 120_000)
+  });
+  if (receipt.status !== "success") {
+    throw new Error("INFT burn transaction was not successful.");
+  }
+
+  const normalizedContract = resolvedContractAddress.toLowerCase();
+  const expectedTokenId = BigInt(tokenId);
+  for (const log of receipt.logs) {
+    if (log.address.toLowerCase() !== normalizedContract) {
+      continue;
+    }
+    try {
+      const event = decodeEventLog({
+        abi: [transferEventAbi],
+        data: log.data,
+        topics: log.topics
+      });
+      const args = event.args as { to?: string; tokenId?: bigint };
+      if (
+        event.eventName === "Transfer" &&
+        args.to?.toLowerCase() === ZERO_ADDRESS &&
+        args.tokenId === expectedTokenId
+      ) {
+        return {
+          verified: true,
+          txHash,
+          tokenId
+        };
+      }
+    } catch {
+      continue;
+    }
+  }
+  throw new Error("INFT burn transaction did not emit the expected burn event.");
 }
 
 export async function recoverINFTFromChain(id: string): Promise<INFTRecord | undefined> {

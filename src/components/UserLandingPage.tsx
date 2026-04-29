@@ -1384,6 +1384,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
                 allowBurn
                 customerId={customer.id}
                 emptyText="No completed videos for this wallet yet."
+                ethereumProvider={activeWalletProvider?.provider || walletProviders[0]?.provider || null}
                 initialPageSize={6}
                 onRefresh={load}
                 store={store}

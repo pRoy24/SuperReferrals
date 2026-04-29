@@ -928,6 +928,61 @@ export function removeINFT(store: SuperReferralsStore, id: string) {
   return removed || null;
 }
 
+export function removeGenerationVideoReferences(store: SuperReferralsStore, input: {
+  generationId: string;
+  inftId?: string;
+}) {
+  const generationIds = new Set([input.generationId].filter(Boolean));
+  const inftIds = new Set([input.inftId].filter(Boolean));
+
+  for (const inft of store.infts) {
+    if (generationIds.has(inft.generationId) || inftIds.has(inft.id)) {
+      inftIds.add(inft.id);
+      generationIds.add(inft.generationId);
+    }
+  }
+  for (const generation of store.generations) {
+    if (generationIds.has(generation.id) || (generation.inftId && inftIds.has(generation.inftId))) {
+      generationIds.add(generation.id);
+      if (generation.inftId) {
+        inftIds.add(generation.inftId);
+      }
+    }
+  }
+
+  const removedGenerationCount = store.generations.length;
+  store.generations = store.generations.filter((generation) => !generationIds.has(generation.id));
+  const removedInftCount = store.infts.length;
+  store.infts = store.infts.filter((inft) => !inftIds.has(inft.id) && !generationIds.has(inft.generationId));
+
+  store.feedLikes = store.feedLikes.filter((like) => !generationIds.has(like.generationId));
+  store.feedComments = store.feedComments.filter((comment) => !generationIds.has(comment.generationId));
+  store.feedViews = store.feedViews.filter((view) => !generationIds.has(view.generationId));
+  store.storefrontRatings = store.storefrontRatings.filter((rating) =>
+    !generationIds.has(rating.generationId || "") &&
+    !inftIds.has(rating.inftId || "")
+  );
+  store.quotes = store.quotes.filter((quote) => !inftIds.has(quote.inftId || ""));
+
+  const removedJobIds = new Set(
+    store.agentJobs
+      .filter((job) =>
+        generationIds.has(job.generationId || "") ||
+        inftIds.has(job.inftId || "")
+      )
+      .map((job) => job.id)
+  );
+  store.agentJobs = store.agentJobs.filter((job) => !removedJobIds.has(job.id));
+  store.agentTownEvents = store.agentTownEvents.filter((event) => !removedJobIds.has(event.jobId || ""));
+
+  return {
+    generationIds: [...generationIds],
+    inftIds: [...inftIds],
+    removedGenerations: removedGenerationCount - store.generations.length,
+    removedInfts: removedInftCount - store.infts.length
+  };
+}
+
 export function upsertStorefrontRating(store: SuperReferralsStore, input: {
   customerId: string;
   subAccountId?: string;

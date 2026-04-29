@@ -2,7 +2,9 @@
 
 import { Flame, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { encodeFunctionData, parseAbi } from "viem";
 import VideoMosaic from "@/components/VideoMosaic";
+import { requestWalletAccounts, type EthereumProvider } from "@/lib/browser-wallets";
 import { fetchWithSamsarAuth } from "@/lib/storefront-auth-client";
 import type { Generation, INFTRecord, PublicFeedItem, SuperReferralsStore, VideoAspectRatio, VideoModel } from "@/lib/types";
 
@@ -13,7 +15,25 @@ type StorefrontVideoItem = PublicFeedItem & {
 };
 
 type StorefrontVideoMode = "published" | "infts";
-type StorefrontVideoAction = "publish" | "unpublish" | "burn" | "unpublish_and_burn";
+type StorefrontVideoAction = "publish" | "unpublish" | "burn" | "unpublish_and_burn" | "prepare_burn";
+type INFTBurnChain = {
+  id: number;
+  hexChainId?: string;
+  name: string;
+  nativeCurrency: {
+    name: string;
+    symbol: string;
+    decimals: number;
+  };
+  rpcUrls: string[];
+  blockExplorerUrls?: string[];
+};
+type INFTBurnRequest = {
+  tokenId?: string;
+  contractAddress?: string;
+  mock?: boolean;
+  chain?: INFTBurnChain;
+};
 
 type StorefrontVideoGridProps = {
   actor: "owner" | "user";
@@ -24,11 +44,14 @@ type StorefrontVideoGridProps = {
   onRefresh?: () => Promise<void> | void;
   pageSizeOptions?: number[];
   publishedOnly?: boolean;
+  ethereumProvider?: EthereumProvider | null;
   showCreatorWallet?: boolean;
   store: SuperReferralsStore;
   subAccountId?: string;
   wallet?: string;
 };
+
+const inftBurnAbi = parseAbi(["function burnAgent(uint256 tokenId)"]);
 
 export default function StorefrontVideoGrid({
   actor,
@@ -39,6 +62,7 @@ export default function StorefrontVideoGrid({
   onRefresh,
   pageSizeOptions = [6, 9, 12, 24],
   showCreatorWallet = false,
+  ethereumProvider,
   store,
   subAccountId,
   wallet
@@ -69,25 +93,15 @@ export default function StorefrontVideoGrid({
   }, [page, pageCount]);
 
   async function updateVideo(item: StorefrontVideoItem, action: StorefrontVideoAction) {
+    if (actor === "user" && isBurnAction(action)) {
+      await updateVideoWithWalletBurn(item, action);
+      return;
+    }
+
     setBusyAction(`${action}:${item.generationId}`);
     setMessage("");
     try {
-      const fetcher = actor === "owner" ? fetchWithSamsarAuth : fetch;
-      const response = await fetcher(`/api/generations/${encodeURIComponent(item.generationId)}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action,
-          actor,
-          customerId,
-          subAccountId,
-          wallet
-        })
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data.message || "Video update failed.");
-      }
+      await sendGenerationAction(item, action);
       await onRefresh?.();
       setMessage(actionMessage(action));
     } catch (error) {
@@ -95,6 +109,56 @@ export default function StorefrontVideoGrid({
     } finally {
       setBusyAction("");
     }
+  }
+
+  async function updateVideoWithWalletBurn(item: StorefrontVideoItem, action: StorefrontVideoAction) {
+    setBusyAction(`${action}:${item.generationId}`);
+    setMessage("");
+    try {
+      const prepared = await sendGenerationAction(item, "prepare_burn");
+      const burnRequest = readBurnRequest(prepared);
+      let burnTxHash = cleanText((prepared.burn as Record<string, unknown> | undefined)?.txHash);
+      if (!burnRequest.mock) {
+        setMessage("Confirm the INFT burn in your wallet.");
+        burnTxHash = await requestWalletINFTBurn({
+          provider: ethereumProvider,
+          ownerWallet: wallet,
+          burnRequest
+        });
+      }
+      await sendGenerationAction(item, action, { burnTxHash });
+      await onRefresh?.();
+      setMessage(actionMessage(action));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Video update failed.");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function sendGenerationAction(
+    item: StorefrontVideoItem,
+    action: StorefrontVideoAction,
+    extra: Record<string, unknown> = {}
+  ) {
+    const fetcher = actor === "owner" ? fetchWithSamsarAuth : fetch;
+    const response = await fetcher(`/api/generations/${encodeURIComponent(item.generationId)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action,
+        actor,
+        customerId,
+        subAccountId,
+        wallet,
+        ...extra
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.message || "Video update failed.");
+    }
+    return data as Record<string, unknown>;
   }
 
   return (
@@ -223,12 +287,16 @@ function actionMessage(action: StorefrontVideoAction) {
     return "INFT published to the video feed.";
   }
   if (action === "burn") {
-    return "INFT unpublished and burn recorded.";
+    return "INFT burned and video records removed.";
   }
   if (action === "unpublish_and_burn") {
-    return "Video unpublished and INFT burn recorded.";
+    return "Video unpublished, INFT burned, and records removed.";
   }
   return "Video unpublished.";
+}
+
+function isBurnAction(action: StorefrontVideoAction) {
+  return action === "burn" || action === "unpublish_and_burn";
 }
 
 function buildStorefrontVideoItems(
@@ -435,4 +503,175 @@ function inftAttribute(inft: INFTRecord, traitType: string) {
 
 function videoTime(item: StorefrontVideoItem) {
   return Date.parse(item.publishedAt || item.createdAt) || 0;
+}
+
+function readBurnRequest(data: Record<string, unknown>): INFTBurnRequest {
+  const burnRequest = data.burnRequest && typeof data.burnRequest === "object"
+    ? data.burnRequest as INFTBurnRequest
+    : {};
+  if (burnRequest.mock) {
+    return burnRequest;
+  }
+  if (!burnRequest.contractAddress || !burnRequest.tokenId || !burnRequest.chain) {
+    throw new Error("Burn request is missing INFT contract, token, or chain details.");
+  }
+  return burnRequest;
+}
+
+async function requestWalletINFTBurn({
+  provider,
+  ownerWallet,
+  burnRequest
+}: {
+  provider?: EthereumProvider | null;
+  ownerWallet?: string;
+  burnRequest: INFTBurnRequest;
+}) {
+  if (!provider) {
+    throw new Error("Connect this wallet in a wallet-enabled browser before burning the INFT.");
+  }
+  const chain = burnRequest.chain;
+  const tokenId = burnRequest.tokenId;
+  const contractAddress = burnRequest.contractAddress;
+  if (!chain || !tokenId || !contractAddress) {
+    throw new Error("Burn request is missing INFT contract, token, or chain details.");
+  }
+  await ensureWalletNetwork(provider, chain);
+  const accounts = await requestWalletAccounts(provider);
+  const owner = ownerWallet?.trim();
+  const from = accounts.find((account) => sameWallet(account, owner)) || accounts[0];
+  if (!from) {
+    throw new Error("Connect the INFT owner wallet before burning.");
+  }
+  if (owner && !sameWallet(from, owner)) {
+    throw new Error("The connected wallet does not match the INFT owner wallet.");
+  }
+
+  const transaction = {
+    from,
+    to: contractAddress,
+    data: encodeFunctionData({
+      abi: inftBurnAbi,
+      functionName: "burnAgent",
+      args: [BigInt(tokenId)]
+    }),
+    value: "0x0"
+  };
+  const gas = await estimateWalletGas(provider, transaction, chain.name);
+  const txHash = String(await provider.request({
+    method: "eth_sendTransaction",
+    params: [compactTransaction({ ...transaction, gas })]
+  }));
+  const receipt = await waitForWalletReceipt(provider, txHash, 120000);
+  if (!receipt) {
+    throw new Error("Timed out waiting for the INFT burn transaction to confirm.");
+  }
+  if (!isSuccessfulReceipt(receipt)) {
+    throw new Error("INFT burn transaction reverted.");
+  }
+  return txHash;
+}
+
+async function ensureWalletNetwork(provider: EthereumProvider, chain: INFTBurnChain) {
+  const hexChainId = chain.hexChainId || `0x${chain.id.toString(16)}`;
+  const currentChainId = await provider.request({ method: "eth_chainId" }).catch(() => "");
+  if (String(currentChainId).toLowerCase() === hexChainId.toLowerCase()) {
+    return;
+  }
+  try {
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: hexChainId }]
+    });
+  } catch (error) {
+    if (walletErrorCode(error) !== 4902) {
+      throw new Error(`Switch wallet to ${chain.name} to continue.`);
+    }
+    await provider.request({
+      method: "wallet_addEthereumChain",
+      params: [{
+        chainId: hexChainId,
+        chainName: chain.name,
+        nativeCurrency: chain.nativeCurrency,
+        rpcUrls: chain.rpcUrls,
+        blockExplorerUrls: chain.blockExplorerUrls || []
+      }]
+    });
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: hexChainId }]
+    });
+  }
+}
+
+async function estimateWalletGas(provider: EthereumProvider, transaction: Record<string, unknown>, chainName: string) {
+  try {
+    const gas = BigInt(String(await provider.request({
+      method: "eth_estimateGas",
+      params: [compactTransaction(transaction)]
+    })));
+    return `0x${((gas * 12n) / 10n + 1n).toString(16)}`;
+  } catch (error) {
+    throw new Error(`INFT burn gas estimate failed on ${chainName}: ${formatErrorMessage(error, "wallet gas estimate failed")}.`);
+  }
+}
+
+async function waitForWalletReceipt(provider: EthereumProvider, txHash: string, timeoutMs = 60000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const receipt = await provider.request({
+      method: "eth_getTransactionReceipt",
+      params: [txHash]
+    }).catch(() => null);
+    if (receipt) {
+      return receipt;
+    }
+    await delay(3000);
+  }
+  return null;
+}
+
+function compactTransaction(tx: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(tx).filter(([, value]) => value !== undefined && value !== null && value !== ""));
+}
+
+function isSuccessfulReceipt(receipt: unknown) {
+  if (!receipt || typeof receipt !== "object") {
+    return false;
+  }
+  const status = (receipt as { status?: unknown }).status;
+  if (typeof status === "string") {
+    return status.toLowerCase() === "0x1" || status === "1";
+  }
+  if (typeof status === "number") {
+    return status === 1;
+  }
+  if (typeof status === "boolean") {
+    return status;
+  }
+  return false;
+}
+
+function walletErrorCode(error: unknown) {
+  return typeof error === "object" && error && "code" in error ? Number((error as { code?: unknown }).code) : 0;
+}
+
+function formatErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "object" && error) {
+    const record = error as Record<string, unknown>;
+    const nested = record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : undefined;
+    return String(record.message || nested?.message || fallback);
+  }
+  return fallback;
+}
+
+function sameWallet(left?: string, right?: string) {
+  return Boolean(left && right && left.trim().toLowerCase() === right.trim().toLowerCase());
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
