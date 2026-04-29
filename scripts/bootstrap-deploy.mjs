@@ -234,6 +234,7 @@ function validateEnvFile(target, zeroGConfig) {
   const variables = loadTargetEnvVariables(target);
   const missing = [];
   const placeholders = [];
+  const missingAny = [];
 
   for (const key of zeroGConfig.required || []) {
     const value = variables.get(key);
@@ -244,16 +245,41 @@ function validateEnvFile(target, zeroGConfig) {
     }
   }
 
-  if (missing.length || placeholders.length) {
+  for (const group of normalizeRequiredAnyGroups(zeroGConfig.requiredAny)) {
+    const usableKey = group.keys.find((key) => {
+      const value = variables.get(key);
+      return value && !isPlaceholder(value);
+    });
+    if (!usableKey) {
+      missingAny.push(`${group.label}: ${group.keys.join(" or ")}`);
+    }
+  }
+
+  if (missing.length || placeholders.length || missingAny.length) {
     const parts = [];
     if (missing.length) parts.push(`missing: ${missing.join(", ")}`);
     if (placeholders.length) parts.push(`placeholder values: ${placeholders.join(", ")}`);
-    fail(`0G storage env is not ready in ${envFile} (${parts.join("; ")}).`);
+    if (missingAny.length) parts.push(`missing one of: ${missingAny.join("; ")}`);
+    fail(`0G env is not ready in ${envFile} (${parts.join("; ")}).`);
   }
 
   const recommendedMissing = (zeroGConfig.recommended || []).filter((key) => !variables.get(key));
   const fallbackLabel = target.fallbackEnvFiles.length ? ` with fallbacks ${target.fallbackEnvFiles.join(", ")}` : "";
   console.log(`0G required env: ok${fallbackLabel}${recommendedMissing.length ? `; recommended missing: ${recommendedMissing.join(", ")}` : ""}`);
+}
+
+function normalizeRequiredAnyGroups(requiredAny) {
+  if (!Array.isArray(requiredAny)) {
+    return [];
+  }
+  return requiredAny
+    .map((group, index) => ({
+      label: typeof group?.label === "string" && group.label.trim() ? group.label.trim() : `group ${index + 1}`,
+      keys: Array.isArray(group?.keys)
+        ? group.keys.filter((key) => typeof key === "string" && key.trim())
+        : []
+    }))
+    .filter((group) => group.keys.length);
 }
 
 function loadTargetEnvVariables(target) {

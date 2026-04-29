@@ -41,6 +41,19 @@
       "OG_STORAGE_INDEXER_RPC",
       "OG_PRIVATE_KEY"
     ],
+    "requiredAny": [
+      {
+        "label": "0G Compute platform signer",
+        "keys": [
+          "OG_COMPUTE_PRIVATE_KEY",
+          "OG_COMPUTE_PRIVATE_KEY_STAGING_QWEN_2_5_7B_INSTRUCT",
+          "OG_COMPUTE_PRIVATE_KEY_GALILEO_QWEN_2_5_7B_INSTRUCT",
+          "OG_COMPUTE_PRIVATE_KEY_TESTNET_QWEN_2_5_7B_INSTRUCT",
+          "OG_COMPUTE_PRIVATE_KEY_PRODUCTION_GLM_5_FP8",
+          "OG_COMPUTE_PRIVATE_KEY_MAINNET_GLM_5_FP8"
+        ]
+      }
+    ],
     "recommended": [
       "OG_STORAGE_GATEWAY_URL",
       "INFT_CHAIN_ID",

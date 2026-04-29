@@ -85,4 +85,4 @@ OG_DA_URL=
 OG_SERVICE_MARKETPLACE_URL=
 ```
 
-The app remains mock-first when `SUPERREFERRALS_MOCKS` is unset or true. In live mode, 0G Compute uses the 0G serving broker and `OG_PRIVATE_KEY` to discover inference providers; the model and provider endpoint are not env-managed.
+The app remains mock-first when `SUPERREFERRALS_MOCKS` is unset or true. In live mode, 0G Compute uses the 0G serving broker and the platform compute signer from `OG_COMPUTE_PRIVATE_KEY` to discover inference providers. Deployed assistant requests do not fall back to customer/project `OG_PRIVATE_KEY`. Set `OG_COMPUTE_PROVIDER_ADDRESS` when the platform wallet is funded with a specific provider for the current environment/model.
