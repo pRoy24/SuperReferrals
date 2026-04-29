@@ -1374,7 +1374,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
             <div className="panel-header">
               <div>
                 <h2>Your Videos</h2>
-                <p className="subtle">Videos created by this wallet on the current storefront.</p>
+                <p className="subtle">Toggle between published videos and all INFTs created by this wallet on the current storefront.</p>
               </div>
               <Bot size={18} />
             </div>

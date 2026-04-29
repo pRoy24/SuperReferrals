@@ -1067,7 +1067,7 @@ export default function Dashboard() {
               <div>
                 <h2>Published Videos</h2>
                 <p className="subtle">
-                  Public videos currently visible in the landing page, storefront preview, and feed. Unpublishing removes the video from every public feed surface.
+                  Toggle between public videos and all INFTs created for this storefront. Unpublishing removes the video from every public feed surface.
                 </p>
               </div>
               <Bot size={18} />

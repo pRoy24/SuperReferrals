@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { normalizeWallet } from "@/lib/ids";
+import { normalizeWallet, nowIso } from "@/lib/ids";
 import { burnINFT } from "@/lib/inft";
 import { getGeneration, mutateStore, readStore, removeINFT, updateGeneration } from "@/lib/store";
 import type { Generation } from "@/lib/types";
@@ -18,7 +18,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const { id } = await params;
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
     const action = String(body.action || "").trim();
-    if (action !== "unpublish" && action !== "unpublish_and_burn") {
+    if (action !== "publish" && action !== "unpublish" && action !== "burn" && action !== "unpublish_and_burn") {
       return NextResponse.json({ message: "Unsupported generation action" }, { status: 400 });
     }
 
@@ -31,7 +31,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ message: "Not authorized to update this video" }, { status: 403 });
     }
 
-    const burnResult = action === "unpublish_and_burn"
+    const burnResult = action === "burn" || action === "unpublish_and_burn"
       ? await burnGenerationINFT(existing)
       : undefined;
 
@@ -40,11 +40,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (!current) {
         throw new Error("generation not found");
       }
-      const next = updateGeneration(store, id, {
-        feed: {
+      const nextFeed = action === "publish"
+        ? {
+          ...(current.feed || { tags: [] }),
+          published: true,
+          publishedAt: current.feed?.publishedAt || nowIso()
+        }
+        : {
           ...(current.feed || { tags: [] }),
           published: false
-        },
+        };
+      const next = updateGeneration(store, id, {
+        feed: nextFeed,
         ...(burnResult?.burned ? { inftId: undefined } : {})
       });
       if (burnResult?.burned) {
@@ -63,14 +70,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 }
 
 async function burnGenerationINFT(generation: Generation) {
-  const inftId = generation.inftId;
-  if (!inftId) {
-    return { burned: false, reason: "No INFT is attached to this video." };
-  }
   const store = await readStore();
-  const inft = store.infts.find((item) => item.id === inftId || item.generationId === generation.id);
+  const inft = store.infts.find((item) =>
+    item.id === generation.inftId || item.generationId === generation.id
+  );
   if (!inft) {
-    return { burned: false, inftId, reason: "INFT was not found in the local store." };
+    return { burned: false, inftId: generation.inftId, reason: "INFT was not found in the local store." };
   }
   const result = await burnINFT({ tokenId: inft.tokenId });
   return {

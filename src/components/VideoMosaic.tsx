@@ -4,6 +4,19 @@ import { ArrowRight, Check, Copy, ExternalLink, Pause, Play, Volume2, VolumeX } 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { PublicFeedItem } from "@/lib/types";
 
+type MosaicTileLayout = {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+};
+
+type MosaicLayout = {
+  columns: number;
+  height: number;
+  tiles: Record<string, MosaicTileLayout>;
+};
+
 type VideoMosaicProps = {
   items: PublicFeedItem[];
   actions?: (item: PublicFeedItem) => ReactNode;
@@ -31,7 +44,7 @@ export default function VideoMosaic({
   moreLabel = "More videos",
   showCreatorWallet = false,
   showFeedLink = true,
-  showInftLink = false
+  showInftLink = true
 }: VideoMosaicProps) {
   const rowLimit = maxRows ? maxRows * 3 : undefined;
   const visibleLimit = [limit, rowLimit]
@@ -47,6 +60,8 @@ export default function VideoMosaic({
   const [mutedById, setMutedById] = useState<Record<string, boolean>>({});
   const [volumeById, setVolumeById] = useState<Record<string, number>>({});
   const [videoReadyById, setVideoReadyById] = useState<Record<string, boolean>>({});
+  const [mosaicLayout, setMosaicLayout] = useState<MosaicLayout | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
 
   useEffect(() => {
@@ -74,6 +89,51 @@ export default function VideoMosaic({
     setVideoReadyById((current) => Object.fromEntries(
       Object.entries(current).filter(([id]) => visibleIds.has(id))
     ));
+  }, [visibleItems]);
+
+  useEffect(() => {
+    const node = gridRef.current;
+    if (!node || visibleItems.length === 0) {
+      setMosaicLayout(null);
+      return;
+    }
+    const gridNode = node;
+
+    let frame = 0;
+
+    function measureMosaic() {
+      frame = 0;
+      const nodeWidth = gridNode.clientWidth;
+      if (nodeWidth <= 0) {
+        return;
+      }
+      const styles = window.getComputedStyle(gridNode);
+      const nextLayout = buildMosaicLayout(visibleItems, {
+        containerWidth: nodeWidth,
+        gap: cssNumber(styles.getPropertyValue("--mosaic-gap"), 12),
+        landscapeSpan: cssInteger(styles.getPropertyValue("--mosaic-landscape-span"), 2),
+        maxColumns: cssInteger(styles.getPropertyValue("--mosaic-max-columns"), 6),
+        minColumnWidth: cssNumber(styles.getPropertyValue("--mosaic-min-column"), 170)
+      });
+      setMosaicLayout((current) => mosaicLayoutsEqual(current, nextLayout) ? current : nextLayout);
+    }
+
+    function scheduleMeasure() {
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+      frame = window.requestAnimationFrame(measureMosaic);
+    }
+
+    measureMosaic();
+    const observer = new ResizeObserver(scheduleMeasure);
+    observer.observe(gridNode);
+    return () => {
+      observer.disconnect();
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+    };
   }, [visibleItems]);
 
   function markVideoReady(item: PublicFeedItem) {
@@ -138,15 +198,25 @@ export default function VideoMosaic({
 
   return (
     <div className={`video-mosaic ${className}`.trim()}>
-      <div className={`video-mosaic-grid ${maxRows ? `rows-${maxRows}` : ""}`.trim()}>
-        {visibleItems.map((item, index) => {
+      <div
+        className={`video-mosaic-grid ${maxRows ? `rows-${maxRows}` : ""} ${mosaicLayout ? "is-laid-out" : ""}`.trim()}
+        ref={gridRef}
+        style={mosaicLayout ? { "--mosaic-height": `${mosaicLayout.height}px` } as CSSProperties : undefined}
+      >
+        {visibleItems.map((item) => {
           const isActive = activeId === item.id;
           const muted = mutedById[item.id] ?? true;
           const volume = volumeById[item.id] ?? 0.66;
           const creatorWallet = showCreatorWallet ? getCreatorWallet?.(item) : "";
           const shouldShowFeedLink = typeof showFeedLink === "function" ? showFeedLink(item) : showFeedLink;
+          const shouldShowInftLink = showInftLink && Boolean(item.inftId);
+          const layout = mosaicLayout?.tiles[item.id];
           const tileStyle = {
-            "--tile-ratio": item.aspectRatio === "9:16" ? "9 / 16" : "16 / 9"
+            "--tile-height": layout ? `${layout.height}px` : undefined,
+            "--tile-ratio": item.aspectRatio === "9:16" ? "9 / 16" : "16 / 9",
+            "--tile-width": layout ? `${layout.width}px` : undefined,
+            "--tile-x": layout ? `${layout.x}px` : undefined,
+            "--tile-y": layout ? `${layout.y}px` : undefined
           } as CSSProperties;
 
           return (
@@ -155,7 +225,10 @@ export default function VideoMosaic({
               key={item.id}
               style={tileStyle}
             >
-              <div className="video-mosaic-media">
+              <div
+                className="video-mosaic-media"
+                onClick={() => togglePlayback(item)}
+              >
                 {item.posterUrl && (
                   <img
                     alt=""
@@ -179,7 +252,15 @@ export default function VideoMosaic({
                   onPlay={() => setActiveId(item.id)}
                   onPlaying={() => markVideoReady(item)}
                 />
-                <button className="video-mosaic-play" onClick={() => togglePlayback(item)} title={isActive ? "Pause video" : "Play video"} type="button">
+                <button
+                  className="video-mosaic-play"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    togglePlayback(item);
+                  }}
+                  title={isActive ? "Pause video" : "Play video"}
+                  type="button"
+                >
                   {isActive ? <Pause size={22} /> : <Play size={22} />}
                 </button>
               </div>
@@ -212,15 +293,19 @@ export default function VideoMosaic({
                       value={muted ? 0 : Math.round(volume * 100)}
                     />
                   </label>
-                  {showInftLink && item.inftId && (
-                    <a className="video-mosaic-feed-link" href={`/inft/${item.inftId}`} title="Open INFT">
-                      <ExternalLink size={16} /> INFT
-                    </a>
-                  )}
-                  {shouldShowFeedLink && (
-                    <a className="video-mosaic-feed-link" href={feedHrefForItem(item)} title="View in feed">
-                      <ExternalLink size={16} /> Feed
-                    </a>
+                  {(shouldShowInftLink || shouldShowFeedLink) && (
+                    <div className="video-mosaic-link-row">
+                      {shouldShowInftLink && (
+                        <a className="video-mosaic-feed-link" href={`/inft/${item.inftId}`} title="Open INFT">
+                          <ExternalLink size={16} /> INFT
+                        </a>
+                      )}
+                      {shouldShowFeedLink && (
+                        <a className="video-mosaic-feed-link" href={feedHrefForItem(item)} title="View in feed">
+                          <ExternalLink size={16} /> Feed
+                        </a>
+                      )}
+                    </div>
                   )}
                 </div>
                 {actions && <div className="video-mosaic-actions">{actions(item)}</div>}
@@ -252,4 +337,98 @@ function shortWallet(value = "") {
 function feedHrefForItem(item: PublicFeedItem) {
   const mode = item.aspectRatio === "9:16" ? "mobile" : "desktop";
   return `/feed/${encodeURIComponent(item.generationId || item.id)}/${mode}`;
+}
+
+function buildMosaicLayout(
+  items: PublicFeedItem[],
+  options: {
+    containerWidth: number;
+    gap: number;
+    landscapeSpan: number;
+    maxColumns: number;
+    minColumnWidth: number;
+  }
+): MosaicLayout {
+  const gap = Math.max(0, options.gap);
+  const minColumnWidth = Math.max(120, options.minColumnWidth);
+  const maxColumns = Math.max(1, options.maxColumns);
+  const rawColumns = Math.floor((options.containerWidth + gap) / (minColumnWidth + gap));
+  const columns = Math.max(1, Math.min(maxColumns, rawColumns || 1));
+  const columnWidth = (options.containerWidth - gap * (columns - 1)) / columns;
+  const columnHeights = Array.from({ length: columns }, () => 0);
+  const tiles: Record<string, MosaicTileLayout> = {};
+
+  for (const item of items) {
+    const preferredSpan = item.aspectRatio === "9:16" ? 1 : Math.max(1, options.landscapeSpan);
+    const span = Math.min(columns, preferredSpan);
+    let bestColumn = 0;
+    let bestY = Number.POSITIVE_INFINITY;
+
+    for (let column = 0; column <= columns - span; column += 1) {
+      const candidateY = Math.max(...columnHeights.slice(column, column + span));
+      if (candidateY < bestY) {
+        bestY = candidateY;
+        bestColumn = column;
+      }
+    }
+
+    const width = columnWidth * span + gap * (span - 1);
+    const ratio = item.aspectRatio === "9:16" ? 16 / 9 : 9 / 16;
+    const height = width * ratio;
+    const x = bestColumn * (columnWidth + gap);
+    const y = bestY;
+    const nextHeight = y + height + gap;
+
+    for (let column = bestColumn; column < bestColumn + span; column += 1) {
+      columnHeights[column] = nextHeight;
+    }
+
+    tiles[item.id] = {
+      height: roundCssNumber(height),
+      width: roundCssNumber(width),
+      x: roundCssNumber(x),
+      y: roundCssNumber(y)
+    };
+  }
+
+  const height = Math.max(0, Math.max(...columnHeights) - gap);
+  return {
+    columns,
+    height: roundCssNumber(height),
+    tiles
+  };
+}
+
+function cssNumber(value: string, fallback: number) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function cssInteger(value: string, fallback: number) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function roundCssNumber(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function mosaicLayoutsEqual(left: MosaicLayout | null, right: MosaicLayout) {
+  if (!left || left.columns !== right.columns || left.height !== right.height) {
+    return false;
+  }
+  const leftIds = Object.keys(left.tiles);
+  const rightIds = Object.keys(right.tiles);
+  if (leftIds.length !== rightIds.length) {
+    return false;
+  }
+  return rightIds.every((id) => {
+    const leftTile = left.tiles[id];
+    const rightTile = right.tiles[id];
+    return Boolean(leftTile) &&
+      leftTile.height === rightTile.height &&
+      leftTile.width === rightTile.width &&
+      leftTile.x === rightTile.x &&
+      leftTile.y === rightTile.y;
+  });
 }

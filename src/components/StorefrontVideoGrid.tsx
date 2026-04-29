@@ -4,12 +4,16 @@ import { Flame, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import VideoMosaic from "@/components/VideoMosaic";
 import { fetchWithSamsarAuth } from "@/lib/storefront-auth-client";
-import type { Generation, INFTRecord, PublicFeedItem, SuperReferralsStore } from "@/lib/types";
+import type { Generation, INFTRecord, PublicFeedItem, SuperReferralsStore, VideoAspectRatio, VideoModel } from "@/lib/types";
 
 type StorefrontVideoItem = PublicFeedItem & {
   creatorWallet?: string;
   published: boolean;
+  source: "published" | "inft";
 };
+
+type StorefrontVideoMode = "published" | "infts";
+type StorefrontVideoAction = "publish" | "unpublish" | "burn" | "unpublish_and_burn";
 
 type StorefrontVideoGridProps = {
   actor: "owner" | "user";
@@ -34,19 +38,21 @@ export default function StorefrontVideoGrid({
   initialPageSize = 9,
   onRefresh,
   pageSizeOptions = [6, 9, 12, 24],
-  publishedOnly = false,
   showCreatorWallet = false,
   store,
   subAccountId,
   wallet
 }: StorefrontVideoGridProps) {
   const [busyAction, setBusyAction] = useState("");
+  const [mode, setMode] = useState<StorefrontVideoMode>("published");
   const [message, setMessage] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(initialPageSize);
   const items = useMemo(
-    () => buildStorefrontVideoItems(store, { customerId, publishedOnly, subAccountId }),
-    [customerId, publishedOnly, store, subAccountId]
+    () => mode === "infts"
+      ? buildStorefrontINFTItems(store, { customerId, subAccountId })
+      : buildStorefrontVideoItems(store, { customerId, publishedOnly: true, subAccountId }),
+    [customerId, mode, store, subAccountId]
   );
   const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
   const normalizedPage = Math.min(page, pageCount);
@@ -54,7 +60,7 @@ export default function StorefrontVideoGrid({
 
   useEffect(() => {
     setPage(1);
-  }, [customerId, pageSize, publishedOnly, subAccountId]);
+  }, [customerId, pageSize, mode, subAccountId]);
 
   useEffect(() => {
     if (page > pageCount) {
@@ -62,7 +68,7 @@ export default function StorefrontVideoGrid({
     }
   }, [page, pageCount]);
 
-  async function updateVideo(item: StorefrontVideoItem, action: "unpublish" | "unpublish_and_burn") {
+  async function updateVideo(item: StorefrontVideoItem, action: StorefrontVideoAction) {
     setBusyAction(`${action}:${item.generationId}`);
     setMessage("");
     try {
@@ -83,7 +89,7 @@ export default function StorefrontVideoGrid({
         throw new Error(data.message || "Video update failed.");
       }
       await onRefresh?.();
-      setMessage(action === "unpublish_and_burn" ? "Video unpublished and INFT burn recorded." : "Video unpublished.");
+      setMessage(actionMessage(action));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Video update failed.");
     } finally {
@@ -96,7 +102,15 @@ export default function StorefrontVideoGrid({
       <div className="storefront-video-grid-toolbar">
         <div className="storefront-video-count">
           <strong>{items.length}</strong>
-          <span>{publishedOnly ? "published videos" : "videos"}</span>
+          <span>{mode === "infts" ? "INFTs" : "published videos"}</span>
+        </div>
+        <div className="storefront-video-mode-toggle" role="group" aria-label="Video view">
+          <button className={mode === "published" ? "active" : ""} onClick={() => setMode("published")} type="button">
+            Published
+          </button>
+          <button className={mode === "infts" ? "active" : ""} onClick={() => setMode("infts")} type="button">
+            INFTs
+          </button>
         </div>
         <label className="storefront-video-page-size">
           <SlidersHorizontal size={15} />
@@ -120,9 +134,10 @@ export default function StorefrontVideoGrid({
             onAction={updateVideo}
           />
         )}
-        emptyText={emptyText}
+        emptyText={mode === "infts" ? "No INFT videos for this storefront yet." : emptyText}
         getCreatorWallet={(item) => (item as StorefrontVideoItem).creatorWallet}
         items={pageItems}
+        key={mode}
         moreHref=""
         showCreatorWallet={showCreatorWallet}
         showFeedLink={(item) => (item as StorefrontVideoItem).published}
@@ -153,12 +168,33 @@ function VideoActions({
   allowBurn: boolean;
   busyAction: string;
   item: StorefrontVideoItem;
-  onAction: (item: StorefrontVideoItem, action: "unpublish" | "unpublish_and_burn") => Promise<void>;
+  onAction: (item: StorefrontVideoItem, action: StorefrontVideoAction) => Promise<void>;
 }) {
+  const publishBusy = busyAction === `publish:${item.generationId}`;
   const unpublishBusy = busyAction === `unpublish:${item.generationId}`;
+  const directBurnBusy = busyAction === `burn:${item.generationId}`;
   const burnBusy = busyAction === `unpublish_and_burn:${item.generationId}`;
   if (!item.published) {
-    return <span className="video-mosaic-status">Unpublished</span>;
+    return (
+      <>
+        <button className="video-mosaic-action" disabled={Boolean(busyAction)} onClick={() => onAction(item, "publish")} type="button">
+          {publishBusy ? <RefreshCw size={14} className="spin" /> : null}
+          Publish
+        </button>
+        {allowBurn && item.source === "inft" && (
+          <button
+            className="video-mosaic-action danger"
+            disabled={Boolean(busyAction) || !item.inftId}
+            onClick={() => onAction(item, "burn")}
+            title={item.inftId ? "Burn INFT" : "This video has no INFT to burn"}
+            type="button"
+          >
+            {directBurnBusy ? <RefreshCw size={14} className="spin" /> : <Flame size={14} />}
+            Burn
+          </button>
+        )}
+      </>
+    );
   }
   return (
     <>
@@ -170,16 +206,29 @@ function VideoActions({
         <button
           className="video-mosaic-action danger"
           disabled={Boolean(busyAction) || !item.inftId}
-          onClick={() => onAction(item, "unpublish_and_burn")}
+          onClick={() => onAction(item, item.source === "inft" ? "burn" : "unpublish_and_burn")}
           title={item.inftId ? "Unpublish and burn INFT" : "This video has no INFT to burn"}
           type="button"
         >
-          {burnBusy ? <RefreshCw size={14} className="spin" /> : <Flame size={14} />}
-          Unpublish & burn
+          {burnBusy || directBurnBusy ? <RefreshCw size={14} className="spin" /> : <Flame size={14} />}
+          {item.source === "inft" ? "Burn" : "Unpublish & burn"}
         </button>
       )}
     </>
   );
+}
+
+function actionMessage(action: StorefrontVideoAction) {
+  if (action === "publish") {
+    return "INFT published to the video feed.";
+  }
+  if (action === "burn") {
+    return "INFT unpublished and burn recorded.";
+  }
+  if (action === "unpublish_and_burn") {
+    return "Video unpublished and INFT burn recorded.";
+  }
+  return "Video unpublished.";
 }
 
 function buildStorefrontVideoItems(
@@ -245,7 +294,74 @@ function buildStorefrontVideoItem(store: SuperReferralsStore, generation: Genera
     likedByViewer: false,
     createdAt: generation.createdAt,
     publishedAt,
-    published: generation.feed?.published === true
+    published: generation.feed?.published === true,
+    source: "published"
+  };
+}
+
+function buildStorefrontINFTItems(
+  store: SuperReferralsStore,
+  filters: { customerId: string; subAccountId?: string }
+): StorefrontVideoItem[] {
+  return store.infts
+    .filter((inft) =>
+      inft.customerId === filters.customerId &&
+      (!filters.subAccountId || inft.subAccountId === filters.subAccountId)
+    )
+    .map((inft) => buildStorefrontINFTItem(store, inft))
+    .filter((item): item is StorefrontVideoItem => Boolean(item))
+    .sort((left, right) => videoTime(right) - videoTime(left));
+}
+
+function buildStorefrontINFTItem(store: SuperReferralsStore, inft: INFTRecord): StorefrontVideoItem | null {
+  const generation = store.generations.find((item) => item.id === inft.generationId || item.inftId === inft.id);
+  const generationId = generation?.id || inft.generationId;
+  const videoUrl = inft.videoUrl || generation?.resultUrl || "";
+  if (!videoUrl || !generationId) {
+    return null;
+  }
+  const customer = store.customers.find((item) => item.id === inft.customerId);
+  const subAccount = store.subAccounts.find((item) => item.id === inft.subAccountId);
+  const comments = store.feedComments
+    .filter((comment) => comment.generationId === generationId)
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+    .slice(0, 12)
+    .reverse();
+  const commentCount = store.feedComments.filter((comment) => comment.generationId === generationId).length;
+  const likes = store.feedLikes.filter((like) => like.generationId === generationId).length;
+  const views = store.feedViews
+    .filter((view) => view.generationId === generationId)
+    .reduce((total, view) => total + Math.max(0, view.count || 0), 0);
+
+  return {
+    id: inft.id,
+    generationId,
+    inftId: inft.id,
+    customerId: inft.customerId,
+    customerName: customer?.name || "SuperReferrals customer",
+    subAccountId: inft.subAccountId,
+    authorName: cleanText(subAccount?.username) || cleanText(subAccount?.email?.split("@")[0]) || "SuperReferrals creator",
+    creatorWallet: inft.ownerWallet || subAccount?.wallet,
+    referrerCode: generation?.referrerCode || inft.referrer.code,
+    title: cleanText(inft.title) || (generation ? feedTitle(generation, inft) : "SuperReferrals INFT"),
+    description: cleanText(inft.description) || (generation ? feedDescription(generation, inft) : "Generated SuperReferrals INFT"),
+    videoUrl,
+    posterUrl: generation ? firstImageUrl(generation) : undefined,
+    aspectRatio: generation?.input.aspect_ratio || inftAspectRatio(inft),
+    videoModel: generation?.input.video_model || inftVideoModel(inft),
+    tags: generation?.feed?.tags || [],
+    metrics: {
+      likes,
+      comments: commentCount,
+      views,
+      score: likes * 8 + commentCount * 12 + views
+    },
+    comments,
+    likedByViewer: false,
+    createdAt: inft.createdAt,
+    publishedAt: generation?.feed?.publishedAt || inft.updatedAt || inft.createdAt,
+    published: generation?.feed?.published === true,
+    source: "inft"
   };
 }
 
@@ -298,6 +414,23 @@ function firstImageUrl(generation: Generation) {
 
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function inftAspectRatio(inft: INFTRecord): VideoAspectRatio {
+  return inftAttribute(inft, "aspect_ratio") === "9:16" ? "9:16" : "16:9";
+}
+
+function inftVideoModel(inft: INFTRecord): VideoModel {
+  const value = inftAttribute(inft, "video_model");
+  if (value === "VEO3.1I2V" || value === "SEEDANCEI2V" || value === "KLING3.0" || value === "RUNWAYML") {
+    return value;
+  }
+  return "RUNWAYML";
+}
+
+function inftAttribute(inft: INFTRecord, traitType: string) {
+  const attribute = inft.attributes.find((item) => item.trait_type === traitType);
+  return typeof attribute?.value === "string" ? attribute.value.trim() : "";
 }
 
 function videoTime(item: StorefrontVideoItem) {
