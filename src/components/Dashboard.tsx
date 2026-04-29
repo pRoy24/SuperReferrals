@@ -42,6 +42,7 @@ import {
   removeAuthCredentialsFromCurrentUrl,
   storeSamsarCredentials
 } from "@/lib/storefront-auth-client";
+import StorefrontVideoGrid from "@/components/StorefrontVideoGrid";
 import { isUsableEvmAddress } from "@/lib/wallet-address";
 import type { Customer, INFTPaidAction, ModelPricingConfiguration, PaymentCurrencySymbol, SuperReferralsStore, VideoAspectRatio, VideoModel } from "@/lib/types";
 
@@ -627,6 +628,7 @@ export default function Dashboard() {
           <a className="nav-item" href="#store-setup"><KeyRound size={16} /> Store setup</a>
           <a className="nav-item" href="#usdc-pricing"><ShieldCheck size={16} /> USDC pricing</a>
           <a className="nav-item" href="#render-history"><Bot size={16} /> Render history</a>
+          <a className="nav-item" href="#published-videos"><Radio size={16} /> Published videos</a>
           <a className="nav-item" href="#agent-town"><Network size={16} /> Agent Town</a>
           <a className="nav-item" href="/storefronts"><Store size={16} /> Storefront directory</a>
         </nav>
@@ -1058,6 +1060,30 @@ export default function Dashboard() {
             </div>
           </section>
         </div>
+
+        {customer && (
+          <section className="panel storefront-owner-video-panel" id="published-videos">
+            <div className="panel-header">
+              <div>
+                <h2>Published Videos</h2>
+                <p className="subtle">
+                  Public videos currently visible in the landing page, storefront preview, and feed. Unpublishing removes the video from every public feed surface.
+                </p>
+              </div>
+              <Bot size={18} />
+            </div>
+            <StorefrontVideoGrid
+              actor="owner"
+              customerId={customer.id}
+              emptyText="No published videos for this storefront yet."
+              initialPageSize={9}
+              onRefresh={load}
+              publishedOnly
+              showCreatorWallet
+              store={store}
+            />
+          </section>
+        )}
 
         <section className="panel agent-town-panel" id="agent-town">
           <div className="panel-header">

@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowDown, ArrowUp, Bot, ChevronDown, CircleDollarSign, 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from "react";
 import { UserStoreCreatorSkeleton } from "@/components/FormLoadingSkeletons";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
-import VideoMosaic from "@/components/VideoMosaic";
+import StorefrontVideoGrid from "@/components/StorefrontVideoGrid";
 import {
   requestWalletAccounts,
   subscribeToBrowserWalletProviders,
@@ -38,7 +38,6 @@ import type {
   PaymentCurrencySymbol,
   PaymentQuote,
   PaymentRail,
-  PublicFeedItem,
   SubAccount,
   SuperReferralsStore,
   GenerationStatus,
@@ -353,10 +352,6 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const userGenerations = connectedSubAccount
     ? store?.generations.filter((generation) => generation.subAccountId === connectedSubAccount.id) || []
     : [];
-  const storefrontPublishedItems = useMemo(
-    () => customer && store ? buildStorefrontPublishedItems(store, customer.id) : [],
-    [customer?.id, store]
-  );
   const trackedGeneration = renderFlow.generationId
     ? userGenerations.find((generation) => generation.id === renderFlow.generationId)
     : undefined;
@@ -1377,11 +1372,31 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
 
           <div className="panel">
             <div className="panel-header">
-              <h2>Your Render Tasks</h2>
+              <div>
+                <h2>Your Videos</h2>
+                <p className="subtle">Videos created by this wallet on the current storefront.</p>
+              </div>
               <Bot size={18} />
             </div>
+            {connectedSubAccount ? (
+              <StorefrontVideoGrid
+                actor="user"
+                allowBurn
+                customerId={customer.id}
+                emptyText="No completed videos for this wallet yet."
+                initialPageSize={6}
+                onRefresh={load}
+                store={store}
+                subAccountId={connectedSubAccount.id}
+                wallet={connectedSubAccount.wallet || walletAddress}
+              />
+            ) : (
+              <p className="subtle">Connect your wallet to view videos created by this wallet.</p>
+            )}
             <div className="list">
-              {!connectedSubAccount && <p className="subtle">Connect your wallet to view previous render tasks.</p>}
+              <div className="section-title compact">
+                <h3>Task status</h3>
+              </div>
               {connectedSubAccount && userGenerations.length === 0 && <p className="subtle">No render tasks for this wallet yet.</p>}
               {userGenerations.map((generation) => (
                 <GenerationItem
@@ -1397,23 +1412,6 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
           </div>
         </section>
       </div>
-
-      <section className="panel storefront-renditions-panel">
-        <div className="panel-header">
-          <div>
-            <h2>Published Storefront Renditions</h2>
-            <p className="subtle">
-              Public videos created on this storefront across all connected users.
-            </p>
-          </div>
-          <Play size={18} />
-        </div>
-        <VideoMosaic
-          items={storefrontPublishedItems}
-          emptyText="No published videos on this storefront yet."
-          limit={24}
-        />
-      </section>
     </main>
   );
 }
@@ -2340,115 +2338,6 @@ function GenerationItem({
       )}
     </div>
   );
-}
-
-function buildStorefrontPublishedItems(store: SuperReferralsStore, customerId: string): PublicFeedItem[] {
-  return store.generations
-    .filter((generation) =>
-      generation.customerId === customerId &&
-      generation.status === "COMPLETED" &&
-      generation.feed?.published === true
-    )
-    .map((generation) => buildStorefrontPublishedItem(store, generation))
-    .filter((item): item is PublicFeedItem => Boolean(item))
-    .sort((left, right) => feedTime(right) - feedTime(left));
-}
-
-function buildStorefrontPublishedItem(store: SuperReferralsStore, generation: Generation): PublicFeedItem | null {
-  const inft = store.infts.find((item) => item.generationId === generation.id || item.id === generation.inftId);
-  const videoUrl = generation.resultUrl || inft?.videoUrl || "";
-  if (!videoUrl) {
-    return null;
-  }
-  const customer = store.customers.find((item) => item.id === generation.customerId);
-  const subAccount = store.subAccounts.find((item) => item.id === generation.subAccountId);
-  const comments = store.feedComments
-    .filter((comment) => comment.generationId === generation.id)
-    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
-    .slice(0, 12)
-    .reverse();
-  const views = store.feedViews
-    .filter((view) => view.generationId === generation.id)
-    .reduce((total, view) => total + Math.max(0, view.count || 0), 0);
-  const likes = store.feedLikes.filter((like) => like.generationId === generation.id).length;
-  const commentCount = store.feedComments.filter((comment) => comment.generationId === generation.id).length;
-  const publishedAt = generation.feed?.publishedAt || generation.updatedAt || generation.createdAt;
-
-  return {
-    id: generation.id,
-    generationId: generation.id,
-    inftId: inft?.id || generation.inftId,
-    customerId: generation.customerId,
-    customerName: customer?.name || "SuperReferrals customer",
-    subAccountId: generation.subAccountId,
-    authorName: cleanRenditionText(subAccount?.username) || cleanRenditionText(subAccount?.email?.split("@")[0]) || "SuperReferrals creator",
-    referrerCode: generation.referrerCode,
-    title: feedTitleForGeneration(generation, inft?.title),
-    description: cleanRenditionText(generation.input.metadata?.description) || cleanRenditionText(generation.input.prompt) || inft?.description || "Published SuperReferrals video",
-    videoUrl,
-    posterUrl: firstGenerationImageUrl(generation),
-    aspectRatio: generation.input.aspect_ratio,
-    videoModel: generation.input.video_model,
-    tags: [],
-    metrics: {
-      likes,
-      comments: commentCount,
-      views,
-      score: likes * 8 + commentCount * 12 + views
-    },
-    comments,
-    likedByViewer: false,
-    createdAt: generation.createdAt,
-    publishedAt
-  };
-}
-
-function feedTitleForGeneration(generation: Generation, inftTitle?: string) {
-  return cleanRenditionText(generation.input.metadata?.title) ||
-    titleFromGenerationSlug(cleanRenditionText(generation.input.metadata?.slug)) ||
-    cleanRenditionText(inftTitle) ||
-    "SuperReferrals Video";
-}
-
-function titleFromGenerationSlug(value: string) {
-  const slug = value
-    .trim()
-    .split(/[/?#]/)[0]
-    .replace(/\.[a-z0-9]+$/i, "")
-    .replace(/[-_]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!slug) {
-    return "";
-  }
-  return slug
-    .split(" ")
-    .map((part) => part ? part[0]!.toUpperCase() + part.slice(1) : "")
-    .join(" ");
-}
-
-function firstGenerationImageUrl(generation: Generation) {
-  for (const item of generation.input.image_urls || []) {
-    if (typeof item === "string" && item.trim()) {
-      return item.trim();
-    }
-    if (item && typeof item === "object" && !Array.isArray(item)) {
-      const record = item as Record<string, unknown>;
-      const value = cleanRenditionText(record.image_url) || cleanRenditionText(record.imageUrl) || cleanRenditionText(record.url);
-      if (value) {
-        return value;
-      }
-    }
-  }
-  return undefined;
-}
-
-function cleanRenditionText(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function feedTime(item: PublicFeedItem) {
-  return Date.parse(item.publishedAt || item.createdAt) || 0;
 }
 
 function feedHrefForGeneration(generation: Generation) {

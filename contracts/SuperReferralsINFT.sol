@@ -26,6 +26,7 @@ contract SuperReferralsINFT is ERC721URIStorage, Ownable, ReentrancyGuard {
         string referrerCode
     );
     event AgentMetadataUpdated(uint256 indexed tokenId, bytes32 metadataHash, string encryptedURI);
+    event AgentBurned(uint256 indexed tokenId);
     event UsageAuthorized(uint256 indexed tokenId, address indexed executor, bytes permissions);
 
     constructor(address initialOwner) ERC721("SuperReferrals Video INFT", "SRINFT") Ownable(initialOwner) {}
@@ -85,6 +86,14 @@ contract SuperReferralsINFT is ERC721URIStorage, Ownable, ReentrancyGuard {
         _agentData[tokenId].metadataHash = metadataHash;
         _setTokenURI(tokenId, encryptedURI);
         emit AgentMetadataUpdated(tokenId, metadataHash, encryptedURI);
+    }
+
+    function burnAgent(uint256 tokenId) external nonReentrant {
+        address currentOwner = ownerOf(tokenId);
+        require(currentOwner == msg.sender || owner() == msg.sender || _isAuthorized(currentOwner, msg.sender, tokenId), "not authorized");
+        delete _agentData[tokenId];
+        _burn(tokenId);
+        emit AgentBurned(tokenId);
     }
 
     function transferWithMetadata(

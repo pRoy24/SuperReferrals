@@ -865,6 +865,17 @@ export function addINFT(store: SuperReferralsStore, inft: INFTRecord) {
   return inft;
 }
 
+export function removeINFT(store: SuperReferralsStore, id: string) {
+  const existingIndex = store.infts.findIndex((item) =>
+    item.id === id || item.generationId === id || item.tokenId === id
+  );
+  if (existingIndex < 0) {
+    return null;
+  }
+  const [removed] = store.infts.splice(existingIndex, 1);
+  return removed || null;
+}
+
 export function upsertStorefrontRating(store: SuperReferralsStore, input: {
   customerId: string;
   subAccountId?: string;

@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { getGeneration } from "@/lib/store";
+import { normalizeWallet } from "@/lib/ids";
+import { burnINFT } from "@/lib/inft";
+import { getGeneration, mutateStore, readStore, removeINFT, updateGeneration } from "@/lib/store";
+import type { Generation } from "@/lib/types";
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -8,4 +11,91 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     return NextResponse.json({ message: "generation not found" }, { status: 404 });
   }
   return NextResponse.json({ generation });
+}
+
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await params;
+    const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+    const action = String(body.action || "").trim();
+    if (action !== "unpublish" && action !== "unpublish_and_burn") {
+      return NextResponse.json({ message: "Unsupported generation action" }, { status: 400 });
+    }
+
+    const existing = await getGeneration(id);
+    if (!existing) {
+      return NextResponse.json({ message: "generation not found" }, { status: 404 });
+    }
+    const store = await readStore();
+    if (!isAuthorizedGenerationMutation(existing, body, store)) {
+      return NextResponse.json({ message: "Not authorized to update this video" }, { status: 403 });
+    }
+
+    const burnResult = action === "unpublish_and_burn"
+      ? await burnGenerationINFT(existing)
+      : undefined;
+
+    const generation = await mutateStore((store) => {
+      const current = store.generations.find((item) => item.id === id);
+      if (!current) {
+        throw new Error("generation not found");
+      }
+      const next = updateGeneration(store, id, {
+        feed: {
+          ...(current.feed || { tags: [] }),
+          published: false
+        },
+        ...(burnResult?.burned ? { inftId: undefined } : {})
+      });
+      if (burnResult?.burned) {
+        removeINFT(store, burnResult.inftId || id);
+      }
+      return next;
+    });
+
+    return NextResponse.json({ generation, burn: burnResult });
+  } catch (error) {
+    return NextResponse.json(
+      { message: error instanceof Error ? error.message : "Unable to update video" },
+      { status: 400 }
+    );
+  }
+}
+
+async function burnGenerationINFT(generation: Generation) {
+  const inftId = generation.inftId;
+  if (!inftId) {
+    return { burned: false, reason: "No INFT is attached to this video." };
+  }
+  const store = await readStore();
+  const inft = store.infts.find((item) => item.id === inftId || item.generationId === generation.id);
+  if (!inft) {
+    return { burned: false, inftId, reason: "INFT was not found in the local store." };
+  }
+  const result = await burnINFT({ tokenId: inft.tokenId });
+  return {
+    burned: true,
+    inftId: inft.id,
+    txHash: result.txHash,
+    mock: result.mock
+  };
+}
+
+function isAuthorizedGenerationMutation(generation: Generation, body: Record<string, unknown>, store: Awaited<ReturnType<typeof readStore>>) {
+  const actor = String(body.actor || "").trim();
+  const customerId = String(body.customerId || body.ownerCustomerId || "").trim();
+  if (actor === "owner") {
+    return customerId === generation.customerId;
+  }
+
+  const subAccountId = String(body.subAccountId || "").trim();
+  const wallet = normalizeWallet(String(body.wallet || ""));
+  if (!wallet) {
+    return false;
+  }
+  const subAccount = store.subAccounts.find((item) => item.id === generation.subAccountId);
+  if (subAccountId && subAccountId !== generation.subAccountId) {
+    return false;
+  }
+  return Boolean(subAccount && wallet === normalizeWallet(subAccount.wallet));
 }

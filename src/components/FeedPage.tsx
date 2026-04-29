@@ -857,26 +857,53 @@ function FeedVideo({
   onEnded: () => void;
   onProgress: (id: string, video: HTMLVideoElement) => void;
 }) {
+  const ratio = feedAspectRatioStyle(item);
+  const [posterVisible, setPosterVisible] = useState(Boolean(item.posterUrl));
+
+  useEffect(() => {
+    setPosterVisible(Boolean(item.posterUrl));
+  }, [item.id, item.posterUrl, item.videoUrl]);
+
+  function revealVideoFrame() {
+    setPosterVisible(false);
+  }
+
   return (
-    <video
-      className={`feed-video ${item.aspectRatio === "9:16" ? "portrait" : "landscape"}`}
-      ref={(node) => {
-        videoRefs.current[item.id] = node;
-      }}
-      src={item.videoUrl}
-      poster={item.posterUrl}
-      muted={muted}
-      loop={false}
-      playsInline
-      preload={active ? "auto" : "metadata"}
-      autoPlay={active && playing}
-      onCanPlay={(event) => onProgress(item.id, event.currentTarget)}
-      onDurationChange={(event) => onProgress(item.id, event.currentTarget)}
-      onEnded={onEnded}
-      onLoadedMetadata={(event) => onProgress(item.id, event.currentTarget)}
-      onSeeked={(event) => onProgress(item.id, event.currentTarget)}
-      onTimeUpdate={(event) => onProgress(item.id, event.currentTarget)}
-    />
+    <div
+      className={`feed-video-frame ${item.aspectRatio === "9:16" ? "portrait" : "landscape"}`}
+      style={ratio}
+    >
+      {item.posterUrl && (
+        <img
+          alt=""
+          className={`feed-video-poster ${posterVisible ? "" : "hidden"}`}
+          src={item.posterUrl}
+        />
+      )}
+      <video
+        className={`feed-video ${item.aspectRatio === "9:16" ? "portrait" : "landscape"}`}
+        height={item.aspectRatio === "9:16" ? 16 : 9}
+        ref={(node) => {
+          videoRefs.current[item.id] = node;
+        }}
+        src={item.videoUrl}
+        poster={item.posterUrl}
+        muted={muted}
+        loop={false}
+        playsInline
+        preload={active ? "auto" : "metadata"}
+        autoPlay={active && playing}
+        width={item.aspectRatio === "9:16" ? 9 : 16}
+        onCanPlay={(event) => onProgress(item.id, event.currentTarget)}
+        onDurationChange={(event) => onProgress(item.id, event.currentTarget)}
+        onEnded={onEnded}
+        onLoadedData={revealVideoFrame}
+        onLoadedMetadata={(event) => onProgress(item.id, event.currentTarget)}
+        onPlaying={revealVideoFrame}
+        onSeeked={(event) => onProgress(item.id, event.currentTarget)}
+        onTimeUpdate={(event) => onProgress(item.id, event.currentTarget)}
+      />
+    </div>
   );
 }
 
@@ -1257,6 +1284,13 @@ function formatVideoTime(value: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function feedAspectRatioStyle(item: PublicFeedItem) {
+  return {
+    "--feed-video-ratio": item.aspectRatio === "9:16" ? "9 / 16" : "16 / 9",
+    "--feed-video-ratio-value": item.aspectRatio === "9:16" ? "0.5625" : "1.7777777778"
+  } as CSSProperties;
 }
 
 function isVisibleInFeedMode(item: PublicFeedItem, viewMode: FeedViewMode) {

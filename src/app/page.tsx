@@ -187,6 +187,9 @@ export default async function Home() {
           items={featuredFeed.items}
           emptyText="No published storefront videos yet."
           limit={10}
+          maxRows={2}
+          moreHref="/feed"
+          moreLabel="More videos"
         />
       </section>
     </main>
