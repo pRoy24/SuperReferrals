@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { verifyMessage } from "viem";
+import { getAddress, verifyMessage } from "viem";
 import { createId, normalizeWallet, nowIso } from "@/lib/ids";
 import { buildINFTBurnRequest, burnINFT, getINFTTokenOwner, verifyINFTBurnTransaction } from "@/lib/inft";
 import { persistJsonToZeroG } from "@/lib/zero-g";
@@ -298,8 +298,9 @@ async function verifyBurnAuthorization(input: unknown, generation: Generation, i
   if (authorization.message !== expectedMessage) {
     throw new Error("Burn authorization details do not match this INFT.");
   }
+  const storedOwner = normalizeEvmAddressForCompare(inft.ownerWallet);
   const valid = await verifyMessage({
-    address: normalizeWallet(inft.ownerWallet) as `0x${string}`,
+    address: getAddress(inft.ownerWallet) as `0x${string}`,
     message: authorization.message,
     signature: authorization.signature as `0x${string}`
   }).catch(() => false);
@@ -312,14 +313,26 @@ async function verifyBurnAuthorization(input: unknown, generation: Generation, i
   }).catch((error) => {
     throw new Error(`Unable to verify current INFT owner before platform burn: ${error instanceof Error ? error.message : String(error)}`);
   });
-  if (currentOwner && normalizeWallet(currentOwner) !== normalizeWallet(inft.ownerWallet)) {
-    throw new Error(`Current on-chain INFT owner ${currentOwner} does not match the stored owner ${inft.ownerWallet}.`);
+  const normalizedCurrentOwner = currentOwner ? normalizeEvmAddressForCompare(currentOwner) : storedOwner;
+  if (normalizedCurrentOwner !== storedOwner) {
+    throw new Error(`Current on-chain INFT owner ${currentOwner} (${normalizedCurrentOwner}) does not match the stored owner ${inft.ownerWallet} (${storedOwner}).`);
   }
   return {
     ...authorization,
-    signer: normalizeWallet(inft.ownerWallet),
-    currentOwner: currentOwner ? normalizeWallet(currentOwner) : normalizeWallet(inft.ownerWallet)
+    signer: storedOwner,
+    currentOwner: normalizedCurrentOwner
   };
+}
+
+function normalizeEvmAddressForCompare(value?: string) {
+  if (!value) {
+    return "";
+  }
+  try {
+    return getAddress(value).toLowerCase();
+  } catch {
+    return value.trim().toLowerCase();
+  }
 }
 
 function parseBurnAuthorization(input: unknown): BurnAuthorization & {
