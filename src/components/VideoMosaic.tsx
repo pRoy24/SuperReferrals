@@ -6,6 +6,16 @@ import { DEFAULT_FEED_VIDEO_VOLUME, persistFeedVideoVolume, readFeedVideoVolume,
 import type { PublicFeedItem } from "@/lib/types";
 
 type MosaicAspectRatio = "16:9" | "9:16";
+type MosaicLayout = {
+  columns: number;
+  gap: number;
+  rowHeight: number;
+  width: number;
+};
+
+const MOSAIC_COLUMNS = 12;
+const MOSAIC_GAP_PX = 12;
+const MOSAIC_ROW_HEIGHT_PX = 4;
 
 type VideoMosaicProps = {
   items: PublicFeedItem[];
@@ -49,6 +59,13 @@ export default function VideoMosaic({
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(DEFAULT_FEED_VIDEO_VOLUME);
   const [videoReadyById, setVideoReadyById] = useState<Record<string, boolean>>({});
+  const [mosaicLayout, setMosaicLayout] = useState<MosaicLayout>({
+    columns: 1,
+    gap: MOSAIC_GAP_PX,
+    rowHeight: MOSAIC_ROW_HEIGHT_PX,
+    width: 0
+  });
+  const mosaicGridRef = useRef<HTMLDivElement | null>(null);
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const displayedItems = aspectReadyItems;
   const hiddenCount = Math.max(0, items.length - displayedItems.length);
@@ -99,6 +116,33 @@ export default function VideoMosaic({
       Object.entries(current).filter(([id]) => visibleIds.has(id))
     ));
   }, [aspectReadyItems]);
+
+  useEffect(() => {
+    const grid = mosaicGridRef.current;
+    if (!grid) {
+      return;
+    }
+
+    function syncColumnCount() {
+      const width = grid?.clientWidth || 0;
+      const columns = width <= 620 ? 1 : MOSAIC_COLUMNS;
+      setMosaicLayout((current) =>
+        current.width === width && current.columns === columns
+          ? current
+          : { ...current, columns, width }
+      );
+    }
+
+    syncColumnCount();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", syncColumnCount);
+      return () => window.removeEventListener("resize", syncColumnCount);
+    }
+
+    const resizeObserver = new ResizeObserver(syncColumnCount);
+    resizeObserver.observe(grid);
+    return () => resizeObserver.disconnect();
+  }, []);
 
   function markVideoReady(item: PublicFeedItem) {
     setVideoReadyById((current) => current[item.id] ? current : { ...current, [item.id]: true });
@@ -177,6 +221,12 @@ export default function VideoMosaic({
     <div className={`video-mosaic ${className}`.trim()}>
       <div
         className={`video-mosaic-grid ${maxRows ? `rows-${maxRows}` : ""}`.trim()}
+        ref={mosaicGridRef}
+        style={{
+          "--mosaic-columns": String(mosaicLayout.columns),
+          "--mosaic-gap": `${mosaicLayout.gap}px`,
+          "--mosaic-row-height": `${mosaicLayout.rowHeight}px`
+        } as CSSProperties}
       >
         {displayedItems.map((item) => {
           const aspectRatio = normalizeMosaicAspectRatio(item.aspectRatio) as MosaicAspectRatio;
@@ -186,8 +236,11 @@ export default function VideoMosaic({
           const shouldShowFeedLink = typeof showFeedLink === "function" ? showFeedLink(item) : showFeedLink;
           const shouldShowInftLink = showInftLink && Boolean(item.inftId);
           const posterUrl = item.posterUrl;
+          const columnSpan = getMosaicColumnSpan(aspectRatio, mosaicLayout);
           const tileStyle = {
-            "--tile-ratio": isPortrait ? "9 / 16" : "16 / 9"
+            "--tile-column-span": String(columnSpan),
+            "--tile-ratio": isPortrait ? "9 / 16" : "16 / 9",
+            "--tile-row-span": String(getMosaicRowSpan(aspectRatio, columnSpan, mosaicLayout))
           } as CSSProperties;
 
           return (
@@ -295,6 +348,30 @@ export default function VideoMosaic({
       )}
     </div>
   );
+}
+
+function getMosaicColumnSpan(aspectRatio: MosaicAspectRatio, layout: MosaicLayout) {
+  if (layout.columns <= 1) {
+    return 1;
+  }
+  if (layout.width <= 980) {
+    return aspectRatio === "9:16" ? 4 : 8;
+  }
+  return aspectRatio === "9:16" ? 3 : 6;
+}
+
+function getMosaicRowSpan(aspectRatio: MosaicAspectRatio, columnSpan: number, layout: MosaicLayout) {
+  const columns = Math.max(1, layout.columns);
+  const fallbackWidth = aspectRatio === "9:16" ? 180 : 320;
+  const width = layout.width || fallbackWidth;
+  const trackWidth = columns === 1
+    ? width
+    : (width - layout.gap * (columns - 1)) / columns;
+  const tileWidth = columns === 1
+    ? trackWidth
+    : trackWidth * columnSpan + layout.gap * (columnSpan - 1);
+  const tileHeight = aspectRatio === "9:16" ? tileWidth * (16 / 9) : tileWidth * (9 / 16);
+  return Math.max(1, Math.ceil((tileHeight + layout.gap) / (layout.rowHeight + layout.gap)));
 }
 
 function shortWallet(value = "") {
