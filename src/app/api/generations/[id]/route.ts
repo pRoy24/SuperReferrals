@@ -1,8 +1,19 @@
 import { NextResponse } from "next/server";
-import { normalizeWallet, nowIso } from "@/lib/ids";
-import { buildINFTBurnRequest, burnINFT, verifyINFTBurnTransaction } from "@/lib/inft";
-import { getGeneration, mutateStore, readStore, removeGenerationVideoReferences, updateGeneration } from "@/lib/store";
-import type { Generation } from "@/lib/types";
+import { verifyMessage } from "viem";
+import { createId, normalizeWallet, nowIso } from "@/lib/ids";
+import { buildINFTBurnRequest, burnINFT, getINFTTokenOwner, verifyINFTBurnTransaction } from "@/lib/inft";
+import { persistJsonToZeroG } from "@/lib/zero-g";
+import { addAgentTownEvent, getGeneration, mutateStore, readStore, removeGenerationVideoReferences, updateGeneration } from "@/lib/store";
+import type { Generation, INFTRecord, ZeroGArtifact } from "@/lib/types";
+
+type BurnAuthorization = {
+  message?: string;
+  signature?: string;
+  signer?: string;
+  nonce?: string;
+  issuedAt?: string;
+  expiresAt?: string;
+};
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -38,7 +49,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
 
     if (action === "prepare_burn") {
-      const prepared = await prepareGenerationINFTBurn(id);
+      const prepared = await prepareGenerationINFTBurn(id, body);
       return NextResponse.json(prepared);
     }
 
@@ -53,6 +64,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         throw new Error("generation not found");
       }
       if (burnResult?.burned) {
+        if (burnResult.audit) {
+          addAgentTownEvent(store, {
+            id: createId("evt"),
+            fromAgentId: "superreferrals-platform",
+            channel: "0g",
+            eventType: "receipt",
+            content: `INFT ${burnResult.inftId || current.inftId || id} burn authorized by token owner and executed by platform contract owner.`,
+            payload: {
+              generationId: id,
+              inftId: burnResult.inftId || current.inftId,
+              tokenId: burnResult.tokenId,
+              txHash: burnResult.txHash,
+              audit: burnResult.audit
+            },
+            createdAt: nowIso()
+          });
+        }
         const cleanup = removeGenerationVideoReferences(store, {
           generationId: id,
           inftId: burnResult.inftId || current.inftId
@@ -86,7 +114,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 }
 
-async function prepareGenerationINFTBurn(id: string) {
+async function prepareGenerationINFTBurn(id: string, body: Record<string, unknown>) {
   return mutateStore((store) => {
     const generation = store.generations.find((item) => item.id === id);
     if (!generation) {
@@ -100,6 +128,12 @@ async function prepareGenerationINFTBurn(id: string) {
       tokenId: inft.tokenId,
       contractAddress: inft.contractAddress
     });
+    const authorization = buildBurnAuthorization({
+      requestedWallet: cleanOptionalString(body.wallet),
+      generation,
+      inft,
+      burnRequest
+    });
     const nextFeed = {
       ...(generation.feed || { tags: [] }),
       published: false
@@ -112,7 +146,8 @@ async function prepareGenerationINFTBurn(id: string) {
         tokenId: inft.tokenId,
         mock: burnRequest.mock
       },
-      burnRequest
+      burnRequest,
+      burnAuthorization: authorization
     };
   });
 }
@@ -146,14 +181,214 @@ async function burnGenerationINFT(generation: Generation, body: Record<string, u
       recorded: true
     };
   }
-  const result = await burnINFT({ tokenId: inft.tokenId });
+  const authorization = await verifyBurnAuthorization(body.burnAuthorization, generation, inft);
+  const audit = await persistBurnAuditToZeroG({
+    generation,
+    inft,
+    authorization
+  });
+  const result = await burnINFT({ tokenId: inft.tokenId, contractAddress: inft.contractAddress });
   return {
     burned: true,
     inftId: inft.id,
     tokenId: inft.tokenId,
     txHash: result.txHash,
-    mock: result.mock
+    mock: result.mock,
+    authorizedBy: authorization.signer,
+    audit
   };
+}
+
+function buildBurnAuthorization({
+  requestedWallet,
+  generation,
+  inft,
+  burnRequest
+}: {
+  requestedWallet?: string;
+  generation: Generation;
+  inft: INFTRecord;
+  burnRequest: ReturnType<typeof buildINFTBurnRequest>;
+}) {
+  const issuedAt = nowIso();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  const nonce = createId("burn_auth");
+  const payload = {
+    action: "burn_inft_with_platform_contract_owner",
+    generationId: generation.id,
+    inftId: inft.id,
+    tokenId: inft.tokenId || "",
+    contractAddress: inft.contractAddress || burnRequest.contractAddress || "",
+    chainId: burnRequest.chain?.id || 0,
+    tokenOwner: normalizeWallet(inft.ownerWallet),
+    requestedWallet: normalizeWallet(requestedWallet || ""),
+    nonce,
+    issuedAt,
+    expiresAt
+  };
+  return {
+    ...payload,
+    message: burnAuthorizationMessage(payload)
+  };
+}
+
+function burnAuthorizationMessage(payload: {
+  action: string;
+  generationId: string;
+  inftId: string;
+  tokenId: string;
+  contractAddress: string;
+  chainId: number;
+  tokenOwner: string;
+  requestedWallet: string;
+  nonce: string;
+  issuedAt: string;
+  expiresAt: string;
+}) {
+  return [
+    "SuperReferrals INFT Burn Authorization",
+    "",
+    "You authorize SuperReferrals to use the platform contract-owner key to burn the INFT listed below.",
+    "The platform will first verify that this signature belongs to the current token owner, write this authorization to 0G Storage, then execute burnAgent.",
+    "",
+    `Action: ${payload.action}`,
+    `Generation ID: ${payload.generationId}`,
+    `INFT ID: ${payload.inftId}`,
+    `Token ID: ${payload.tokenId}`,
+    `Contract: ${payload.contractAddress}`,
+    `0G Chain ID: ${payload.chainId}`,
+    `Token owner: ${payload.tokenOwner}`,
+    `Requested wallet: ${payload.requestedWallet}`,
+    `Nonce: ${payload.nonce}`,
+    `Issued At: ${payload.issuedAt}`,
+    `Expires At: ${payload.expiresAt}`
+  ].join("\n");
+}
+
+async function verifyBurnAuthorization(input: unknown, generation: Generation, inft: INFTRecord) {
+  const authorization = parseBurnAuthorization(input);
+  const now = Date.now();
+  const expiresAt = Date.parse(authorization.expiresAt || "");
+  if (!Number.isFinite(expiresAt) || expiresAt < now) {
+    throw new Error("Burn authorization has expired. Start the burn again.");
+  }
+  const burnRequest = buildINFTBurnRequest({
+    tokenId: inft.tokenId,
+    contractAddress: inft.contractAddress
+  });
+  const expected = buildBurnAuthorization({
+    requestedWallet: authorization.requestedWallet,
+    generation,
+    inft,
+    burnRequest
+  });
+  const expectedMessage = burnAuthorizationMessage({
+    action: expected.action,
+    generationId: expected.generationId,
+    inftId: expected.inftId,
+    tokenId: expected.tokenId,
+    contractAddress: expected.contractAddress,
+    chainId: expected.chainId,
+    tokenOwner: expected.tokenOwner,
+    requestedWallet: expected.requestedWallet,
+    nonce: authorization.nonce || "",
+    issuedAt: authorization.issuedAt || "",
+    expiresAt: authorization.expiresAt || ""
+  });
+  if (authorization.message !== expectedMessage) {
+    throw new Error("Burn authorization details do not match this INFT.");
+  }
+  const valid = await verifyMessage({
+    address: normalizeWallet(inft.ownerWallet) as `0x${string}`,
+    message: authorization.message,
+    signature: authorization.signature as `0x${string}`
+  }).catch(() => false);
+  if (!valid) {
+    throw new Error("Burn authorization was not signed by the INFT owner wallet.");
+  }
+  const currentOwner = await getINFTTokenOwner({
+    tokenId: inft.tokenId,
+    contractAddress: inft.contractAddress
+  }).catch((error) => {
+    throw new Error(`Unable to verify current INFT owner before platform burn: ${error instanceof Error ? error.message : String(error)}`);
+  });
+  if (currentOwner && normalizeWallet(currentOwner) !== normalizeWallet(inft.ownerWallet)) {
+    throw new Error(`Current on-chain INFT owner ${currentOwner} does not match the stored owner ${inft.ownerWallet}.`);
+  }
+  return {
+    ...authorization,
+    signer: normalizeWallet(inft.ownerWallet),
+    currentOwner: currentOwner ? normalizeWallet(currentOwner) : normalizeWallet(inft.ownerWallet)
+  };
+}
+
+function parseBurnAuthorization(input: unknown): BurnAuthorization & {
+  action?: string;
+  generationId?: string;
+  inftId?: string;
+  tokenId?: string;
+  contractAddress?: string;
+  chainId?: number;
+  tokenOwner?: string;
+  requestedWallet?: string;
+} {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("Token owner burn authorization is required.");
+  }
+  const record = input as Record<string, unknown>;
+  const authorization = {
+    action: cleanOptionalString(record.action),
+    generationId: cleanOptionalString(record.generationId),
+    inftId: cleanOptionalString(record.inftId),
+    tokenId: cleanOptionalString(record.tokenId),
+    contractAddress: cleanOptionalString(record.contractAddress),
+    chainId: Number(record.chainId),
+    tokenOwner: cleanOptionalString(record.tokenOwner),
+    requestedWallet: cleanOptionalString(record.requestedWallet),
+    nonce: cleanOptionalString(record.nonce),
+    issuedAt: cleanOptionalString(record.issuedAt),
+    expiresAt: cleanOptionalString(record.expiresAt),
+    message: cleanOptionalString(record.message),
+    signature: cleanOptionalString(record.signature),
+    signer: cleanOptionalString(record.signer)
+  };
+  if (!authorization.message || !authorization.signature || !authorization.nonce || !authorization.issuedAt || !authorization.expiresAt) {
+    throw new Error("Burn authorization is incomplete.");
+  }
+  return authorization;
+}
+
+async function persistBurnAuditToZeroG({
+  generation,
+  inft,
+  authorization
+}: {
+  generation: Generation;
+  inft: INFTRecord;
+  authorization: ReturnType<typeof parseBurnAuthorization> & { signer?: string; currentOwner?: string };
+}): Promise<ZeroGArtifact> {
+  return persistJsonToZeroG({
+    type: "superreferrals.inft_burn_authorization",
+    version: 1,
+    createdAt: nowIso(),
+    generationId: generation.id,
+    inftId: inft.id,
+    tokenId: inft.tokenId,
+    contractAddress: inft.contractAddress,
+    customerId: generation.customerId,
+    subAccountId: generation.subAccountId,
+    tokenOwner: inft.ownerWallet,
+    verifiedCurrentOwner: authorization.currentOwner,
+    platformBurner: "contract_owner",
+    authorization: {
+      message: authorization.message,
+      signature: authorization.signature,
+      signer: authorization.signer,
+      nonce: authorization.nonce,
+      issuedAt: authorization.issuedAt,
+      expiresAt: authorization.expiresAt
+    }
+  });
 }
 
 function findGenerationINFT(store: Awaited<ReturnType<typeof readStore>>, generation: Generation) {

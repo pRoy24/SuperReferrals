@@ -34,6 +34,22 @@ type INFTBurnRequest = {
   mock?: boolean;
   chain?: INFTBurnChain;
 };
+type INFTBurnAuthorization = {
+  action?: string;
+  generationId?: string;
+  inftId?: string;
+  tokenId?: string;
+  contractAddress?: string;
+  chainId?: number;
+  tokenOwner?: string;
+  requestedWallet?: string;
+  nonce?: string;
+  issuedAt?: string;
+  expiresAt?: string;
+  message?: string;
+  signature?: string;
+  signer?: string;
+};
 type INFTBurnDiagnostics = {
   tokenId: string;
   contractAddress: string;
@@ -139,16 +155,17 @@ export default function StorefrontVideoGrid({
     try {
       const prepared = await sendGenerationAction(item, "prepare_burn");
       const burnRequest = readBurnRequest(prepared);
-      let burnTxHash = cleanText((prepared.burn as Record<string, unknown> | undefined)?.txHash);
+      const burnAuthorization = readBurnAuthorization(prepared);
       if (!burnRequest.mock) {
-        setMessage("Confirm the INFT burn in your wallet.");
-        burnTxHash = await requestWalletINFTBurn({
+        setMessage("Sign the INFT burn authorization in your wallet.");
+        await requestWalletBurnAuthorization({
           provider: ethereumProvider,
           ownerWallet: wallet,
-          burnRequest
+          burnRequest,
+          burnAuthorization
         });
       }
-      await sendGenerationAction(item, action, { burnTxHash });
+      await sendGenerationAction(item, action, { burnAuthorization });
       await onRefresh?.();
       setMessage(actionMessage(action));
     } catch (error) {
@@ -540,14 +557,26 @@ function readBurnRequest(data: Record<string, unknown>): INFTBurnRequest {
   return burnRequest;
 }
 
-async function requestWalletINFTBurn({
+function readBurnAuthorization(data: Record<string, unknown>): INFTBurnAuthorization {
+  const authorization = data.burnAuthorization && typeof data.burnAuthorization === "object"
+    ? data.burnAuthorization as INFTBurnAuthorization
+    : {};
+  if (!authorization.message || !authorization.nonce || !authorization.expiresAt) {
+    throw new Error("Burn authorization details are missing.");
+  }
+  return authorization;
+}
+
+async function requestWalletBurnAuthorization({
   provider,
   ownerWallet,
-  burnRequest
+  burnRequest,
+  burnAuthorization
 }: {
   provider?: EthereumProvider | null;
   ownerWallet?: string;
   burnRequest: INFTBurnRequest;
+  burnAuthorization: INFTBurnAuthorization;
 }) {
   if (!provider) {
     throw new Error("Connect this wallet in a wallet-enabled browser before burning the INFT.");
@@ -586,24 +615,19 @@ async function requestWalletINFTBurn({
     value: "0x0"
   };
   await preflightINFTBurn(provider, transaction, diagnostics);
-  const gas = await resolveINFTBurnGas(provider, transaction, chain);
-  const txHash = String(await provider.request({
-    method: "eth_sendTransaction",
-    params: [compactTransaction({ ...transaction, gas })]
+  if (!burnAuthorization.message) {
+    throw new Error("Burn authorization message is missing.");
+  }
+  const signature = String(await provider.request({
+    method: "personal_sign",
+    params: [burnAuthorization.message, from]
   }));
-  const receipt = await waitForWalletReceipt(provider, txHash, 120000);
-  if (!receipt) {
-    throw new Error("Timed out waiting for the INFT burn transaction to confirm.");
+  burnAuthorization.signature = signature;
+  burnAuthorization.signer = from;
+  if (!signature || !signature.startsWith("0x")) {
+    throw new Error("Wallet did not return a valid burn authorization signature.");
   }
-  if (!isSuccessfulReceipt(receipt)) {
-    const latestDiagnostics = await readINFTBurnDiagnostics(provider, {
-      contractAddress,
-      from,
-      tokenId
-    }).catch(() => diagnostics);
-    throw new Error(`INFT burn transaction reverted. ${formatINFTBurnDiagnostics(latestDiagnostics)} Transaction: ${shortHash(txHash)}.`);
-  }
-  return txHash;
+  return burnAuthorization;
 }
 
 async function readINFTBurnDiagnostics(
@@ -744,63 +768,8 @@ async function ensureWalletNetwork(provider: EthereumProvider, chain: INFTBurnCh
   }
 }
 
-async function resolveINFTBurnGas(provider: EthereumProvider, transaction: Record<string, unknown>, chain: INFTBurnChain) {
-  try {
-    const gas = BigInt(String(await provider.request({
-      method: "eth_estimateGas",
-      params: [compactTransaction(transaction)]
-    })));
-    return `0x${((gas * 12n) / 10n + 1n).toString(16)}`;
-  } catch (error) {
-    if (isZeroGChain(chain)) {
-      console.warn("Falling back to a fixed 0G INFT burn gas limit after estimateGas failed.", {
-        chainId: chain.id,
-        error
-      });
-      return INFT_BURN_GAS_LIMIT;
-    }
-    throw new Error(`INFT burn gas estimate failed on ${chain.name}: ${formatErrorMessage(error, "wallet gas estimate failed")}.`);
-  }
-}
-
-function isZeroGChain(chain: INFTBurnChain) {
-  return chain.id === 16602 || chain.id === 16661 || /0g/i.test(chain.name);
-}
-
-async function waitForWalletReceipt(provider: EthereumProvider, txHash: string, timeoutMs = 60000) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const receipt = await provider.request({
-      method: "eth_getTransactionReceipt",
-      params: [txHash]
-    }).catch(() => null);
-    if (receipt) {
-      return receipt;
-    }
-    await delay(3000);
-  }
-  return null;
-}
-
 function compactTransaction(tx: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(tx).filter(([, value]) => value !== undefined && value !== null && value !== ""));
-}
-
-function isSuccessfulReceipt(receipt: unknown) {
-  if (!receipt || typeof receipt !== "object") {
-    return false;
-  }
-  const status = (receipt as { status?: unknown }).status;
-  if (typeof status === "string") {
-    return status.toLowerCase() === "0x1" || status === "1";
-  }
-  if (typeof status === "number") {
-    return status === 1;
-  }
-  if (typeof status === "boolean") {
-    return status;
-  }
-  return false;
 }
 
 function walletErrorCode(error: unknown) {
@@ -860,12 +829,4 @@ function shortWallet(value = "") {
     return trimmed || "wallet";
   }
   return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`;
-}
-
-function shortHash(value = "") {
-  return value.length > 14 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value;
-}
-
-function delay(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

@@ -186,6 +186,19 @@ function parsePositiveIntegerEnv(name: string, fallback: number) {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 }
 
+function parsePositiveBigIntEnv(name: string, fallback: bigint) {
+  const value = env(name);
+  if (!value) {
+    return fallback;
+  }
+  try {
+    const parsed = BigInt(value);
+    return parsed > 0n ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export async function updateINFTMetadata({
   tokenId,
   metadataUri,
@@ -240,8 +253,8 @@ export async function updateINFTMetadata({
   };
 }
 
-export async function burnINFT({ tokenId }: { tokenId?: string }) {
-  const contractAddress = env("INFT_CONTRACT_ADDRESS") as `0x${string}`;
+export async function burnINFT({ tokenId, contractAddress: inputContractAddress }: { tokenId?: string; contractAddress?: string }) {
+  const contractAddress = (inputContractAddress || env("INFT_CONTRACT_ADDRESS")) as `0x${string}`;
   const privateKey = (env("INFT_MINTER_PRIVATE_KEY") || env("OG_PRIVATE_KEY")) as `0x${string}`;
   const chain = getINFTChain();
   const rpcUrl = chain.rpcUrls.default.http[0];
@@ -278,10 +291,48 @@ export async function burnINFT({ tokenId }: { tokenId?: string }) {
       walletClient
     })
   );
+  const receipt = await publicClient.waitForTransactionReceipt({
+    hash: txHash,
+    timeout: parsePositiveIntegerEnv("INFT_BURN_RECEIPT_TIMEOUT_MS", 120_000)
+  });
+  if (receipt.status !== "success") {
+    throw new Error(`INFT burn transaction failed: ${txHash}`);
+  }
+  assertBurnReceipt(receipt, contractAddress, tokenId);
   return {
     txHash,
     mock: false
   };
+}
+
+export async function getINFTTokenOwner({
+  tokenId,
+  contractAddress: inputContractAddress
+}: {
+  tokenId?: string;
+  contractAddress?: string;
+}) {
+  const contractAddress = (inputContractAddress || env("INFT_CONTRACT_ADDRESS")) as `0x${string}`;
+  if (isProviderMock("INFT")) {
+    return undefined;
+  }
+  if (!contractAddress) {
+    throw new Error("INFT_CONTRACT_ADDRESS is required to read INFT ownership.");
+  }
+  if (!tokenId || !/^\d+$/.test(tokenId)) {
+    throw new Error("A numeric token id is required to read INFT ownership.");
+  }
+  const chain = getINFTChain();
+  const publicClient = createPublicClient({
+    chain,
+    transport: http(chain.rpcUrls.default.http[0])
+  });
+  return String(await publicClient.readContract({
+    address: contractAddress,
+    abi: inftAbi,
+    functionName: "ownerOf",
+    args: [BigInt(tokenId)]
+  }));
 }
 
 export async function verifyINFTBurnTransaction({
@@ -349,6 +400,34 @@ export async function verifyINFTBurnTransaction({
     }
   }
   throw new Error("INFT burn transaction did not emit the expected burn event.");
+}
+
+function assertBurnReceipt(receipt: TransactionReceipt, contractAddress: `0x${string}`, tokenId: string) {
+  const normalizedContract = contractAddress.toLowerCase();
+  const expectedTokenId = BigInt(tokenId);
+  for (const log of receipt.logs) {
+    if (log.address.toLowerCase() !== normalizedContract) {
+      continue;
+    }
+    try {
+      const event = decodeEventLog({
+        abi: [transferEventAbi],
+        data: log.data,
+        topics: log.topics
+      });
+      const args = event.args as { to?: string; tokenId?: bigint };
+      if (
+        event.eventName === "Transfer" &&
+        args.to?.toLowerCase() === ZERO_ADDRESS &&
+        args.tokenId === expectedTokenId
+      ) {
+        return;
+      }
+    } catch {
+      continue;
+    }
+  }
+  throw new Error(`INFT burn transaction did not emit a burn Transfer event: ${receipt.transactionHash}`);
 }
 
 export async function recoverINFTFromChain(id: string): Promise<INFTRecord | undefined> {
@@ -716,6 +795,7 @@ async function writeBurnWithRetry({
         abi: inftAbi,
         functionName: "burnAgent",
         args: [tokenId],
+        gas: parsePositiveBigIntEnv("INFT_BURN_GAS_LIMIT", 1_500_000n),
         ...(nonce === undefined ? {} : { nonce }),
         ...feeOverrides
       });
