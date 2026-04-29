@@ -1254,6 +1254,64 @@ a:hover {
   opacity: 0.52;
 }
 
+.video-mosaic-action-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.video-mosaic-action-trigger {
+  min-width: 108px;
+}
+
+.video-mosaic-action-dropdown {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+  padding: 6px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.18);
+}
+
+.video-mosaic-action-option {
+  width: 100%;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #0f172a;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.video-mosaic-action-option:hover,
+.video-mosaic-action-option:focus-visible {
+  background: #eff6ff;
+  color: #1d4ed8;
+  outline: none;
+}
+
+.video-mosaic-action-option.danger {
+  color: #b91c1c;
+}
+
+.video-mosaic-action-option.danger:hover,
+.video-mosaic-action-option.danger:focus-visible {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
 .video-mosaic-status {
   color: rgba(232, 251, 255, 0.62);
 }
@@ -5403,6 +5461,48 @@ button.item {
   padding: 14px;
   border-top: 1px solid rgba(31, 91, 160, 0.12);
   background: rgba(255, 255, 255, 0.86);
+}
+
+.video-delete-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.4);
+}
+
+.video-delete-dialog {
+  width: min(360px, 100%);
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 12px;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 18px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+}
+
+.video-delete-dialog h3 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.video-delete-dialog p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.video-delete-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 6px;
 }
 
 .page-assistant-form textarea {

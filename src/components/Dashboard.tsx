@@ -1049,9 +1049,9 @@ export default function Dashboard() {
           <section className="panel storefront-owner-video-panel" id="published-videos">
             <div className="panel-header">
               <div>
-                <h2>Published Videos</h2>
+                <h2>Videos</h2>
                 <p className="subtle">
-                  Toggle between public videos and all INFTs created for this storefront. Unpublishing removes the video from every public feed surface.
+                  Manage published and unpublished videos for this storefront. Unpublishing removes the video from every public feed surface.
                 </p>
               </div>
               <Bot size={18} />
@@ -1062,7 +1062,6 @@ export default function Dashboard() {
               emptyText="No published videos for this storefront yet."
               initialPageSize={9}
               onRefresh={load}
-              publishedOnly
               showCreatorWallet
               store={store}
             />

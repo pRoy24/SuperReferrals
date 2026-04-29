@@ -1489,17 +1489,15 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
             <div className="panel-header">
               <div>
                 <h2>Your Videos</h2>
-                <p className="subtle">Toggle between published videos and all INFTs created by this wallet on the current storefront.</p>
+                <p className="subtle">Manage published and unpublished videos created by this wallet on the current storefront.</p>
               </div>
               <Bot size={18} />
             </div>
             {connectedSubAccount ? (
               <StorefrontVideoGrid
                 actor="user"
-                allowBurn
                 customerId={customer.id}
                 emptyText="No completed videos for this wallet yet."
-                ethereumProvider={activeWalletProvider?.provider || walletProviders[0]?.provider || null}
                 initialPageSize={6}
                 onRefresh={load}
                 store={store}
