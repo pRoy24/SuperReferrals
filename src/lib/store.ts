@@ -29,6 +29,8 @@ const DEFAULT_DATA_DIR = ".superreferrals";
 const DEFAULT_REDIS_STORE_KEY_PREFIX = "superreferrals:store";
 const DEFAULT_REDIS_LOCK_TTL_MS = 15_000;
 const DEFAULT_REDIS_LOCK_RETRIES = 40;
+const DEFAULT_SCOPED_LOCK_TTL_MS = 600_000;
+const DEFAULT_SCOPED_LOCK_RETRIES = 120;
 const REDIS_LOCK_RELEASE_SCRIPT = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
 const LEGACY_DEMO_CUSTOMER_ID = "cus_demo";
 const LEGACY_DEMO_SUB_ACCOUNT_ID = "sub_demo";
@@ -46,6 +48,9 @@ type LocalKvEntry = {
   expiresAt?: number;
 };
 type LocalKvDocument = Record<string, LocalKvEntry>;
+const localLocks = ((globalThis as typeof globalThis & {
+  __superReferralsStoreScopedLocks?: Map<string, Promise<void>>;
+}).__superReferralsStoreScopedLocks ??= new Map<string, Promise<void>>());
 
 function dataDir() {
   const configured = env("SUPERREFERRALS_DATA_DIR", DEFAULT_DATA_DIR);
@@ -424,10 +429,34 @@ async function mutateRedisStore<T>(mutator: (store: SuperReferralsStore) => T | 
 }
 
 async function withRedisStoreLock<T>(operation: () => Promise<T>) {
-  const lockKey = redisStoreLockKey();
+  return withRedisLock(redisStoreLockKey(), operation, {
+    ttlMs: parsePositiveIntegerEnv("SUPERREFERRALS_REDIS_LOCK_TTL_MS", DEFAULT_REDIS_LOCK_TTL_MS),
+    retries: parsePositiveIntegerEnv("SUPERREFERRALS_REDIS_LOCK_RETRIES", DEFAULT_REDIS_LOCK_RETRIES)
+  });
+}
+
+export async function withStoreScopedLock<T>(
+  scope: string,
+  operation: () => Promise<T>,
+  options: { ttlMs?: number; retries?: number } = {}
+) {
+  const lockScope = normalizeLockScope(scope);
+  if (storeBackend() === "redis") {
+    const ttlMs = options.ttlMs || parsePositiveIntegerEnv("SUPERREFERRALS_SCOPED_LOCK_TTL_MS", DEFAULT_SCOPED_LOCK_TTL_MS);
+    const retries = options.retries || parsePositiveIntegerEnv("SUPERREFERRALS_SCOPED_LOCK_RETRIES", DEFAULT_SCOPED_LOCK_RETRIES);
+    return withRedisLock(`${redisStoreKey()}:lock:${lockScope}`, operation, { ttlMs, retries });
+  }
+  return withLocalScopedLock(lockScope, operation);
+}
+
+async function withRedisLock<T>(
+  lockKey: string,
+  operation: () => Promise<T>,
+  options: { ttlMs: number; retries: number }
+) {
   const token = createId("lock");
-  const ttlMs = parsePositiveIntegerEnv("SUPERREFERRALS_REDIS_LOCK_TTL_MS", DEFAULT_REDIS_LOCK_TTL_MS);
-  const retries = parsePositiveIntegerEnv("SUPERREFERRALS_REDIS_LOCK_RETRIES", DEFAULT_REDIS_LOCK_RETRIES);
+  const ttlMs = options.ttlMs;
+  const retries = options.retries;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     const acquired = await redisCommand<string | null>(["SET", lockKey, token, "NX", "PX", String(ttlMs)]);
     if (String(acquired || "").toUpperCase() === "OK") {
@@ -440,6 +469,29 @@ async function withRedisStoreLock<T>(operation: () => Promise<T>) {
     await delay(Math.min(1000, 50 + attempt * 25));
   }
   throw new Error(`Timed out waiting for Redis store lock ${lockKey}`);
+}
+
+async function withLocalScopedLock<T>(scope: string, operation: () => Promise<T>) {
+  const previous = localLocks.get(scope) ?? Promise.resolve();
+  const run = previous.catch(() => undefined).then(operation);
+  const settled = run.then(() => undefined, () => undefined);
+  localLocks.set(scope, settled);
+
+  try {
+    return await run;
+  } finally {
+    if (localLocks.get(scope) === settled) {
+      localLocks.delete(scope);
+    }
+  }
+}
+
+function normalizeLockScope(scope: string) {
+  return scope
+    .toLowerCase()
+    .replace(/[^a-z0-9:_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 160) || "default";
 }
 
 export async function redisCommand<T>(command: Array<string | number>) {

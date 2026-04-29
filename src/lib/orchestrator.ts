@@ -44,7 +44,8 @@ import {
   readStore,
   updateGeneration,
   upsertCustomer,
-  publicStore
+  publicStore,
+  withStoreScopedLock
 } from "./store";
 import {
   createExternalImageListVideo,
@@ -1085,9 +1086,13 @@ async function finalizeGeneration(
   subAccount: SubAccount,
   resultUrl: string
 ) {
-  return withSerializedZeroGTransaction(
-    `generation-finalize:${generation.id}`,
-    () => finalizeGenerationUnlocked(generation, customer, subAccount, resultUrl)
+  const lockKey = `generation-finalize:${generation.id}`;
+  return withStoreScopedLock(
+    lockKey,
+    () => withSerializedZeroGTransaction(
+      lockKey,
+      () => finalizeGenerationUnlocked(generation, customer, subAccount, resultUrl)
+    )
   );
 }
 
@@ -1718,7 +1723,9 @@ async function finalizeINFTActionResult({
   status: Record<string, unknown>;
   subAccount: SubAccount;
 }) {
-  return withSerializedZeroGTransaction(`inft-action-finalize:${inft.id}:${requestId}`, async () => {
+  const normalizedLockRequestId = normalizeSamsarVideoSessionId(requestId) || requestId;
+  const lockKey = `inft-action-finalize:${inft.id}:${normalizedLockRequestId}`;
+  return withStoreScopedLock(lockKey, () => withSerializedZeroGTransaction(lockKey, async () => {
     const latestStore = await readStore();
     const normalizedRequestId = normalizeSamsarVideoSessionId(requestId);
     const latestGeneration = latestStore.generations.find((item) => item.id === generation.id) || generation;
@@ -1872,7 +1879,7 @@ async function finalizeINFTActionResult({
       inft: saved.inft,
       generation: saved.generation
     };
-  });
+  }));
 }
 
 function generationMatchesActionRequest(generation: Generation, requestId: string, normalizedRequestId: string) {

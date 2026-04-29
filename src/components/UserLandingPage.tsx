@@ -1370,7 +1370,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
             <RenderFlowNotice state={renderFlow} />
           </div>
 
-          <div className="panel">
+          <div className="panel storefront-user-video-panel">
             <div className="panel-header">
               <div>
                 <h2>Your Videos</h2>

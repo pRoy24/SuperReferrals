@@ -1,7 +1,8 @@
 "use client";
 
-import { ArrowRight, Check, Copy, ExternalLink, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { ArrowRight, Check, Copy, ExternalLink, Maximize2, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { DEFAULT_FEED_VIDEO_VOLUME, persistFeedVideoVolume, readFeedVideoVolume, subscribeFeedVideoVolume } from "@/lib/feed-video-preferences";
 import type { PublicFeedItem } from "@/lib/types";
 
 type MosaicTileLayout = {
@@ -57,12 +58,22 @@ export default function VideoMosaic({
   const hiddenCount = Math.max(0, items.length - visibleItems.length);
   const [activeId, setActiveId] = useState("");
   const [copiedWalletId, setCopiedWalletId] = useState("");
-  const [mutedById, setMutedById] = useState<Record<string, boolean>>({});
-  const [volumeById, setVolumeById] = useState<Record<string, number>>({});
+  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(DEFAULT_FEED_VIDEO_VOLUME);
   const [videoReadyById, setVideoReadyById] = useState<Record<string, boolean>>({});
   const [mosaicLayout, setMosaicLayout] = useState<MosaicLayout | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
+
+  useEffect(() => {
+    const storedVolume = readFeedVideoVolume();
+    setVolume(storedVolume);
+    setMuted(storedVolume === 0);
+    return subscribeFeedVideoVolume((nextVolume) => {
+      setVolume(nextVolume);
+      setMuted(nextVolume === 0);
+    });
+  }, []);
 
   useEffect(() => {
     for (const [id, video] of Object.entries(videoRefs.current)) {
@@ -71,6 +82,16 @@ export default function VideoMosaic({
       }
     }
   }, [activeId]);
+
+  useEffect(() => {
+    for (const video of Object.values(videoRefs.current)) {
+      if (!video) {
+        continue;
+      }
+      video.volume = volume;
+      video.muted = muted || volume === 0;
+    }
+  }, [muted, volume]);
 
   useEffect(() => {
     const visibleIds = new Set(visibleItems.map((item) => item.id));
@@ -158,30 +179,39 @@ export default function VideoMosaic({
     if (video.ended) {
       video.currentTime = 0;
     }
-    video.muted = mutedById[item.id] ?? true;
-    video.volume = volumeById[item.id] ?? 0.66;
+    video.muted = muted || volume === 0;
+    video.volume = volume;
     setActiveId(item.id);
     await video.play().catch(() => setActiveId(""));
   }
 
-  function toggleMuted(item: PublicFeedItem) {
-    const nextMuted = !(mutedById[item.id] ?? true);
-    setMutedById((current) => ({ ...current, [item.id]: nextMuted }));
-    const video = videoRefs.current[item.id];
-    if (video) {
-      video.muted = nextMuted;
+  function toggleMuted() {
+    const nextMuted = !muted;
+    setMuted(nextMuted);
+    for (const video of Object.values(videoRefs.current)) {
+      if (video) {
+        video.muted = nextMuted || volume === 0;
+      }
     }
   }
 
   function changeVolume(item: PublicFeedItem, value: number) {
-    const normalized = Math.max(0, Math.min(1, value));
-    setVolumeById((current) => ({ ...current, [item.id]: normalized }));
-    setMutedById((current) => ({ ...current, [item.id]: normalized === 0 }));
+    const normalized = persistFeedVideoVolume(value);
+    setVolume(normalized);
+    setMuted(normalized === 0);
     const video = videoRefs.current[item.id];
     if (video) {
       video.volume = normalized;
       video.muted = normalized === 0;
     }
+  }
+
+  function openFullscreen(item: PublicFeedItem) {
+    const video = videoRefs.current[item.id];
+    if (!video) {
+      return;
+    }
+    requestVideoFullscreen(video);
   }
 
   async function copyWallet(item: PublicFeedItem, wallet: string) {
@@ -205,8 +235,6 @@ export default function VideoMosaic({
       >
         {visibleItems.map((item) => {
           const isActive = activeId === item.id;
-          const muted = mutedById[item.id] ?? true;
-          const volume = volumeById[item.id] ?? 0.66;
           const creatorWallet = showCreatorWallet ? getCreatorWallet?.(item) : "";
           const shouldShowFeedLink = typeof showFeedLink === "function" ? showFeedLink(item) : showFeedLink;
           const shouldShowInftLink = showInftLink && Boolean(item.inftId);
@@ -243,7 +271,7 @@ export default function VideoMosaic({
                   }}
                   src={item.videoUrl}
                   poster={item.posterUrl}
-                  muted={muted}
+                  muted={muted || volume === 0}
                   playsInline
                   preload="metadata"
                   width={item.aspectRatio === "9:16" ? 9 : 16}
@@ -280,8 +308,11 @@ export default function VideoMosaic({
                   <button className="video-mosaic-icon" onClick={() => togglePlayback(item)} title={isActive ? "Pause" : "Play"} type="button">
                     {isActive ? <Pause size={16} /> : <Play size={16} />}
                   </button>
-                  <button className="video-mosaic-icon" onClick={() => toggleMuted(item)} title={muted ? "Unmute" : "Mute"} type="button">
-                    {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                  <button className="video-mosaic-icon" onClick={toggleMuted} title={muted || volume === 0 ? "Unmute" : "Mute"} type="button">
+                    {muted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                  </button>
+                  <button className="video-mosaic-icon" onClick={() => openFullscreen(item)} title="Full screen" type="button">
+                    <Maximize2 size={16} />
                   </button>
                   <label className="video-mosaic-volume" title="Volume">
                     <input
@@ -290,9 +321,10 @@ export default function VideoMosaic({
                       min="0"
                       onChange={(event) => changeVolume(item, Number(event.target.value) / 100)}
                       type="range"
-                      value={muted ? 0 : Math.round(volume * 100)}
+                      value={muted || volume === 0 ? 0 : Math.round(volume * 100)}
                     />
                   </label>
+                  {actions && <div className="video-mosaic-actions">{actions(item)}</div>}
                   {(shouldShowInftLink || shouldShowFeedLink) && (
                     <div className="video-mosaic-link-row">
                       {shouldShowInftLink && (
@@ -308,7 +340,6 @@ export default function VideoMosaic({
                     </div>
                   )}
                 </div>
-                {actions && <div className="video-mosaic-actions">{actions(item)}</div>}
               </div>
             </article>
           );
@@ -337,6 +368,16 @@ function shortWallet(value = "") {
 function feedHrefForItem(item: PublicFeedItem) {
   const mode = item.aspectRatio === "9:16" ? "mobile" : "desktop";
   return `/feed/${encodeURIComponent(item.generationId || item.id)}/${mode}`;
+}
+
+function requestVideoFullscreen(video: HTMLVideoElement) {
+  const target = (video.closest(".video-mosaic-media") as HTMLElement | null) || video;
+  if (target.requestFullscreen) {
+    target.requestFullscreen().catch(() => undefined);
+    return;
+  }
+  const fullscreenVideo = video as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+  fullscreenVideo.webkitEnterFullscreen?.();
 }
 
 function buildMosaicLayout(

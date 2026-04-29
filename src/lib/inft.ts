@@ -1,4 +1,5 @@
-import { createPublicClient, createWalletClient, http, parseAbi } from "viem";
+import { createPublicClient, createWalletClient, decodeEventLog, http, parseAbi, parseAbiItem } from "viem";
+import type { TransactionReceipt } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { env, isProviderMock } from "./env";
 import { createId, shortHash } from "./ids";
@@ -21,7 +22,9 @@ const inftAbi = parseAbi([
   "function ownerOf(uint256 tokenId) view returns (address)",
   "function agentData(uint256 tokenId) view returns ((string encryptedURI, bytes32 metadataHash, address agentWallet, string referrerCode))"
 ]);
+const transferEventAbi = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)");
 const INFT_TRANSACTION_RETRY_COUNT = 3;
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 function getINFTChain() {
   const configuredChainId = Number(env("INFT_CHAIN_ID") || env("OG_CHAIN_ID") || "");
@@ -51,7 +54,7 @@ export async function mintINFT({
   referrerCode: string;
 }) {
   const contractAddress = env("INFT_CONTRACT_ADDRESS") as `0x${string}`;
-  const privateKey = env("OG_PRIVATE_KEY") as `0x${string}`;
+  const privateKey = (env("INFT_MINTER_PRIVATE_KEY") || env("OG_PRIVATE_KEY")) as `0x${string}`;
   const chain = getINFTChain();
   const rpcUrl = chain.rpcUrls.default.http[0];
 
@@ -64,7 +67,7 @@ export async function mintINFT({
     };
   }
   if (!contractAddress || !privateKey) {
-    throw new Error("INFT_CONTRACT_ADDRESS and OG_PRIVATE_KEY are required for live INFT minting.");
+    throw new Error("INFT_CONTRACT_ADDRESS and either INFT_MINTER_PRIVATE_KEY or OG_PRIVATE_KEY are required for live INFT minting.");
   }
 
   const account = privateKeyToAccount(privateKey);
@@ -78,11 +81,6 @@ export async function mintINFT({
     transport: http(rpcUrl)
   });
   const mint = await withSerializedZeroGTransaction(`0g-inft:${account.address.toLowerCase()}:${rpcUrl}`, async () => {
-    const nextTokenId = await publicClient.readContract({
-      address: contractAddress,
-      abi: inftAbi,
-      functionName: "nextTokenId"
-    });
     const txHash = await writeMintWithRetry({
       accountAddress: account.address,
       agentWallet,
@@ -94,8 +92,15 @@ export async function mintINFT({
       referrerCode,
       walletClient
     });
+    const receipt = await publicClient.waitForTransactionReceipt({
+      hash: txHash,
+      timeout: parsePositiveIntegerEnv("INFT_MINT_RECEIPT_TIMEOUT_MS", 120_000)
+    });
+    if (receipt.status !== "success") {
+      throw new Error(`INFT mint transaction failed: ${txHash}`);
+    }
     return {
-      tokenId: String(nextTokenId),
+      tokenId: tokenIdFromMintReceipt(receipt, contractAddress, ownerWallet),
       txHash
     };
   });
@@ -111,6 +116,44 @@ export function deriveAgentWallet(seed: string) {
   return `0x${shortHash(seed).padEnd(40, "0")}` as `0x${string}`;
 }
 
+function tokenIdFromMintReceipt(
+  receipt: TransactionReceipt,
+  contractAddress: `0x${string}`,
+  ownerWallet: `0x${string}`
+) {
+  const normalizedContract = contractAddress.toLowerCase();
+  const normalizedOwner = ownerWallet.toLowerCase();
+  for (const log of receipt.logs) {
+    if (log.address.toLowerCase() !== normalizedContract) {
+      continue;
+    }
+    try {
+      const event = decodeEventLog({
+        abi: [transferEventAbi],
+        data: log.data,
+        topics: log.topics
+      });
+      const args = event.args as { from?: string; to?: string; tokenId?: bigint };
+      if (
+        event.eventName === "Transfer" &&
+        args.from?.toLowerCase() === ZERO_ADDRESS &&
+        args.to?.toLowerCase() === normalizedOwner &&
+        args.tokenId !== undefined
+      ) {
+        return args.tokenId.toString();
+      }
+    } catch {
+      continue;
+    }
+  }
+  throw new Error(`INFT mint transaction did not emit a mint Transfer event: ${receipt.transactionHash}`);
+}
+
+function parsePositiveIntegerEnv(name: string, fallback: number) {
+  const value = Number(env(name));
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
 export async function updateINFTMetadata({
   tokenId,
   metadataUri,
@@ -121,7 +164,7 @@ export async function updateINFTMetadata({
   metadataHash: `0x${string}`;
 }) {
   const contractAddress = env("INFT_CONTRACT_ADDRESS") as `0x${string}`;
-  const privateKey = env("OG_PRIVATE_KEY") as `0x${string}`;
+  const privateKey = (env("INFT_MINTER_PRIVATE_KEY") || env("OG_PRIVATE_KEY")) as `0x${string}`;
   const chain = getINFTChain();
   const rpcUrl = chain.rpcUrls.default.http[0];
 
@@ -132,7 +175,7 @@ export async function updateINFTMetadata({
     };
   }
   if (!contractAddress || !privateKey) {
-    throw new Error("INFT_CONTRACT_ADDRESS and OG_PRIVATE_KEY are required for live INFT metadata updates.");
+    throw new Error("INFT_CONTRACT_ADDRESS and either INFT_MINTER_PRIVATE_KEY or OG_PRIVATE_KEY are required for live INFT metadata updates.");
   }
   if (!/^\d+$/.test(tokenId)) {
     throw new Error("A numeric token id is required for INFT metadata updates.");
@@ -167,7 +210,7 @@ export async function updateINFTMetadata({
 
 export async function burnINFT({ tokenId }: { tokenId?: string }) {
   const contractAddress = env("INFT_CONTRACT_ADDRESS") as `0x${string}`;
-  const privateKey = env("OG_PRIVATE_KEY") as `0x${string}`;
+  const privateKey = (env("INFT_MINTER_PRIVATE_KEY") || env("OG_PRIVATE_KEY")) as `0x${string}`;
   const chain = getINFTChain();
   const rpcUrl = chain.rpcUrls.default.http[0];
 
@@ -178,7 +221,7 @@ export async function burnINFT({ tokenId }: { tokenId?: string }) {
     };
   }
   if (!contractAddress || !privateKey) {
-    throw new Error("INFT_CONTRACT_ADDRESS and OG_PRIVATE_KEY are required for live INFT burns.");
+    throw new Error("INFT_CONTRACT_ADDRESS and either INFT_MINTER_PRIVATE_KEY or OG_PRIVATE_KEY are required for live INFT burns.");
   }
   if (!tokenId || !/^\d+$/.test(tokenId)) {
     throw new Error("A numeric token id is required to burn this INFT.");

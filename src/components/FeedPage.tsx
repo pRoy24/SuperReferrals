@@ -6,6 +6,7 @@ import {
   ChevronRight,
   ExternalLink,
   Heart,
+  Maximize2,
   MessageCircle,
   Monitor,
   Pause,
@@ -20,6 +21,7 @@ import {
   X
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent, type RefObject, type UIEvent, type WheelEvent } from "react";
+import { DEFAULT_FEED_VIDEO_VOLUME, persistFeedVideoVolume, readFeedVideoVolume, subscribeFeedVideoVolume } from "@/lib/feed-video-preferences";
 import { samsarAuthHeaders } from "@/lib/storefront-auth-client";
 import type { FeedSortOption, PublicFeedItem } from "@/lib/types";
 
@@ -83,7 +85,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
   const [loading, setLoading] = useState(true);
   const [activeIndex, setActiveIndex] = useState(0);
   const [muted, setMuted] = useState(true);
-  const [volume, setVolume] = useState(0.66);
+  const [volume, setVolume] = useState(DEFAULT_FEED_VIDEO_VOLUME);
   const [playing, setPlaying] = useState(true);
   const [controlsVisible, setControlsVisible] = useState(false);
   const [commentItemId, setCommentItemId] = useState<string | null>(null);
@@ -112,8 +114,18 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
   useEffect(() => {
     setViewerId(getOrCreateViewerId());
     setAuthorName(window.localStorage.getItem("superreferrals:feed-author") || "");
+    const storedVolume = readFeedVideoVolume();
+    setVolume(storedVolume);
+    if (storedVolume === 0) {
+      setMuted(true);
+    }
     setViewMode(initialViewMode || (window.matchMedia("(max-width: 760px)").matches ? "mobile" : "desktop"));
   }, [initialViewMode]);
+
+  useEffect(() => subscribeFeedVideoVolume((nextVolume) => {
+    setVolume(nextVolume);
+    setMuted(nextVolume === 0);
+  }), []);
 
   useEffect(() => {
     initialSelectionApplied.current = false;
@@ -479,9 +491,17 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
   }
 
   function changeVolume(nextValue: number) {
-    const normalized = Math.max(0, Math.min(1, nextValue));
+    const normalized = persistFeedVideoVolume(nextValue);
     setVolume(normalized);
     setMuted(normalized === 0);
+  }
+
+  function openFullscreen(item: PublicFeedItem) {
+    const video = videoRefs.current[item.id];
+    if (!video) {
+      return;
+    }
+    requestVideoFullscreen(video);
   }
 
   function revealControls(event: PointerEvent<HTMLElement>) {
@@ -606,6 +626,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
                 onToggleMute={() => setMuted((value) => !value)}
                 onTogglePlay={() => setPlaying((value) => !value)}
                 onVolume={changeVolume}
+                onFullscreen={() => openFullscreen(item)}
                 onComments={() => openComments(item)}
                 onLike={() => toggleLike(item)}
               />
@@ -655,6 +676,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
               onToggleMute={() => setMuted((value) => !value)}
               onTogglePlay={() => setPlaying((value) => !value)}
               onVolume={changeVolume}
+              onFullscreen={() => activeItem && openFullscreen(activeItem)}
               onComments={() => openComments(activeItem)}
               onLike={() => toggleLike(activeItem)}
             />
@@ -918,6 +940,7 @@ function MobileOverlay({
   onToggleMute,
   onTogglePlay,
   onVolume,
+  onFullscreen,
   onComments,
   onLike
 }: {
@@ -931,6 +954,7 @@ function MobileOverlay({
   onToggleMute: () => void;
   onTogglePlay: () => void;
   onVolume: (value: number) => void;
+  onFullscreen: () => void;
   onComments: () => void;
   onLike: () => void;
 }) {
@@ -945,6 +969,9 @@ function MobileOverlay({
         </button>
         <button className="round-action" onClick={onToggleMute} title={muted ? "Unmute" : "Mute"}>
           {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+        </button>
+        <button className="round-action" onClick={onFullscreen} title="Full screen">
+          <Maximize2 size={20} />
         </button>
         <label className="mobile-volume" title="Volume">
           <input
@@ -1007,6 +1034,7 @@ function DesktopMinimalControls({
   onToggleMute,
   onTogglePlay,
   onVolume,
+  onFullscreen,
   onComments,
   onLike
 }: {
@@ -1019,6 +1047,7 @@ function DesktopMinimalControls({
   onToggleMute: () => void;
   onTogglePlay: () => void;
   onVolume: (value: number) => void;
+  onFullscreen: () => void;
   onComments: () => void;
   onLike: () => void;
 }) {
@@ -1031,6 +1060,9 @@ function DesktopMinimalControls({
         </button>
         <button className="glass-icon" onClick={onToggleMute} title={muted ? "Unmute" : "Mute"}>
           {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+        </button>
+        <button className="glass-icon" onClick={onFullscreen} title="Full screen">
+          <Maximize2 size={18} />
         </button>
         <label className="desktop-volume" title="Volume">
           <input
@@ -1284,6 +1316,16 @@ function formatVideoTime(value: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function requestVideoFullscreen(video: HTMLVideoElement) {
+  const target = (video.closest(".feed-video-frame") as HTMLElement | null) || video;
+  if (target.requestFullscreen) {
+    target.requestFullscreen().catch(() => undefined);
+    return;
+  }
+  const fullscreenVideo = video as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+  fullscreenVideo.webkitEnterFullscreen?.();
 }
 
 function feedAspectRatioStyle(item: PublicFeedItem) {
