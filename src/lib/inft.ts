@@ -26,6 +26,8 @@ const inftAbi = parseAbi([
 ]);
 const transferEventAbi = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)");
 const INFT_TRANSACTION_RETRY_COUNT = 3;
+const INFT_MINT_RECEIPT_TIMEOUT_MS = 600_000;
+const INFT_RECEIPT_POLLING_INTERVAL_MS = 3_000;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 function getINFTChain() {
@@ -98,10 +100,11 @@ export async function mintINFT({
       referrerCode,
       walletClient
     });
-    const receipt = await publicClient.waitForTransactionReceipt({
-      hash: txHash,
-      timeout: parsePositiveIntegerEnv("INFT_MINT_RECEIPT_TIMEOUT_MS", 120_000)
-    });
+    const receipt = await waitForINFTTransactionReceipt(
+      publicClient,
+      txHash,
+      parsePositiveIntegerEnv("INFT_MINT_RECEIPT_TIMEOUT_MS", INFT_MINT_RECEIPT_TIMEOUT_MS)
+    );
     if (receipt.status !== "success") {
       throw new Error(`INFT mint transaction failed: ${txHash}`);
     }
@@ -171,6 +174,47 @@ function parsePositiveBigIntEnv(name: string, fallback: bigint) {
   } catch {
     return fallback;
   }
+}
+
+async function waitForINFTTransactionReceipt(
+  publicClient: any,
+  txHash: `0x${string}`,
+  timeoutMs: number
+): Promise<TransactionReceipt> {
+  const startedAt = Date.now();
+  const pollingInterval = parsePositiveIntegerEnv("INFT_RECEIPT_POLLING_INTERVAL_MS", INFT_RECEIPT_POLLING_INTERVAL_MS);
+  let lastError: unknown;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      return await publicClient.waitForTransactionReceipt({
+        hash: txHash,
+        pollingInterval,
+        timeout: Math.min(60_000, Math.max(1_000, timeoutMs - (Date.now() - startedAt)))
+      });
+    } catch (error) {
+      lastError = error;
+      if (!isPendingReceiptError(error)) {
+        throw error;
+      }
+      await delay(Math.min(pollingInterval, Math.max(250, timeoutMs - (Date.now() - startedAt))));
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Timed out waiting for INFT mint transaction receipt: ${txHash}`);
+}
+
+function isPendingReceiptError(error: unknown) {
+  const text = errorToSearchText(error).toLowerCase();
+  return (
+    text.includes("transaction receipt") &&
+    (text.includes("could not be found") || text.includes("not found") || text.includes("not be processed"))
+  ) || (
+    text.includes("timed out") &&
+    (text.includes("transaction receipt") || text.includes("transaction with hash") || text.includes("to be confirmed"))
+  );
 }
 
 export async function updateINFTMetadata({

@@ -1,7 +1,7 @@
 "use client";
 
-import { Cable, Captions, ChevronDown, Copy, Download, ExternalLink, ImagePlus, Languages, Link2, PanelBottom, RefreshCw, Send, Share2, Wallet } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Cable, Captions, ChevronDown, Copy, Download, ExternalLink, ImagePlus, Languages, Link2, Loader2, PanelBottom, RefreshCw, Send, Share2, Trash2, UploadCloud, Wallet } from "lucide-react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import BreadcrumbNav from "@/components/BreadcrumbNav";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
 import {
@@ -22,7 +22,7 @@ import {
 import { defaultINFTActionPricesUsd } from "@/lib/pricing";
 import { renditionLanguageName, resolveRenditionLanguageCode, supportedSamsarProcessorLanguageOptions } from "@/lib/rendition-language";
 import { isUsableEvmAddress } from "@/lib/wallet-address";
-import type { Customer, INFTPaidAction, INFTRecord, PaymentCurrencySymbol, PaymentQuote, PaymentRail, SamsarVideoRenderMetadata, SuperReferralsStore } from "@/lib/types";
+import type { Customer, Generation, INFTPaidAction, INFTRecord, PaymentCurrencySymbol, PaymentQuote, PaymentRail, SamsarVideoRenderMetadata, SuperReferralsStore } from "@/lib/types";
 
 type ActionPollState = {
   action: string;
@@ -32,6 +32,7 @@ type ActionPollState = {
   errorMessage?: string;
   languageCode?: string;
   expectedVideoMetadata?: SamsarVideoRenderMetadata;
+  expressGenerationStatus?: Record<string, string>;
 };
 
 type ActionPaymentFlow = {
@@ -69,6 +70,9 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [lastVideoOperation, setLastVideoOperation] = useState("");
   const [actionPoll, setActionPoll] = useState<ActionPollState | null>(null);
   const [createdInft, setCreatedInft] = useState<INFTRecord | null>(null);
+  const [createdGeneration, setCreatedGeneration] = useState<Generation | null>(null);
+  const [renderActionBusy, setRenderActionBusy] = useState<"publish" | "delete" | "">("");
+  const [renderActionMessage, setRenderActionMessage] = useState("");
   const [store, setStore] = useState<SuperReferralsStore | null>(null);
   const [walletAddress, setWalletAddress] = useState(activeInft.ownerWallet || "");
   const [walletProviders, setWalletProviders] = useState<BrowserWalletProvider[]>([]);
@@ -86,6 +90,8 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   useEffect(() => {
     setActiveInft(inft);
     setCreatedInft(null);
+    setCreatedGeneration(null);
+    setRenderActionMessage("");
   }, [inft]);
 
   async function loadStore() {
@@ -129,6 +135,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const videoActionDisabled = Boolean(busy) || videoOperationPending;
   const walletActionLabel = walletConnectedOnTransactionChain ? "Switch wallet" : "Connect wallet";
   const metadataItems = useMemo(() => buildINFTMetadataItems(activeInft), [activeInft]);
+  const showActionReview = Boolean(lastVideoOperation && actionPoll?.status.toUpperCase() === "COMPLETED");
 
   useEffect(() => {
     const firstToken = selectablePaymentTokens[0];
@@ -170,11 +177,15 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
         const finalization = isRecord(result.finalization) ? result.finalization : undefined;
         const finalizationError = firstStringValue(finalization, "errorMessage", "message");
         const nextErrorMessage = extractActionError(result) || finalizationError;
+        const nextExpressStatus = extractExpressGenerationStatus(result);
         const finalizedInft = isRecord(result.inft) ? result.inft as unknown as INFTRecord : undefined;
+        const finalizedGeneration = extractGeneration(result);
         if (!cancelled) {
-          setActionResult(JSON.stringify(result, null, 2));
           if (finalizedInft) {
             setCreatedInft(finalizedInft);
+          }
+          if (finalizedGeneration) {
+            setCreatedGeneration(finalizedGeneration);
           }
           setActionPoll((current) => {
             if (!current || current.requestId !== pollRequestId) {
@@ -184,7 +195,8 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
               ...current,
               status: nextStatus || current.status || "PROCESSING",
               resultUrl: nextResultUrl || current.resultUrl,
-              errorMessage: nextErrorMessage
+              errorMessage: nextErrorMessage,
+              expressGenerationStatus: nextExpressStatus || current.expressGenerationStatus
             };
           });
           if (nextStatus === "COMPLETED") {
@@ -393,6 +405,8 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     setBusy(action);
     if (action !== "message_peer") {
       setCreatedInft(null);
+      setCreatedGeneration(null);
+      setRenderActionMessage("");
     }
     try {
       const languageCode = actionLanguageCode(action, payload);
@@ -402,7 +416,11 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
         body: JSON.stringify({ action, payload })
       });
       const data = await parseResponse(response);
-      setActionResult(JSON.stringify(data.result, null, 2));
+      if (action === "message_peer") {
+        setActionResult(JSON.stringify(data.result, null, 2));
+      } else {
+        setActionResult("");
+      }
       if (action !== "message_peer") {
         setLastVideoOperation(action);
         const requestId = extractActionRequestId(data.result);
@@ -415,7 +433,8 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
             resultUrl: extractActionResultUrl(data.result),
             errorMessage: extractActionError(data.result),
             languageCode,
-            expectedVideoMetadata
+            expectedVideoMetadata,
+            expressGenerationStatus: extractExpressGenerationStatus(data.result)
           });
         }
       }
@@ -581,6 +600,8 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     setBusy(action);
     setActionPoll(null);
     setCreatedInft(null);
+    setCreatedGeneration(null);
+    setRenderActionMessage("");
     setActionPaymentFlow({ status: "payment", message: "Preparing payment quote." });
     try {
       const languageCode = actionLanguageCode(action, payload);
@@ -628,7 +649,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
         })
       });
       const data = await parseResponse(response);
-      setActionResult(JSON.stringify(data.result, null, 2));
+      setActionResult("");
       setLastVideoOperation(action);
       const requestId = extractActionRequestId(data.result);
       if (requestId) {
@@ -640,7 +661,8 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
           resultUrl: extractActionResultUrl(data.result),
           errorMessage: extractActionError(data.result),
           languageCode,
-          expectedVideoMetadata
+          expectedVideoMetadata,
+          expressGenerationStatus: extractExpressGenerationStatus(data.result)
         });
       }
       setActionPaymentFlow({
@@ -743,6 +765,47 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   function addSubtitles() {
     const cleanLanguage = subtitleLanguage.trim();
     runPaidAction("add_subtitles", cleanLanguage ? { language: cleanLanguage } : {}).catch(() => undefined);
+  }
+
+  async function mutateCreatedRender(action: "publish" | "delete") {
+    const generation = createdGeneration || (createdInft ? store?.generations.find((item) => item.id === createdInft.generationId) || null : null);
+    const generationId = generation?.id || createdInft?.generationId || "";
+    if (!generationId) {
+      setRenderActionMessage("Render finalization is still finishing.");
+      return;
+    }
+    setRenderActionBusy(action);
+    setRenderActionMessage("");
+    try {
+      const response = await fetch(`/api/generations/${encodeURIComponent(generationId)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action,
+          subAccountId: generation?.subAccountId || createdInft?.subAccountId || activeInft.subAccountId,
+          wallet: createdInft?.ownerWallet || activeInft.ownerWallet
+        })
+      });
+      const data = await parseResponse(response);
+      if (action === "delete") {
+        setCreatedGeneration(null);
+        setCreatedInft(null);
+        setActionPoll(null);
+        setRenderActionMessage("Render deleted.");
+        setActionPaymentFlow({ status: "idle", message: "Render deleted." });
+      } else {
+        const nextGeneration = extractGeneration(data);
+        if (nextGeneration) {
+          setCreatedGeneration(nextGeneration);
+        }
+        setRenderActionMessage("Render published.");
+      }
+      await loadStore().catch(() => undefined);
+    } catch (error) {
+      setRenderActionMessage(error instanceof Error ? error.message : "Unable to update render.");
+    } finally {
+      setRenderActionBusy("");
+    }
   }
 
   return (
@@ -1042,39 +1105,26 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
               </div>
             </details>
             {actionPoll && (
-              <div className="item">
-                <div className="item-title">
-                  <span className="subtle">{actionPoll.action.replaceAll("_", " ")}</span>
-                  <strong>{actionPoll.status}</strong>
-                </div>
-                <p className="mono">{actionPoll.requestId}</p>
-                {actionPoll.resultUrl && (
-                  <a className="btn" href={actionPoll.resultUrl} target="_blank" rel="noreferrer">
-                    <Download size={16} /> Open result
-                  </a>
-                )}
-                {actionPoll.errorMessage && <p className="subtle">{actionPoll.errorMessage}</p>}
-              </div>
+              <ActionProgressCard
+                poll={actionPoll}
+                pending={!terminalActionStatuses.has(actionPoll.status.toUpperCase())}
+              />
             )}
-            {createdInft && (
-              <div className="item">
-                <div className="item-title">
-                  <span className="subtle">New INFT</span>
-                  <strong>{createdInft.tokenId ? `token #${createdInft.tokenId}` : createdInft.id}</strong>
-                </div>
-                <p className="subtle">{createdInft.title}</p>
-                <div className="button-row">
-                  <a className="btn primary" href={`/inft/${createdInft.id}`}>
-                    <Link2 size={16} /> Open new INFT
-                  </a>
-                  <a className="btn" href={createdInft.videoUrl} target="_blank" rel="noreferrer">
-                    <Download size={16} /> Open video
-                  </a>
-                </div>
-              </div>
+            {actionPoll?.resultUrl && actionPoll.status.toUpperCase() === "COMPLETED" && (
+              <ActionRenderPreview
+                resultUrl={actionPoll.resultUrl}
+                action={actionPoll.action}
+                generation={createdGeneration}
+                inft={createdInft}
+                fallbackInft={activeInft}
+                busyAction={renderActionBusy}
+                message={renderActionMessage}
+                onPublish={() => mutateCreatedRender("publish")}
+                onDelete={() => mutateCreatedRender("delete")}
+              />
             )}
             {actionResult && <pre className="item mono">{actionResult}</pre>}
-            {lastVideoOperation && (
+            {showActionReview && (
               <StorefrontRatingForm
                 customerId={activeInft.customerId}
                 subAccountId={activeInft.subAccountId}
@@ -1327,6 +1377,123 @@ function SelectField({
           </option>
         ))}
       </select>
+    </div>
+  );
+}
+
+function ActionProgressCard({
+  poll,
+  pending
+}: {
+  poll: ActionPollState;
+  pending: boolean;
+}) {
+  const expressEntries = expressStatusEntries(poll.expressGenerationStatus);
+  const progress = expressStatusProgress(expressEntries, poll.status);
+  const currentStage = currentExpressStage(expressEntries, poll.status);
+  return (
+    <div className="inft-action-status item">
+      <div className="inft-action-status-top">
+        <span className="inft-action-status-icon" aria-hidden="true">
+          {pending ? <Loader2 size={18} className="spin" /> : <span />}
+        </span>
+        <div>
+          <span className="subtle">{formatActionLabel(poll.action)}</span>
+          <strong>{currentStage.label}</strong>
+        </div>
+        <span className={`badge ${progress.complete ? "ok" : ""}`}>{currentStage.status}</span>
+      </div>
+      <div className="inft-action-progress" aria-label="Express generation progress">
+        <span style={{ width: `${progress.percent}%` }} />
+      </div>
+      <details className="inft-status-dropdown">
+        <summary>
+          <span>Express generation status</span>
+          <strong>{progress.completed}/{progress.total}</strong>
+        </summary>
+        {expressEntries.length > 0 ? (
+          <div className="inft-express-status-list">
+            {expressEntries.map(([key, status]) => (
+              <div className="inft-express-status-row" key={key}>
+                <span>{formatExpressStatusLabel(key)}</span>
+                <strong>{formatExpressStatusValue(status)}</strong>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="inft-express-status-list">
+            <div className="inft-express-status-row">
+              <span>Render</span>
+              <strong>{formatExpressStatusValue(poll.status)}</strong>
+            </div>
+          </div>
+        )}
+      </details>
+      <p className="mono inft-action-request">{poll.requestId}</p>
+      {poll.errorMessage && <p className="subtle">{poll.errorMessage}</p>}
+    </div>
+  );
+}
+
+function ActionRenderPreview({
+  resultUrl,
+  action,
+  generation,
+  inft,
+  fallbackInft,
+  busyAction,
+  message,
+  onPublish,
+  onDelete
+}: {
+  resultUrl: string;
+  action: string;
+  generation: Generation | null;
+  inft: INFTRecord | null;
+  fallbackInft: INFTRecord;
+  busyAction: "publish" | "delete" | "";
+  message: string;
+  onPublish: () => void;
+  onDelete: () => void;
+}) {
+  const published = generation?.feed?.published === true;
+  const previewStyle = {
+    "--inft-render-preview-ratio": resolveRenderAspectRatio(generation, inft || fallbackInft)
+  } as CSSProperties;
+  return (
+    <div className="inft-render-preview item">
+      <div className="item-title">
+        <span className="subtle">{formatActionLabel(action)} render</span>
+        <strong>{published ? "Published" : "Ready"}</strong>
+      </div>
+      <div className="inft-render-preview-frame" style={previewStyle}>
+        <video src={resultUrl} controls playsInline preload="metadata" />
+      </div>
+      <div className="button-row">
+        <button className="btn primary" onClick={onPublish} disabled={!generation || published || Boolean(busyAction)} type="button">
+          {busyAction === "publish" ? <Loader2 size={16} className="spin" /> : <UploadCloud size={16} />}
+          {published ? "Published" : "Publish"}
+        </button>
+        <button className="btn warn" onClick={onDelete} disabled={!generation || Boolean(busyAction)} type="button">
+          {busyAction === "delete" ? <Loader2 size={16} className="spin" /> : <Trash2 size={16} />}
+          Delete
+        </button>
+        {inft && (
+          <a className="btn" href={`/inft/${inft.id}`}>
+            <Link2 size={16} /> Open INFT
+          </a>
+        )}
+        <a className="btn" href={resultUrl} target="_blank" rel="noreferrer">
+          <Download size={16} /> Open video
+        </a>
+        {generation?.feed?.published && (
+          <a className="btn" href={feedHrefForGeneration(generation)}>
+            <ExternalLink size={16} /> View in feed
+          </a>
+        )}
+      </div>
+      {!generation && <p className="subtle">Finalizing the render record before publish controls are enabled.</p>}
+      {message && <p className="notice">{message}</p>}
     </div>
   );
 }
@@ -1867,6 +2034,22 @@ function extractActionError(value: unknown) {
   return firstStringValue(value, "message", "error", "errorMessage");
 }
 
+function extractExpressGenerationStatus(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value) || !isRecord(value.expressGenerationStatus)) {
+    return undefined;
+  }
+  const entries = Object.entries(value.expressGenerationStatus)
+    .filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim().length > 0);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function extractGeneration(value: unknown): Generation | undefined {
+  const generation = isRecord(value) ? value.generation : undefined;
+  return isRecord(generation) && typeof generation.id === "string"
+    ? generation as unknown as Generation
+    : undefined;
+}
+
 function actionLanguageCode(action: string, payload: Record<string, unknown>) {
   if (!["translate", "add_subtitles"].includes(action)) {
     return undefined;
@@ -1932,6 +2115,72 @@ function extractActionResultUrl(value: unknown): string | undefined {
     ]);
   }
   return undefined;
+}
+
+function expressStatusEntries(status?: Record<string, string>) {
+  return Object.entries(status || {});
+}
+
+function currentExpressStage(entries: Array<[string, string]>, fallbackStatus: string) {
+  const activeEntry = entries.find(([, status]) => normalizeExpressStatus(status) !== "COMPLETED") || entries.at(-1);
+  if (!activeEntry) {
+    return {
+      label: "Render",
+      status: formatExpressStatusValue(fallbackStatus)
+    };
+  }
+  return {
+    label: formatExpressStatusLabel(activeEntry[0]),
+    status: formatExpressStatusValue(activeEntry[1])
+  };
+}
+
+function expressStatusProgress(entries: Array<[string, string]>, fallbackStatus: string) {
+  const total = entries.length || 1;
+  const completed = entries.length > 0
+    ? entries.filter(([, status]) => normalizeExpressStatus(status) === "COMPLETED").length
+    : normalizeExpressStatus(fallbackStatus) === "COMPLETED" ? 1 : 0;
+  return {
+    completed,
+    total,
+    complete: completed >= total,
+    percent: Math.max(5, Math.round((completed / total) * 100))
+  };
+}
+
+function normalizeExpressStatus(status: string) {
+  return status.trim().toUpperCase();
+}
+
+function formatExpressStatusLabel(value: string) {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatExpressStatusValue(value: string) {
+  const normalized = normalizeExpressStatus(value);
+  return normalized
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function resolveRenderAspectRatio(generation?: Generation | null, inft?: INFTRecord | null) {
+  const aspectRatio = generation?.input.aspect_ratio || inftAspectRatio(inft);
+  return aspectRatio === "9:16" ? "9 / 16" : "16 / 9";
+}
+
+function inftAspectRatio(inft?: INFTRecord | null) {
+  if (!inft) {
+    return undefined;
+  }
+  const attribute = inft.attributes.find((item) => normalizeMetadataTrait(item.trait_type) === "aspect_ratio");
+  return String(attribute?.value || "").trim();
+}
+
+function feedHrefForGeneration(generation: Generation) {
+  const mode = generation.input.aspect_ratio === "9:16" ? "mobile" : "desktop";
+  return `/feed/${encodeURIComponent(generation.id)}/${mode}`;
 }
 
 function firstStringValue(value: unknown, ...keys: string[]): string | undefined {

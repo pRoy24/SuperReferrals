@@ -1859,7 +1859,7 @@ async function finalizeINFTActionResult({
     );
     const videoArtifact = await persistRemoteVideoToZeroG(resultUrl);
     const timestamp = nowIso();
-    const derivativeGenerationId = createId("gen");
+    const derivativeGenerationId = existingGeneration?.id || createId("gen");
     const actionName = action || "video_session_edit";
     const metadataTitle = buildDerivativeINFTTitle(latestInft, actionName);
     const sourceVideoMetadata = {
@@ -1905,8 +1905,8 @@ async function finalizeINFTActionResult({
       samsarVideoMetadata,
       languageCode,
       resultUrl,
-      inftId: derivativeGenerationId,
-      createdAt: timestamp,
+      ...(existingGeneration?.feed ? { feed: existingGeneration.feed } : {}),
+      createdAt: existingGeneration?.createdAt || timestamp,
       updatedAt: timestamp
     };
     const attributes = [
@@ -1951,6 +1951,26 @@ async function finalizeINFTActionResult({
     const tokenMetadataUri =
       buildZeroGStorageGatewayUrl(metadataArtifact.rootHash) ||
       metadataArtifact.uri;
+    const derivativeGenerationWithStorage: Generation = {
+      ...derivativeGeneration,
+      storage: {
+        video: videoArtifact,
+        metadata: metadataArtifact
+      }
+    };
+    const savedGenerationBeforeMint = await mutateStore((mutableStore) => {
+      const current = mutableStore.generations.find((item) => item.id === derivativeGenerationId);
+      if (current) {
+        return updateGeneration(mutableStore, derivativeGenerationId, {
+          ...derivativeGenerationWithStorage,
+          feed: current.feed,
+          inftId: current.inftId,
+          createdAt: current.createdAt,
+          errorMessage: undefined
+        });
+      }
+      return addGeneration(mutableStore, derivativeGenerationWithStorage);
+    });
     const agentWallet = deriveAgentWallet(derivativeGenerationId);
     const ownerWallet = normalizeWallet(subAccount.wallet) as `0x${string}`;
     const mint = await mintINFT({
@@ -1959,7 +1979,25 @@ async function finalizeINFTActionResult({
       metadataHash: bytes32From(JSON.stringify(metadata)),
       agentWallet,
       referrerCode: subAccount.referrerCode
+    }).catch(async (error) => {
+      const errorMessage = `Video completed but new INFT creation failed: ${formatErrorText(error)}`;
+      const failedGeneration = await mutateStore((mutableStore) =>
+        updateGeneration(mutableStore, derivativeGenerationId, { errorMessage }) ||
+        savedGenerationBeforeMint
+      );
+      return {
+        errorMessage,
+        generation: failedGeneration || savedGenerationBeforeMint || derivativeGenerationWithStorage
+      };
     });
+    if ("errorMessage" in mint) {
+      return {
+        mode: "render_saved_inft_failed",
+        action: actionName,
+        errorMessage: mint.errorMessage,
+        generation: mint.generation
+      };
+    }
     const derivativeInft: INFTRecord = {
       id: derivativeGenerationId,
       generationId: derivativeGenerationId,
@@ -1987,15 +2025,14 @@ async function finalizeINFTActionResult({
       createdAt: timestamp,
       updatedAt: timestamp
     };
-    const derivativeGenerationWithStorage: Generation = {
-      ...derivativeGeneration,
-      storage: {
-        video: videoArtifact,
-        metadata: metadataArtifact
-      }
-    };
     const saved = await mutateStore((mutableStore) => {
-      const savedGeneration = addGeneration(mutableStore, derivativeGenerationWithStorage);
+      const savedGeneration = updateGeneration(mutableStore, derivativeGenerationId, {
+        inftId: derivativeGenerationId,
+        errorMessage: undefined
+      }) || addGeneration(mutableStore, {
+        ...derivativeGenerationWithStorage,
+        inftId: derivativeGenerationId
+      });
       const savedInft = addINFT(mutableStore, derivativeInft);
       return {
         generation: savedGeneration,
