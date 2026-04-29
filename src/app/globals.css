@@ -3313,6 +3313,12 @@ button.item {
   }
 }
 
+@media (max-width: 1100px) {
+  .inft-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 620px) {
   .main,
   .inft-layout {
@@ -3425,11 +3431,26 @@ button.item {
   }
 
   .feed-toolbar {
-    max-width: 182px;
+    max-width: none;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
   }
 
   .feed-assistant-toggle {
-    min-width: 126px;
+    width: 42px;
+    min-width: 42px;
+    padding: 0;
+  }
+
+  .feed-assistant-toggle span {
+    display: none;
+  }
+
+  .feed-toolbar::-webkit-scrollbar {
+    width: 0;
+    height: 0;
   }
 
   .feed-controls {
@@ -3446,7 +3467,7 @@ button.item {
 
   .mobile-feed-overlay {
     grid-template-columns: minmax(0, 1fr) 54px;
-    padding: 12px;
+    padding: 12px 20px 12px 12px;
   }
 
   .mobile-action-rail {
@@ -3462,6 +3483,7 @@ button.item {
   .mobile-volume {
     width: 46px;
     height: 92px;
+    overflow: hidden;
   }
 
   .feed-minimal-ui {
@@ -3985,13 +4007,16 @@ button.item {
 
 @media (max-width: 620px) {
   .page-assistant {
-    right: 10px;
-    bottom: 10px;
+    right: 14px;
+    bottom: 14px;
   }
 
   .page-assistant-launcher {
+    width: 56px;
+    max-width: 56px;
     min-height: 56px;
-    padding-right: 12px;
+    padding: 8px;
+    border-radius: 999px;
   }
 
   .page-assistant-launcher-icon {
@@ -4000,8 +4025,8 @@ button.item {
     flex-basis: 38px;
   }
 
-  .page-assistant-launcher-copy small {
-    max-width: 150px;
+  .page-assistant-launcher-copy {
+    display: none;
   }
 
   .page-assistant-panel,
