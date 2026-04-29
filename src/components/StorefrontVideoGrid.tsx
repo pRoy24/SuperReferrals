@@ -34,7 +34,22 @@ type INFTBurnRequest = {
   mock?: boolean;
   chain?: INFTBurnChain;
 };
-type INFTBurnFunctionName = "burnAgent" | "burn";
+type INFTBurnAuthorization = {
+  action?: string;
+  generationId?: string;
+  inftId?: string;
+  tokenId?: string;
+  contractAddress?: string;
+  chainId?: number;
+  tokenOwner?: string;
+  requestedWallet?: string;
+  nonce?: string;
+  issuedAt?: string;
+  expiresAt?: string;
+  message?: string;
+  signature?: string;
+  signer?: string;
+};
 type INFTBurnDiagnostics = {
   tokenId: string;
   contractAddress: string;
@@ -48,7 +63,6 @@ type INFTBurnDiagnostics = {
   contractOwnerReadError?: string;
   approvalReadError?: string;
   operatorApprovalReadError?: string;
-  burnCallError?: string;
 };
 
 type StorefrontVideoGridProps = {
@@ -68,14 +82,11 @@ type StorefrontVideoGridProps = {
 };
 
 const inftBurnAbi = parseAbi([
-  "function burnAgent(uint256 tokenId)",
-  "function burn(uint256 tokenId)",
   "function owner() view returns (address)",
   "function ownerOf(uint256 tokenId) view returns (address)",
   "function getApproved(uint256 tokenId) view returns (address)",
   "function isApprovedForAll(address owner, address operator) view returns (bool)"
 ]);
-const walletBurnFunctionNames: INFTBurnFunctionName[] = ["burnAgent", "burn"];
 
 export default function StorefrontVideoGrid({
   actor,
@@ -148,19 +159,21 @@ export default function StorefrontVideoGrid({
     try {
       const prepared = await sendGenerationAction(item, "prepare_burn");
       const burnRequest = readBurnRequest(prepared);
-      const burnTxHash = burnRequest.mock
-        ? "mock_wallet_burn"
-        : await (async () => {
-          setMessage("Confirm the INFT burn transaction in your wallet.");
-          const txHash = await requestWalletBurnTransaction({
-            provider: ethereumProvider,
-            ownerWallet: wallet,
-            burnRequest
-          });
-          setMessage("Waiting for the burn transaction to confirm.");
-          return txHash;
-        })();
-      const result = await sendGenerationAction(item, action, { burnTxHash });
+      let result: Record<string, unknown>;
+      if (burnRequest.mock) {
+        result = await sendGenerationAction(item, action, { burnTxHash: "mock_wallet_burn" });
+      } else {
+        const burnAuthorization = readBurnAuthorization(prepared);
+        setMessage("Sign the INFT owner authorization to burn it on-chain.");
+        await requestWalletBurnAuthorization({
+          provider: ethereumProvider,
+          ownerWallet: wallet,
+          burnRequest,
+          burnAuthorization
+        });
+        setMessage("Waiting for the delegated burn transaction to confirm.");
+        result = await sendGenerationAction(item, action, { burnAuthorization });
+      }
       await refreshVideoLists(item, action, result);
       setMessage(actionMessage(action, result));
     } catch (error) {
@@ -642,14 +655,26 @@ function readBurnRequest(data: Record<string, unknown>): INFTBurnRequest {
   return burnRequest;
 }
 
-async function requestWalletBurnTransaction({
+function readBurnAuthorization(data: Record<string, unknown>): INFTBurnAuthorization {
+  const authorization = data.burnAuthorization && typeof data.burnAuthorization === "object"
+    ? data.burnAuthorization as INFTBurnAuthorization
+    : {};
+  if (!authorization.message || !authorization.nonce || !authorization.expiresAt) {
+    throw new Error("Burn authorization details are missing.");
+  }
+  return authorization;
+}
+
+async function requestWalletBurnAuthorization({
   provider,
   ownerWallet,
-  burnRequest
+  burnRequest,
+  burnAuthorization
 }: {
   provider?: EthereumProvider | null;
   ownerWallet?: string;
   burnRequest: INFTBurnRequest;
+  burnAuthorization: INFTBurnAuthorization;
 }) {
   if (!provider) {
     throw new Error("Connect this wallet in a wallet-enabled browser before burning the INFT.");
@@ -675,90 +700,20 @@ async function requestWalletBurnTransaction({
     from,
     tokenId
   });
-  assertINFTBurnAuthorized(diagnostics);
-  const burnFunction = await resolveWalletBurnFunction(provider, {
-    contractAddress,
-    from,
-    tokenId
-  });
-  const txHash = String(await provider.request({
-    method: "eth_sendTransaction",
-    params: [{
-      from,
-      to: contractAddress,
-      data: burnFunction.data
-    }]
+  assertINFTOwnerSigner(diagnostics);
+  if (!burnAuthorization.message) {
+    throw new Error("Burn authorization message is missing.");
+  }
+  const signature = String(await provider.request({
+    method: "personal_sign",
+    params: [burnAuthorization.message, from]
   }));
-  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
-    throw new Error("Wallet did not return a valid burn transaction hash.");
+  burnAuthorization.signature = signature;
+  burnAuthorization.signer = from;
+  if (!signature || !signature.startsWith("0x")) {
+    throw new Error("Wallet did not return a valid burn authorization signature.");
   }
-  return txHash;
-}
-
-async function resolveWalletBurnFunction(
-  provider: EthereumProvider,
-  input: { contractAddress: string; from: string; tokenId: string }
-) {
-  const candidates = await getWalletBurnFunctionCandidates(provider, input);
-  const errors: string[] = [];
-  for (const candidate of candidates) {
-    try {
-      await provider.request({
-        method: "eth_call",
-        params: [{
-          from: input.from,
-          to: input.contractAddress,
-          data: candidate.data
-        }, "latest"]
-      });
-      return candidate;
-    } catch (error) {
-      errors.push(`${candidate.label}: ${formatErrorMessage(error, "call reverted")}`);
-    }
-  }
-  throw new Error(
-    `Connected wallet cannot burn this INFT. Tried ${candidates.map((candidate) => candidate.label).join(" and ")} from ${shortWallet(input.from)}, but the contract rejected the burn call. ${errors.join(" ")}`
-  );
-}
-
-async function getWalletBurnFunctionCandidates(
-  provider: EthereumProvider,
-  input: { contractAddress: string; tokenId: string }
-) {
-  const candidates = walletBurnFunctionNames.map((functionName) => {
-    const data = encodeBurnFunctionData(functionName, input.tokenId);
-    return {
-      functionName,
-      data,
-      selector: data.slice(0, 10).toLowerCase(),
-      label: `${functionName}(uint256)`,
-      supportedByBytecode: false
-    };
-  });
-  const bytecode = await provider.request({
-    method: "eth_getCode",
-    params: [input.contractAddress, "latest"]
-  }).catch(() => "");
-  const normalizedBytecode = typeof bytecode === "string" ? bytecode.toLowerCase() : "";
-  for (const candidate of candidates) {
-    candidate.supportedByBytecode = Boolean(
-      normalizedBytecode &&
-      normalizedBytecode !== "0x" &&
-      normalizedBytecode.includes(candidate.selector.slice(2))
-    );
-  }
-  return [
-    ...candidates.filter((candidate) => candidate.supportedByBytecode),
-    ...candidates.filter((candidate) => !candidate.supportedByBytecode)
-  ];
-}
-
-function encodeBurnFunctionData(functionName: INFTBurnFunctionName, tokenId: string) {
-  return encodeFunctionData({
-    abi: inftBurnAbi,
-    functionName,
-    args: [BigInt(tokenId)]
-  });
+  return burnAuthorization;
 }
 
 async function readINFTBurnDiagnostics(
@@ -840,12 +795,12 @@ async function readINFTContract(
   });
 }
 
-function assertINFTBurnAuthorized(diagnostics: INFTBurnDiagnostics) {
+function assertINFTOwnerSigner(diagnostics: INFTBurnDiagnostics) {
   if (!diagnostics.owner) {
     throw new Error(`Cannot read owner for INFT token ${diagnostics.tokenId}. ${diagnostics.ownerReadError || "The token may already be burned, the token id may be wrong, or the wallet is on the wrong 0G contract."}`);
   }
-  if (!diagnostics.authorized) {
-    throw new Error(`Connected wallet cannot burn this INFT. ${formatINFTBurnDiagnostics(diagnostics)} Connect the token owner wallet, contract owner wallet, or approve this wallet for the token before burning.`);
+  if (!sameWallet(diagnostics.from, diagnostics.owner)) {
+    throw new Error(`Connect the current INFT owner wallet before authorizing the burn. ${formatINFTBurnDiagnostics(diagnostics)}`);
   }
 }
 
