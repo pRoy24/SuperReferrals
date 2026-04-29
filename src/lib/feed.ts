@@ -62,6 +62,7 @@ export async function listPublicFeedItems(filters: {
   sort?: string;
   limit?: number;
   viewerId?: string;
+  focusId?: string;
 } = {}) {
   const store = await readStore();
   const viewerId = normalizeViewerId(filters.viewerId);
@@ -81,9 +82,17 @@ export async function listPublicFeedItems(filters: {
   }
 
   items.sort((left, right) => compareFeedItems(left, right, sort));
+  const focusId = normalizeFocusId(filters.focusId);
+  const focusedItem = focusId
+    ? items.find((item) => matchesFeedItemId(item, focusId))
+    : undefined;
+  let limitedItems = items.slice(0, limit);
+  if (focusedItem && !limitedItems.some((item) => item.id === focusedItem.id)) {
+    limitedItems = [focusedItem, ...limitedItems.filter((item) => item.id !== focusedItem.id)].slice(0, limit);
+  }
 
   return {
-    items: items.slice(0, limit),
+    items: limitedItems,
     tags: collectFeedTags(items),
     sort,
     search,
@@ -381,6 +390,14 @@ function normalizeLimit(limit?: number) {
 
 function normalizeSearch(value?: string) {
   return String(value || "").trim().toLowerCase();
+}
+
+function normalizeFocusId(value?: string) {
+  return String(value || "").trim();
+}
+
+function matchesFeedItemId(item: PublicFeedItem, value: string) {
+  return item.id === value || item.generationId === value || item.inftId === value;
 }
 
 function normalizeViewerId(value?: string) {

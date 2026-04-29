@@ -60,7 +60,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [updateFooterMode, setUpdateFooterMode] = useState<"update" | "remove">("update");
   const [updateFooterUrl, setUpdateFooterUrl] = useState("");
   const [updateFooterTitle, setUpdateFooterTitle] = useState("");
-  const [updateFooterAnimation, setUpdateFooterAnimation] = useState(true);
+  const [updateFooterLogo, setUpdateFooterLogo] = useState("");
   const [shareMessage, setShareMessage] = useState("");
   const [lastVideoOperation, setLastVideoOperation] = useState("");
   const [actionPoll, setActionPoll] = useState<ActionPollState | null>(null);
@@ -74,7 +74,9 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [actionPaymentFlow, setActionPaymentFlow] = useState<ActionPaymentFlow>({ status: "idle", message: "" });
   const publicInftPath = `/inft/${activeInft.id}`;
   const updateOutroRequiredValue = updateOutroMode === "cta" ? updateOutroCtaUrl.trim() : updateOutroImageUrl.trim();
-  const updateFooterRequiredValue = updateFooterMode === "remove" ? "remove" : updateFooterUrl.trim();
+  const updateFooterRequiredValue = updateFooterMode === "remove"
+    ? "remove"
+    : updateFooterUrl.trim() || updateFooterTitle.trim() || updateFooterLogo.trim();
 
   useEffect(() => {
     setActiveInft(inft);
@@ -619,22 +621,20 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     if (updateFooterMode === "remove") {
       return {
         mode: "remove",
-        remove_footer: true,
-        add_footer_animation: false
+        remove_footer: true
       };
     }
     const footerUrl = updateFooterUrl.trim();
-    if (!footerUrl) {
-      throw new Error("Footer URL is required.");
+    const footerText = updateFooterTitle.trim();
+    const footerLogo = updateFooterLogo.trim();
+    if (!footerUrl && !footerText && !footerLogo) {
+      throw new Error("Footer text, logo, or URL is required.");
     }
-    const footerMetadata = {
-      url: footerUrl,
-      ...(updateFooterTitle.trim() ? { title: updateFooterTitle.trim() } : {})
-    };
     return {
       mode: "update",
-      add_footer_animation: updateFooterAnimation,
-      footer_metadata: [footerMetadata]
+      ...(footerText ? { cta_text: footerText } : {}),
+      ...(footerLogo ? { cta_logo: footerLogo } : {}),
+      ...(footerUrl ? { cta_url: footerUrl } : {})
     };
   }
 
@@ -913,16 +913,9 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                     />
                     {updateFooterMode === "update" && (
                       <>
-                        <TextField label="Footer URL" value={updateFooterUrl} onChange={setUpdateFooterUrl} full />
-                        <TextField label="Footer title" value={updateFooterTitle} onChange={setUpdateFooterTitle} />
-                        <label className="toggle-row">
-                          <input
-                            type="checkbox"
-                            checked={updateFooterAnimation}
-                            onChange={(event) => setUpdateFooterAnimation(event.target.checked)}
-                          />
-                          Animate footer
-                        </label>
+                        <TextField label="Footer text" value={updateFooterTitle} onChange={setUpdateFooterTitle} />
+                        <TextField label="Footer URL" value={updateFooterUrl} onChange={setUpdateFooterUrl} />
+                        <TextField label="Footer logo URL" value={updateFooterLogo} onChange={setUpdateFooterLogo} full />
                       </>
                     )}
                     <INFTActionPayControl

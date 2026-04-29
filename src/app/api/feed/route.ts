@@ -9,6 +9,7 @@ export async function GET(request: Request) {
     tag: url.searchParams.get("tag") || undefined,
     sort: url.searchParams.get("sort") || undefined,
     viewerId: url.searchParams.get("viewerId") || undefined,
+    focusId: url.searchParams.get("focusId") || undefined,
     limit
   });
   return NextResponse.json(result);

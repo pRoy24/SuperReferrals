@@ -10,6 +10,8 @@ import {
   Sparkles,
   Store,
 } from "lucide-react";
+import VideoMosaic from "@/components/VideoMosaic";
+import { listPublicFeedItems } from "@/lib/feed";
 import { readStore } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +43,7 @@ const valuePoints = [
 
 export default async function Home() {
   const store = await readStore();
+  const featuredFeed = await listPublicFeedItems({ sort: "ranked", limit: 10 });
   const customer = store.customers[0];
   const demoReferrer = customer ? store.subAccounts.find((account) => account.customerId === customer.id) : null;
   const latestInft = store.infts[0];
@@ -168,6 +171,23 @@ export default async function Home() {
           <RouteButton href="/feed" title="View video gallery" copy="Browse completed videos and social actions." />
           <RouteButton href={inftHref} title="Open latest video" copy="Preview the latest render." />
         </div>
+      </section>
+
+      <section className="landing-section landing-video-section">
+        <div className="landing-video-header">
+          <div>
+            <div className="eyebrow">Featured Renditions</div>
+            <h2>Recent and popular storefront videos.</h2>
+          </div>
+          <a className="btn" href="/feed" target="_blank" rel="noreferrer">
+            <Film size={16} /> Open feed
+          </a>
+        </div>
+        <VideoMosaic
+          items={featuredFeed.items}
+          emptyText="No published storefront videos yet."
+          limit={10}
+        />
       </section>
     </main>
   );

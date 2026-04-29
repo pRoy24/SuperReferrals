@@ -1580,35 +1580,28 @@ export async function runINFTAction(id: string, action: string, payload: Record<
     const removeFooter =
       footerMode === "remove" ||
       payload.removeFooter === true ||
-      payload.remove_footer === true ||
-      payload.addFooterAnimation === false ||
-      payload.add_footer_animation === false;
+      payload.remove_footer === true;
     const footerUrl = firstString(payload, ["footerUrl", "footer_url", "ctaUrl", "cta_url", "url"]);
-    const footerTitle = firstString(payload, ["footerTitle", "footer_title", "title"]);
+    const footerText = firstString(payload, ["footerText", "footer_text", "footerTitle", "footer_title", "ctaText", "cta_text", "title"]);
+    const footerLogo = firstString(payload, ["footerLogo", "footer_logo", "ctaLogo", "cta_logo", "logo"]);
     const footerMetadata = normalizeFooterMetadata(
       (payload.footer_metadata || payload.footerMetadata) as GenerationInput["footer_metadata"],
       footerUrl
     );
-    if (footerTitle && footerMetadata?.length === 1 && !footerMetadata[0]?.title) {
-      footerMetadata[0] = { ...footerMetadata[0], title: footerTitle };
-    }
+    const metadataItem = footerMetadata?.[0];
+    const ctaUrl = footerUrl || metadataItem?.url || "";
+    const ctaText = footerText || metadataItem?.title || "";
 
-    if (!removeFooter && (!footerMetadata || footerMetadata.length === 0)) {
-      throw new Error("Footer metadata or a footer URL is required.");
-    }
-
-    const addFooterAnimation = typeof payload.add_footer_animation === "boolean"
-      ? payload.add_footer_animation
-      : typeof payload.addFooterAnimation === "boolean"
-        ? payload.addFooterAnimation
-        : true;
-    const actionInput: Record<string, unknown> = {
-      videoSessionId,
-      add_footer_animation: removeFooter ? false : addFooterAnimation,
-      footer_metadata: removeFooter ? [] : footerMetadata
-    };
+    const actionInput: Record<string, unknown> = { videoSessionId };
     if (removeFooter) {
       actionInput.remove_footer = true;
+    } else {
+      if (!ctaUrl && !ctaText && !footerLogo) {
+        throw new Error("Footer text, logo, or URL is required.");
+      }
+      if (ctaText) actionInput.cta_text = ctaText;
+      if (footerLogo) actionInput.cta_logo = footerLogo;
+      if (ctaUrl) actionInput.cta_url = ctaUrl;
     }
 
     return runPaidINFTSamsarAction({

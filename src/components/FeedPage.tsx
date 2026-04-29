@@ -24,6 +24,10 @@ import { samsarAuthHeaders } from "@/lib/storefront-auth-client";
 import type { FeedSortOption, PublicFeedItem } from "@/lib/types";
 
 type FeedViewMode = "mobile" | "desktop";
+type FeedPageProps = {
+  initialGenerationId?: string;
+  initialViewMode?: FeedViewMode;
+};
 type VideoProgress = {
   currentTime: number;
   duration: number;
@@ -67,7 +71,7 @@ const sortOptions: Array<{ value: FeedSortOption; label: string }> = [
 ];
 const ASSISTANT_USER_STORAGE_KEY = "superreferrals:page-assistant-user";
 
-export default function FeedPage() {
+export default function FeedPage({ initialGenerationId = "", initialViewMode }: FeedPageProps = {}) {
   const [items, setItems] = useState<PublicFeedItem[]>([]);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<FeedSortOption>("newest");
@@ -95,6 +99,7 @@ export default function FeedPage() {
   const mobileScrollTargetTimer = useRef<number | null>(null);
   const desktopDrag = useRef<DesktopDragState | null>(null);
   const desktopWheelLock = useRef<number | null>(null);
+  const initialSelectionApplied = useRef(false);
 
   const visibleItems = useMemo(
     () => items.filter((item) => isVisibleInFeedMode(item, viewMode)),
@@ -107,8 +112,12 @@ export default function FeedPage() {
   useEffect(() => {
     setViewerId(getOrCreateViewerId());
     setAuthorName(window.localStorage.getItem("superreferrals:feed-author") || "");
-    setViewMode(window.matchMedia("(max-width: 760px)").matches ? "mobile" : "desktop");
-  }, []);
+    setViewMode(initialViewMode || (window.matchMedia("(max-width: 760px)").matches ? "mobile" : "desktop"));
+  }, [initialViewMode]);
+
+  useEffect(() => {
+    initialSelectionApplied.current = false;
+  }, [initialGenerationId]);
 
   useEffect(() => {
     if (!viewerId) {
@@ -118,7 +127,7 @@ export default function FeedPage() {
       loadFeed().catch((error) => setMessage(error.message));
     }, 180);
     return () => window.clearTimeout(timeout);
-  }, [viewerId, query, sort]);
+  }, [viewerId, query, sort, initialGenerationId]);
 
   useEffect(() => {
     if (visibleItems.length > 0 && activeIndex >= visibleItems.length) {
@@ -221,6 +230,9 @@ export default function FeedPage() {
       if (query.trim()) {
         params.set("q", query.trim());
       }
+      if (initialGenerationId.trim()) {
+        params.set("focusId", initialGenerationId.trim());
+      }
       const response = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
       const data = await parseResponse<FeedResponse>(response);
       setItems(data.items);
@@ -279,6 +291,31 @@ export default function FeedPage() {
   function updateItem(nextItem: PublicFeedItem) {
     setItems((current) => current.map((item) => item.id === nextItem.id ? nextItem : item));
   }
+
+  useEffect(() => {
+    if (!initialGenerationId || items.length === 0) {
+      return;
+    }
+    const focusedItem = items.find((item) => matchesInitialFeedItem(item, initialGenerationId));
+    if (!focusedItem) {
+      return;
+    }
+    const focusedMode = initialViewMode || feedModeForItem(focusedItem);
+    setViewMode((current) => current === focusedMode ? current : focusedMode);
+  }, [initialGenerationId, initialViewMode, items]);
+
+  useEffect(() => {
+    if (!initialGenerationId || initialSelectionApplied.current) {
+      return;
+    }
+    const index = visibleItems.findIndex((item) => matchesInitialFeedItem(item, initialGenerationId));
+    if (index < 0) {
+      return;
+    }
+    initialSelectionApplied.current = true;
+    setActiveIndex(index);
+    setPlaying(true);
+  }, [initialGenerationId, visibleItems]);
 
   function selectItem(index: number, behavior: ScrollBehavior = "smooth") {
     if (visibleItems.length === 0) {
@@ -1226,4 +1263,12 @@ function isVisibleInFeedMode(item: PublicFeedItem, viewMode: FeedViewMode) {
   return viewMode === "mobile"
     ? item.aspectRatio === "9:16"
     : item.aspectRatio !== "9:16";
+}
+
+function feedModeForItem(item: PublicFeedItem): FeedViewMode {
+  return item.aspectRatio === "9:16" ? "mobile" : "desktop";
+}
+
+function matchesInitialFeedItem(item: PublicFeedItem, generationId: string) {
+  return item.id === generationId || item.generationId === generationId || item.inftId === generationId;
 }

@@ -31,6 +31,7 @@ type SamsarSessionActionOptions = {
 type SamsarVideoActionClient = {
   createV2VideoFromImageList(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
   updateV2VideoOutroImage(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
+  updateV2VideoFooterImage(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
   addV2VideoOutroImage(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
   updateVideoOutroImage(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
   addVideoOutroImage(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
@@ -287,10 +288,10 @@ export async function runSamsarSessionAction(
     }
   }
   if (action === "update_footer") {
-    return samsarClientActionResult(await videoClient.postV2("update_footer_image", {
-      input: sessionActionPayload,
-      webhookUrl: `${appBaseUrl()}/api/webhooks/samsar`
-    }, videoOptions));
+    return samsarClientActionResult(await videoClient.updateV2VideoFooterImage(
+      sessionActionPayload,
+      videoOptions
+    ));
   }
   if (action === "cancel_render") {
     return samsarClientActionResult(await videoClient.postV2("cancel_render", {
