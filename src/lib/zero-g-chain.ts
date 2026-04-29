@@ -74,5 +74,24 @@ export function delay(ms: number) {
 }
 
 function defaultZeroGChainId() {
-  return env("NODE_ENV") === "production" ? "16661" : "16602";
+  const network = normalizeEnvironmentValue(env("OG_NETWORK") || env("NEXT_PUBLIC_OG_NETWORK"));
+  if (["mainnet", "production", "prod"].includes(network)) {
+    return "16661";
+  }
+  if (["galileo", "testnet", "staging", "preview", "development", "dev", "local"].includes(network)) {
+    return "16602";
+  }
+
+  const deploymentEnvironment = normalizeEnvironmentValue(
+    env("DEPLOYMENT_ENV") ||
+    env("NEXT_PUBLIC_DEPLOYMENT_ENV") ||
+    env("VERCEL_ENV") ||
+    env("APP_ENV") ||
+    env("NEXT_PUBLIC_APP_ENV")
+  );
+  return deploymentEnvironment === "production" ? "16661" : "16602";
+}
+
+function normalizeEnvironmentValue(value: string) {
+  return value.trim().toLowerCase();
 }

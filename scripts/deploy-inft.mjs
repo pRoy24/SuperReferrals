@@ -3,11 +3,13 @@ import path from "node:path";
 import { createPublicClient, createWalletClient, defineChain, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-loadEnvFile(".env.local");
-loadEnvFile(".env");
-
 const requestedNetwork = String(process.argv[2] || process.env.OG_NETWORK || "galileo").toLowerCase();
 const isMainnet = ["mainnet", "production", "og-mainnet"].includes(requestedNetwork);
+const initialEnvKeys = new Set(Object.keys(process.env));
+loadEnvFile(".env");
+loadEnvFile(".env.local");
+loadEnvFile(isMainnet ? ".env.production" : ".env.staging", { override: true });
+
 const chainId = Number(
   process.env.INFT_CHAIN_ID ||
   process.env.OG_CHAIN_ID ||
@@ -63,7 +65,7 @@ if (receipt.status !== "success" || !receipt.contractAddress) {
 console.log(`INFT_CONTRACT_ADDRESS=${receipt.contractAddress}`);
 console.log(`Explorer: ${explorerUrl.replace(/\/$/, "")}/tx/${txHash}`);
 
-function loadEnvFile(fileName) {
+function loadEnvFile(fileName, options = {}) {
   const envPath = path.resolve(fileName);
   if (!fs.existsSync(envPath)) {
     return;
@@ -80,7 +82,10 @@ function loadEnvFile(fileName) {
     }
     const key = trimmed.slice(0, separator).trim();
     const value = trimmed.slice(separator + 1).trim().replace(/^["']|["']$/g, "");
-    if (key && process.env[key] === undefined) {
+    if (!key || !value || initialEnvKeys.has(key)) {
+      continue;
+    }
+    if (options.override || process.env[key] === undefined || process.env[key] === "") {
       process.env[key] = value;
     }
   }

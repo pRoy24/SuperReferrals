@@ -89,7 +89,6 @@ const inftBurnAbi = parseAbi([
   "function getApproved(uint256 tokenId) view returns (address)",
   "function isApprovedForAll(address owner, address operator) view returns (bool)"
 ]);
-const INFT_BURN_GAS_LIMIT = "0x7a120";
 
 export default function StorefrontVideoGrid({
   actor,
@@ -603,18 +602,6 @@ async function requestWalletBurnAuthorization({
     tokenId
   });
   assertINFTBurnAuthorized(diagnostics);
-
-  const transaction = {
-    from,
-    to: contractAddress,
-    data: encodeFunctionData({
-      abi: inftBurnAbi,
-      functionName: "burnAgent",
-      args: [BigInt(tokenId)]
-    }),
-    value: "0x0"
-  };
-  await preflightINFTBurn(provider, transaction, diagnostics);
   if (!burnAuthorization.message) {
     throw new Error("Burn authorization message is missing.");
   }
@@ -718,24 +705,6 @@ function assertINFTBurnAuthorized(diagnostics: INFTBurnDiagnostics) {
   }
 }
 
-async function preflightINFTBurn(provider: EthereumProvider, transaction: Record<string, unknown>, diagnostics: INFTBurnDiagnostics) {
-  try {
-    await provider.request({
-      method: "eth_call",
-      params: [compactTransaction({ ...transaction, gas: INFT_BURN_GAS_LIMIT }), "latest"]
-    });
-  } catch (error) {
-    diagnostics.burnCallError = formatErrorMessage(error, "burnAgent call failed");
-    if (isContractRevertError(error)) {
-      throw new Error(`INFT burn preflight reverted before wallet submission. ${formatINFTBurnDiagnostics(diagnostics)} Revert: ${diagnostics.burnCallError}.`);
-    }
-    console.warn("0G INFT burn preflight call failed; continuing to wallet submission because Galileo RPC calls can be noisy.", {
-      diagnostics,
-      error
-    });
-  }
-}
-
 async function ensureWalletNetwork(provider: EthereumProvider, chain: INFTBurnChain) {
   const hexChainId = chain.hexChainId || `0x${chain.id.toString(16)}`;
   const currentChainId = await provider.request({ method: "eth_chainId" }).catch(() => "");
@@ -768,10 +737,6 @@ async function ensureWalletNetwork(provider: EthereumProvider, chain: INFTBurnCh
   }
 }
 
-function compactTransaction(tx: Record<string, unknown>) {
-  return Object.fromEntries(Object.entries(tx).filter(([, value]) => value !== undefined && value !== null && value !== ""));
-}
-
 function walletErrorCode(error: unknown) {
   return typeof error === "object" && error && "code" in error ? Number((error as { code?: unknown }).code) : 0;
 }
@@ -802,17 +767,6 @@ function formatINFTBurnDiagnostics(diagnostics: INFTBurnDiagnostics) {
     diagnostics.operatorApprovalReadError ? `isApprovedForAll error ${diagnostics.operatorApprovalReadError}` : undefined
   ].filter(Boolean);
   return parts.join("; ");
-}
-
-function isContractRevertError(error: unknown) {
-  const message = formatErrorMessage(error, "").toLowerCase();
-  return (
-    message.includes("execution reverted") ||
-    message.includes("reverted") ||
-    message.includes("not authorized") ||
-    message.includes("erc721") ||
-    message.includes("nonexistent token")
-  );
 }
 
 function sameWallet(left?: string, right?: string) {

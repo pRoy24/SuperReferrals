@@ -1,4 +1,4 @@
-import { createPublicClient, createWalletClient, decodeEventLog, http, parseAbi, parseAbiItem } from "viem";
+import { createPublicClient, createWalletClient, decodeEventLog, encodeFunctionData, http, parseAbi, parseAbiItem } from "viem";
 import type { TransactionReceipt } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { env, isProviderMock } from "./env";
@@ -6,6 +6,7 @@ import { createId, shortHash } from "./ids";
 import { buildZeroGStorageGatewayUrl } from "./zero-g";
 import {
   delay,
+  errorToSearchText,
   isReplacementTransactionError,
   withSerializedZeroGTransaction,
   zeroGTransactionRetryDelayMs,
@@ -20,6 +21,7 @@ const inftAbi = parseAbi([
   "function burnAgent(uint256 tokenId)",
   "function tokenURI(uint256 tokenId) view returns (string)",
   "function ownerOf(uint256 tokenId) view returns (address)",
+  "function owner() view returns (address)",
   "function agentData(uint256 tokenId) view returns ((string encryptedURI, bytes32 metadataHash, address agentWallet, string referrerCode))"
 ]);
 const transferEventAbi = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)");
@@ -253,9 +255,18 @@ export async function updateINFTMetadata({
   };
 }
 
-export async function burnINFT({ tokenId, contractAddress: inputContractAddress }: { tokenId?: string; contractAddress?: string }) {
+export async function burnINFT({
+  tokenId,
+  contractAddress: inputContractAddress,
+  skipPreflight = false
+}: {
+  tokenId?: string;
+  contractAddress?: string;
+  skipPreflight?: boolean;
+}) {
   const contractAddress = (inputContractAddress || env("INFT_CONTRACT_ADDRESS")) as `0x${string}`;
   const privateKey = (env("INFT_MINTER_PRIVATE_KEY") || env("OG_PRIVATE_KEY")) as `0x${string}`;
+  const chainConfig = getINFTChainConfig();
   const chain = getINFTChain();
   const rpcUrl = chain.rpcUrls.default.http[0];
 
@@ -272,6 +283,7 @@ export async function burnINFT({ tokenId, contractAddress: inputContractAddress 
     throw new Error("A numeric token id is required to burn this INFT.");
   }
 
+  const parsedTokenId = BigInt(tokenId);
   const account = privateKeyToAccount(privateKey);
   const publicClient = createPublicClient({
     chain,
@@ -282,26 +294,155 @@ export async function burnINFT({ tokenId, contractAddress: inputContractAddress 
     chain,
     transport: http(rpcUrl)
   });
+  if (!skipPreflight) {
+    await preflightINFTBurnCall({
+      accountAddress: account.address,
+      contractAddress,
+      publicClient,
+      tokenId: parsedTokenId
+    });
+  }
   const txHash = await withSerializedZeroGTransaction(`0g-inft:${account.address.toLowerCase()}:${rpcUrl}`, () =>
     writeBurnWithRetry({
       accountAddress: account.address,
       contractAddress,
       publicClient,
-      tokenId: BigInt(tokenId),
+      tokenId: parsedTokenId,
       walletClient
     })
   );
-  const receipt = await publicClient.waitForTransactionReceipt({
-    hash: txHash,
-    timeout: parsePositiveIntegerEnv("INFT_BURN_RECEIPT_TIMEOUT_MS", 120_000)
+  const receipt = await waitForINFTTransactionReceipt({
+    publicClient,
+    txHash,
+    timeoutMs: parsePositiveIntegerEnv("INFT_BURN_RECEIPT_TIMEOUT_MS", 120_000),
+    chainConfig
   });
   if (receipt.status !== "success") {
-    throw new Error(`INFT burn transaction failed: ${txHash}`);
+    const transaction = await publicClient.getTransaction({ hash: txHash }).catch(() => undefined);
+    throw new Error(formatINFTBurnReceiptFailure({
+      chainConfig,
+      contractAddress,
+      receipt,
+      sender: account.address,
+      tokenId,
+      transaction
+    }));
   }
-  assertBurnReceipt(receipt, contractAddress, tokenId);
+  assertBurnReceipt(receipt, contractAddress, tokenId, chainConfig);
   return {
     txHash,
     mock: false
+  };
+}
+
+export async function preflightINFTBurn({
+  tokenId,
+  contractAddress: inputContractAddress
+}: {
+  tokenId?: string;
+  contractAddress?: string;
+}) {
+  const contractAddress = (inputContractAddress || env("INFT_CONTRACT_ADDRESS")) as `0x${string}`;
+  const privateKey = (env("INFT_MINTER_PRIVATE_KEY") || env("OG_PRIVATE_KEY")) as `0x${string}`;
+  const chain = getINFTChain();
+  const rpcUrl = chain.rpcUrls.default.http[0];
+
+  if (isProviderMock("INFT")) {
+    return { mock: true };
+  }
+  if (!contractAddress || !privateKey) {
+    throw new Error("INFT_CONTRACT_ADDRESS and either INFT_MINTER_PRIVATE_KEY or OG_PRIVATE_KEY are required for live INFT burn preflight.");
+  }
+  if (!tokenId || !/^\d+$/.test(tokenId)) {
+    throw new Error("A numeric token id is required to preflight this INFT burn.");
+  }
+
+  const account = privateKeyToAccount(privateKey);
+  const publicClient = createPublicClient({
+    chain,
+    transport: http(rpcUrl)
+  });
+  return preflightINFTBurnCall({
+    accountAddress: account.address,
+    contractAddress,
+    publicClient,
+    tokenId: BigInt(tokenId)
+  });
+}
+
+async function preflightINFTBurnCall({
+  accountAddress,
+  contractAddress,
+  publicClient,
+  tokenId
+}: {
+  accountAddress: `0x${string}`;
+  contractAddress: `0x${string}`;
+  publicClient: any;
+  tokenId: bigint;
+}) {
+  const chainConfig = getINFTChainConfig();
+  const [tokenOwner, contractOwner] = await Promise.all([
+    publicClient.readContract({
+      address: contractAddress,
+      abi: inftAbi,
+      functionName: "ownerOf",
+      args: [tokenId]
+    }) as Promise<string>,
+    publicClient.readContract({
+      address: contractAddress,
+      abi: inftAbi,
+      functionName: "owner"
+    }) as Promise<string>
+  ]);
+
+  const callData = encodeFunctionData({
+    abi: inftAbi,
+    functionName: "burnAgent",
+    args: [tokenId]
+  });
+  const selector = callData.slice(0, 10).toLowerCase();
+  const bytecode = await publicClient.getCode({ address: contractAddress }).catch(() => undefined) as string | undefined;
+  if (bytecode && !bytecode.toLowerCase().includes(selector.slice(2))) {
+    throw new Error(
+      `INFT contract on ${chainConfig.name} does not expose burnAgent(uint256) selector ${selector}; ${formatINFTBurnContext({
+        tokenId: tokenId.toString(),
+        contractAddress,
+        sender: accountAddress,
+        tokenOwner,
+        contractOwner
+      })}; contract ${buildINFTExplorerUrl(chainConfig, "address", contractAddress)}. This deployed contract cannot burn existing tokens on-chain. Deploy the current SuperReferralsINFT contract and update INFT_CONTRACT_ADDRESS before minting burnable INFTs.`
+    );
+  }
+  try {
+    await publicClient.call({
+      account: accountAddress,
+      to: contractAddress,
+      data: callData,
+      gas: parsePositiveBigIntEnv(
+        "INFT_BURN_PREFLIGHT_GAS_LIMIT",
+        parsePositiveBigIntEnv("INFT_BURN_GAS_LIMIT", 1_500_000n)
+      )
+    });
+  } catch (error) {
+    throw new Error(
+      `INFT burn preflight reverted on ${chainConfig.name}; ${formatINFTBurnContext({
+        tokenId: tokenId.toString(),
+        contractAddress,
+        sender: accountAddress,
+        tokenOwner,
+        contractOwner
+      })}; contract ${buildINFTExplorerUrl(chainConfig, "address", contractAddress)}. RPC error: ${formatINFTError(error)}. No burn transaction was submitted.`
+    );
+  }
+
+  return {
+    mock: false,
+    tokenId: tokenId.toString(),
+    contractAddress,
+    sender: accountAddress,
+    tokenOwner,
+    contractOwner
   };
 }
 
@@ -358,17 +499,28 @@ export async function verifyINFTBurnTransaction({
     throw new Error("A valid INFT burn transaction hash is required.");
   }
 
+  const chainConfig = getINFTChainConfig();
   const chain = getINFTChain();
   const publicClient = createPublicClient({
     chain,
     transport: http(chain.rpcUrls.default.http[0])
   });
-  const receipt = await publicClient.waitForTransactionReceipt({
-    hash: txHash as `0x${string}`,
-    timeout: parsePositiveIntegerEnv("INFT_BURN_RECEIPT_TIMEOUT_MS", 120_000)
+  const receipt = await waitForINFTTransactionReceipt({
+    publicClient,
+    txHash: txHash as `0x${string}`,
+    timeoutMs: parsePositiveIntegerEnv("INFT_BURN_RECEIPT_TIMEOUT_MS", 120_000),
+    chainConfig
   });
   if (receipt.status !== "success") {
-    throw new Error("INFT burn transaction was not successful.");
+    const transaction = await publicClient.getTransaction({ hash: txHash as `0x${string}` }).catch(() => undefined);
+    throw new Error(formatINFTBurnReceiptFailure({
+      chainConfig,
+      contractAddress: resolvedContractAddress,
+      receipt,
+      sender: receipt.from,
+      tokenId,
+      transaction
+    }));
   }
 
   const normalizedContract = resolvedContractAddress.toLowerCase();
@@ -399,10 +551,15 @@ export async function verifyINFTBurnTransaction({
       continue;
     }
   }
-  throw new Error("INFT burn transaction did not emit the expected burn event.");
+  throw new Error(`INFT burn transaction did not emit the expected burn event: ${txHash}. Explorer: ${buildINFTExplorerUrl(chainConfig, "tx", txHash)}`);
 }
 
-function assertBurnReceipt(receipt: TransactionReceipt, contractAddress: `0x${string}`, tokenId: string) {
+function assertBurnReceipt(
+  receipt: TransactionReceipt,
+  contractAddress: `0x${string}`,
+  tokenId: string,
+  chainConfig = getINFTChainConfig()
+) {
   const normalizedContract = contractAddress.toLowerCase();
   const expectedTokenId = BigInt(tokenId);
   for (const log of receipt.logs) {
@@ -427,7 +584,92 @@ function assertBurnReceipt(receipt: TransactionReceipt, contractAddress: `0x${st
       continue;
     }
   }
-  throw new Error(`INFT burn transaction did not emit a burn Transfer event: ${receipt.transactionHash}`);
+  throw new Error(`INFT burn transaction did not emit a burn Transfer event: ${receipt.transactionHash}. Explorer: ${buildINFTExplorerUrl(chainConfig, "tx", receipt.transactionHash)}`);
+}
+
+async function waitForINFTTransactionReceipt({
+  publicClient,
+  txHash,
+  timeoutMs,
+  chainConfig
+}: {
+  publicClient: any;
+  txHash: `0x${string}`;
+  timeoutMs: number;
+  chainConfig: ReturnType<typeof getINFTChainConfig>;
+}) {
+  const startedAt = Date.now();
+  let lastError: unknown;
+  while (Date.now() - startedAt <= timeoutMs) {
+    try {
+      return await publicClient.getTransactionReceipt({ hash: txHash }) as TransactionReceipt;
+    } catch (error) {
+      lastError = error;
+      await delay(1500);
+    }
+  }
+
+  throw new Error(
+    `INFT transaction receipt was not available after ${timeoutMs}ms: ${txHash}. Explorer: ${buildINFTExplorerUrl(chainConfig, "tx", txHash)}. Last RPC error: ${formatINFTError(lastError)}`
+  );
+}
+
+function formatINFTBurnReceiptFailure({
+  chainConfig,
+  contractAddress,
+  receipt,
+  sender,
+  tokenId,
+  transaction
+}: {
+  chainConfig: ReturnType<typeof getINFTChainConfig>;
+  contractAddress: `0x${string}`;
+  receipt: TransactionReceipt;
+  sender?: string;
+  tokenId: string;
+  transaction?: { gas?: bigint };
+}) {
+  const gasLimit = transaction?.gas ? ` of ${transaction.gas.toString()}` : "";
+  return `INFT burn transaction reverted on ${chainConfig.name}: ${receipt.transactionHash}; ${formatINFTBurnContext({
+    tokenId,
+    contractAddress,
+    sender: sender || receipt.from
+  })}; gas used ${receipt.gasUsed.toString()}${gasLimit}; explorer ${buildINFTExplorerUrl(chainConfig, "tx", receipt.transactionHash)}.`;
+}
+
+function formatINFTBurnContext({
+  tokenId,
+  contractAddress,
+  sender,
+  tokenOwner,
+  contractOwner
+}: {
+  tokenId: string;
+  contractAddress: string;
+  sender?: string;
+  tokenOwner?: string;
+  contractOwner?: string;
+}) {
+  return [
+    `token ${tokenId}`,
+    `contract ${shortAddress(contractAddress)}`,
+    sender ? `sender ${shortAddress(sender)}` : undefined,
+    tokenOwner ? `token owner ${shortAddress(tokenOwner)}` : undefined,
+    contractOwner ? `contract owner ${shortAddress(contractOwner)}` : undefined
+  ].filter(Boolean).join("; ");
+}
+
+function buildINFTExplorerUrl(chainConfig: ReturnType<typeof getINFTChainConfig>, resource: "tx" | "address", value: string) {
+  return `${chainConfig.blockExplorerUrl.replace(/\/$/, "")}/${resource}/${value}`;
+}
+
+function shortAddress(value: string) {
+  return value.length > 12 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value;
+}
+
+function formatINFTError(error: unknown) {
+  const message = error instanceof Error && error.message ? error.message : errorToSearchText(error);
+  return message.replace(/\s+/g, " ").trim().slice(0, 1000) || "unknown RPC error";
 }
 
 export async function recoverINFTFromChain(id: string): Promise<INFTRecord | undefined> {

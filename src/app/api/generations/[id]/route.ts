@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAddress, verifyMessage } from "viem";
 import { createId, normalizeWallet, nowIso } from "@/lib/ids";
-import { buildINFTBurnRequest, burnINFT, getINFTTokenOwner, verifyINFTBurnTransaction } from "@/lib/inft";
+import { buildINFTBurnRequest, burnINFT, getINFTTokenOwner, preflightINFTBurn, verifyINFTBurnTransaction } from "@/lib/inft";
 import { persistJsonToZeroG } from "@/lib/zero-g";
 import { addAgentTownEvent, getGeneration, mutateStore, readStore, removeGenerationVideoReferences, updateGeneration } from "@/lib/store";
 import type { Generation, INFTRecord, ZeroGArtifact } from "@/lib/types";
@@ -107,6 +107,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     return NextResponse.json({ ...result, burn: burnResult });
   } catch (error) {
+    console.error("Generation mutation failed", error);
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Unable to update video" },
       { status: 400 }
@@ -115,41 +116,36 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 }
 
 async function prepareGenerationINFTBurn(id: string, body: Record<string, unknown>) {
-  return mutateStore((store) => {
-    const generation = store.generations.find((item) => item.id === id);
-    if (!generation) {
-      throw new Error("generation not found");
-    }
-    const inft = findGenerationINFT(store, generation);
-    if (!inft) {
-      throw new Error("INFT was not found in the local store.");
-    }
-    const burnRequest = buildINFTBurnRequest({
-      tokenId: inft.tokenId,
-      contractAddress: inft.contractAddress
-    });
-    const authorization = buildBurnAuthorization({
-      requestedWallet: cleanOptionalString(body.wallet),
-      generation,
-      inft,
-      burnRequest
-    });
-    const nextFeed = {
-      ...(generation.feed || { tags: [] }),
-      published: false
-    };
-    return {
-      generation: updateGeneration(store, id, { feed: nextFeed }),
-      burn: {
-        prepared: true,
-        inftId: inft.id,
-        tokenId: inft.tokenId,
-        mock: burnRequest.mock
-      },
-      burnRequest,
-      burnAuthorization: authorization
-    };
+  const store = await readStore();
+  const generation = store.generations.find((item) => item.id === id);
+  if (!generation) {
+    throw new Error("generation not found");
+  }
+  const inft = findGenerationINFT(store, generation);
+  if (!inft) {
+    throw new Error("INFT was not found in the local store.");
+  }
+  const burnRequest = buildINFTBurnRequest({
+    tokenId: inft.tokenId,
+    contractAddress: inft.contractAddress
   });
+  const authorization = buildBurnAuthorization({
+    requestedWallet: cleanOptionalString(body.wallet),
+    generation,
+    inft,
+    burnRequest
+  });
+  return {
+    generation,
+    burn: {
+      prepared: true,
+      inftId: inft.id,
+      tokenId: inft.tokenId,
+      mock: burnRequest.mock
+    },
+    burnRequest,
+    burnAuthorization: authorization
+  };
 }
 
 async function burnGenerationINFT(generation: Generation, body: Record<string, unknown>) {
@@ -182,12 +178,13 @@ async function burnGenerationINFT(generation: Generation, body: Record<string, u
     };
   }
   const authorization = await verifyBurnAuthorization(body.burnAuthorization, generation, inft);
+  await preflightINFTBurn({ tokenId: inft.tokenId, contractAddress: inft.contractAddress });
   const audit = await persistBurnAuditToZeroG({
     generation,
     inft,
     authorization
   });
-  const result = await burnINFT({ tokenId: inft.tokenId, contractAddress: inft.contractAddress });
+  const result = await burnINFT({ tokenId: inft.tokenId, contractAddress: inft.contractAddress, skipPreflight: true });
   return {
     burned: true,
     inftId: inft.id,
@@ -249,7 +246,7 @@ function burnAuthorizationMessage(payload: {
     "SuperReferrals INFT Burn Authorization",
     "",
     "You authorize SuperReferrals to use the platform contract-owner key to burn the INFT listed below.",
-    "The platform will first verify that this signature belongs to the current token owner, write this authorization to 0G Storage, then execute burnAgent.",
+    "The platform will first verify that this signature belongs to the current token owner, preflight burnAgent with the platform key, write this authorization to 0G Storage, then execute burnAgent.",
     "",
     `Action: ${payload.action}`,
     `Generation ID: ${payload.generationId}`,
