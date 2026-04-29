@@ -1358,6 +1358,77 @@ h3 {
   min-width: 0;
 }
 
+.storefront-owner-layout {
+  grid-template-columns: minmax(300px, 0.82fr) minmax(500px, 1.18fr);
+  gap: 14px;
+}
+
+.storefront-owner-layout .stack {
+  gap: 14px;
+}
+
+.storefront-owner-layout .panel {
+  padding: 16px;
+}
+
+.storefront-owner-layout .panel-header {
+  margin-bottom: 12px;
+}
+
+.storefront-owner-layout .form-grid {
+  gap: 10px;
+}
+
+.storefront-owner-layout .button-row,
+.storefront-owner-layout .advanced-section,
+.storefront-owner-layout .setup-wallet-strip {
+  margin-top: 12px;
+}
+
+.storefront-owner-layout .button-row {
+  gap: 8px;
+}
+
+.storefront-owner-layout .setup-wallet-strip {
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.storefront-owner-layout input,
+.storefront-owner-layout textarea,
+.storefront-owner-layout select {
+  min-height: 40px;
+  border-radius: 10px;
+  padding: 9px 10px;
+}
+
+.storefront-owner-layout textarea {
+  min-height: 88px;
+}
+
+.storefront-owner-layout .amount-grid {
+  gap: 8px;
+}
+
+.storefront-owner-layout .amount-choice {
+  min-height: 66px;
+  padding: 9px;
+}
+
+.storefront-owner-pricing-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.storefront-owner-pricing-panel .pricing-table,
+.storefront-owner-pricing-panel .render-conditions-editor {
+  margin-top: 0;
+}
+
+.storefront-owner-pricing-panel .pricing-summary-grid {
+  grid-template-columns: minmax(160px, 0.82fr) minmax(180px, 1fr);
+}
+
 .public-main {
   width: min(1180px, calc(100vw - 40px));
   margin: 0 auto;
@@ -2203,6 +2274,38 @@ button.item {
   overflow-wrap: anywhere;
 }
 
+.render-history-panel {
+  margin-top: 18px;
+}
+
+.render-task-row {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scroll-snap-type: x proximity;
+}
+
+.render-task-row .item {
+  flex: 0 0 min(282px, 82vw);
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding: 10px;
+  scroll-snap-align: start;
+}
+
+.render-task-row .item-title,
+.render-task-row .subtle {
+  margin-bottom: 0;
+}
+
+.render-task-row .btn {
+  width: fit-content;
+  min-height: 36px;
+  padding: 7px 10px;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -3027,12 +3130,22 @@ button.item {
   padding: 12px;
 }
 
+.storefront-render-conditions {
+  gap: 10px;
+  padding: 10px;
+}
+
 .conditions-editor-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(180px, 0.55fr);
   gap: 12px;
   align-items: start;
   min-width: 0;
+}
+
+.storefront-conditions-grid {
+  grid-template-columns: 1fr;
+  gap: 10px;
 }
 
 .condition-chip-grid {
@@ -3064,6 +3177,15 @@ button.item {
   min-height: 16px;
 }
 
+.storefront-owner-pricing-panel .condition-chip-grid {
+  gap: 6px;
+}
+
+.storefront-owner-pricing-panel .toggle-chip {
+  min-height: 32px;
+  padding: 5px 9px;
+}
+
 .pricing-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 132px), 1fr));
@@ -3074,6 +3196,52 @@ button.item {
   background: rgba(255, 255, 255, 0.82);
   padding: 12px;
   min-width: 0;
+}
+
+.action-pricing-list .pricing-row {
+  grid-template-columns: minmax(180px, 1fr) minmax(150px, 0.55fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.model-settings-list {
+  gap: 8px;
+}
+
+.model-settings-row {
+  grid-template-columns: 1fr;
+  gap: 9px;
+  padding: 10px;
+}
+
+.model-settings-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.model-settings-title p {
+  margin: 0;
+  text-align: right;
+}
+
+.model-settings-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 112px), 1fr));
+  gap: 8px;
+  align-items: end;
+  min-width: 0;
+}
+
+.model-settings-fields .field {
+  gap: 4px;
+}
+
+.model-settings-fields .readonly-value,
+.model-settings-fields .toggle-row {
+  min-height: 38px;
 }
 
 .toggle-row {
@@ -4513,6 +4681,20 @@ button.item {
   .pricing-row {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .storefront-owner-pricing-panel .pricing-summary-grid,
+  .action-pricing-list .pricing-row {
+    grid-template-columns: 1fr;
+  }
+
+  .model-settings-title {
+    display: grid;
+    gap: 4px;
+  }
+
+  .model-settings-title p {
+    text-align: left;
   }
 
   .landing-hero-actions {

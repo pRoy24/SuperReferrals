@@ -628,9 +628,9 @@ export default function Dashboard() {
           <a className="nav-item" href="#processor-credits"><CircleDollarSign size={16} /> Credits</a>
           <a className="nav-item" href="#store-setup"><KeyRound size={16} /> Store setup</a>
           <a className="nav-item" href="#usdc-pricing"><ShieldCheck size={16} /> USDC pricing</a>
-          <a className="nav-item" href="#render-history"><Bot size={16} /> Render history</a>
           <a className="nav-item" href="#published-videos"><Radio size={16} /> Published videos</a>
           <a className="nav-item" href="#agent-town"><Network size={16} /> Agent Town</a>
+          <a className="nav-item" href="#render-history"><Bot size={16} /> Render history</a>
           <a className="nav-item" href="/storefronts"><Store size={16} /> Storefront directory</a>
         </nav>
       </aside>
@@ -674,8 +674,8 @@ export default function Dashboard() {
           <div className="stat"><strong>{agentJobs.length}</strong><span className="subtle">agent jobs</span></div>
         </section>
 
-        <div className="grid">
-          <section className="stack">
+        <div className="grid storefront-owner-layout">
+          <section className="stack storefront-owner-setup-stack">
             <div className="panel panel-strong" id="processor-credits">
               <div className="panel-header">
                 <div>
@@ -856,13 +856,13 @@ export default function Dashboard() {
             </div>
           </section>
 
-          <section className="stack">
-            <div className={`panel panel-strong ${hasCreditedProcessorAccount ? "" : "panel-disabled"}`} id="usdc-pricing">
+          <section className="stack storefront-owner-pricing-stack">
+            <div className={`panel panel-strong storefront-owner-pricing-panel ${hasCreditedProcessorAccount ? "" : "panel-disabled"}`} id="usdc-pricing">
               <div className="panel-header">
                 <h2>Public Render Pricing</h2>
                 <Database size={18} />
               </div>
-              <div className="form-grid">
+              <div className="form-grid pricing-summary-grid">
                 <TextField
                   label="Global user multiplier"
                   type="number"
@@ -875,7 +875,7 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <div className="pricing-table">
+              <div className="pricing-table action-pricing-list">
                 {paidINFTActions.map((action) => (
                   <div className="pricing-row" key={action}>
                     <div>
@@ -892,7 +892,7 @@ export default function Dashboard() {
                 ))}
               </div>
 
-              <div className="render-conditions-editor">
+              <div className="render-conditions-editor storefront-render-conditions">
                 <div className="item-title">
                   <div>
                     <strong>Storefront render conditions</strong>
@@ -908,7 +908,7 @@ export default function Dashboard() {
                   </label>
                 </div>
                 {customerForm.conditionalsEnabled && (
-                  <div className="conditions-editor-grid">
+                  <div className="conditions-editor-grid storefront-conditions-grid">
                     <div className="field full">
                       <label>Enabled models</label>
                       <div className="condition-chip-grid">
@@ -975,49 +975,51 @@ export default function Dashboard() {
                 )}
               </div>
 
-              <div className="pricing-table">
+              <div className="pricing-table model-settings-list">
                 {customerForm.modelConfigurations.map((config) => {
                   const details = resolveModelPriceDetails(
                     { pricing: { customerMultiplier: customerForm.customerMultiplier, creditUnitUsd: customerForm.creditUnitUsd } },
                     config
                   );
                   return (
-                    <div className="pricing-row" key={config.id}>
-                      <div>
+                    <div className="pricing-row model-settings-row" key={config.id}>
+                      <div className="model-settings-title">
                         <strong>{config.label}</strong>
                         <p className="subtle">{config.videoModel} · {config.aspectRatio} · up to {config.maxSecondsPerImage}s/image</p>
                       </div>
-                      <div className="readonly-value pricing-readonly">
-                        <span>{details.baseCreditsPerSecond}</span>
-                        <small>credits/sec</small>
-                      </div>
-                      <div className="readonly-value pricing-readonly">
-                        <span>{details.basePricePerSecondUsd.toFixed(2)}</span>
-                        <small>base USDC/sec</small>
-                      </div>
-                      <TextField
-                        label="Custom USDC/sec"
-                        type="number"
-                        value={config.customPricePerSecondUsd ?? ""}
-                        onChange={(customPricePerSecondUsd) => {
-                          const parsed = Number(customPricePerSecondUsd);
-                          updatePricingRow(config.id, {
-                            customPricePerSecondUsd: Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
-                          });
-                        }}
-                      />
-                      <div className="readonly-value pricing-readonly">
-                        <span>{details.pricePerSecondUsd.toFixed(2)}</span>
-                        <small>user USDC/sec</small>
-                      </div>
-                      <label className="toggle-row">
-                        <input
-                          type="checkbox"
-                          checked={config.enabled}
-                          onChange={(event) => updatePricingRow(config.id, { enabled: event.target.checked })}
+                      <div className="model-settings-fields">
+                        <div className="readonly-value pricing-readonly">
+                          <span>{details.baseCreditsPerSecond}</span>
+                          <small>credits/sec</small>
+                        </div>
+                        <div className="readonly-value pricing-readonly">
+                          <span>{details.basePricePerSecondUsd.toFixed(2)}</span>
+                          <small>base USDC/sec</small>
+                        </div>
+                        <TextField
+                          label="Custom USDC/sec"
+                          type="number"
+                          value={config.customPricePerSecondUsd ?? ""}
+                          onChange={(customPricePerSecondUsd) => {
+                            const parsed = Number(customPricePerSecondUsd);
+                            updatePricingRow(config.id, {
+                              customPricePerSecondUsd: Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+                            });
+                          }}
                         />
-                        Enabled
-                      </label>
+                        <div className="readonly-value pricing-readonly">
+                          <span>{details.pricePerSecondUsd.toFixed(2)}</span>
+                          <small>user USDC/sec</small>
+                        </div>
+                        <label className="toggle-row">
+                          <input
+                            type="checkbox"
+                            checked={config.enabled}
+                            onChange={(event) => updatePricingRow(config.id, { enabled: event.target.checked })}
+                          />
+                          Enabled
+                        </label>
+                      </div>
                     </div>
                   );
                 })}
@@ -1038,28 +1040,6 @@ export default function Dashboard() {
                 >
                   Clear model overrides
                 </button>
-              </div>
-            </div>
-
-            <div className="panel" id="render-history">
-              <div className="panel-header">
-                <h2>Recent Render Tasks</h2>
-                <Bot size={18} />
-              </div>
-              <div className="list">
-                {activeStorefrontGenerations.length === 0 && <p className="subtle">No render tasks yet.</p>}
-                {activeStorefrontGenerations.slice(0, 8).map((generation) => (
-                  <div className="item" key={generation.id}>
-                    <div className="item-title">
-                      <strong>{generation.id}</strong>
-                      <span className={generation.status === "COMPLETED" ? "badge ok" : generation.status === "FAILED" ? "badge fail" : "badge"}>{generation.status}</span>
-                    </div>
-                    <p className="subtle">
-                      {generation.input.image_urls.length} images · {generation.input.video_model} · {generation.input.aspect_ratio} · {generation.payment.amountUsd.toFixed(2)} USDC
-                    </p>
-                    {generation.inftId && <a className="btn" href={`/inft/${generation.inftId}`}><ExternalLink size={16} /> Open INFT</a>}
-                  </div>
-                ))}
               </div>
             </div>
           </section>
@@ -1201,6 +1181,28 @@ export default function Dashboard() {
                 })}
               </div>
             </div>
+          </div>
+        </section>
+
+        <section className="panel render-history-panel" id="render-history">
+          <div className="panel-header">
+            <h2>Recent Render Tasks</h2>
+            <Bot size={18} />
+          </div>
+          <div className="list render-task-row">
+            {activeStorefrontGenerations.length === 0 && <p className="subtle">No render tasks yet.</p>}
+            {activeStorefrontGenerations.slice(0, 8).map((generation) => (
+              <div className="item" key={generation.id}>
+                <div className="item-title">
+                  <strong>{generation.id}</strong>
+                  <span className={generation.status === "COMPLETED" ? "badge ok" : generation.status === "FAILED" ? "badge fail" : "badge"}>{generation.status}</span>
+                </div>
+                <p className="subtle">
+                  {generation.input.image_urls.length} images · {generation.input.video_model} · {generation.input.aspect_ratio} · {generation.payment.amountUsd.toFixed(2)} USDC
+                </p>
+                {generation.inftId && <a className="btn" href={`/inft/${generation.inftId}`}><ExternalLink size={16} /> Open INFT</a>}
+              </div>
+            ))}
           </div>
         </section>
       </main>
