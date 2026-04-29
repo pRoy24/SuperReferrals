@@ -30,7 +30,8 @@
     "production": {
       "envFile": ".env.production",
       "environment": "production",
-      "branch": ""
+      "branch": "",
+      "redisFromTarget": "staging"
     }
   },
   "zeroG": {

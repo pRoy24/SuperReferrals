@@ -286,6 +286,12 @@ export async function runSamsarSessionAction(
       ));
     }
   }
+  if (action === "update_footer") {
+    return samsarClientActionResult(await videoClient.postV2("update_footer_image", {
+      input: sessionActionPayload,
+      webhookUrl: `${appBaseUrl()}/api/webhooks/samsar`
+    }, videoOptions));
+  }
   if (action === "cancel_render") {
     return samsarClientActionResult(await videoClient.postV2("cancel_render", {
       input: sessionActionPayload,

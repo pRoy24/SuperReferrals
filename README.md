@@ -113,7 +113,7 @@ cp .env.production.example .env.local
 
 Use private RPC providers for production reliability.
 
-Vercel KV/Upstash env vars are normally injected by the deploy setup. Only put `KV_REST_API_URL` and `KV_REST_API_TOKEN` in a local env file when deliberately running against local or manually managed Redis.
+Local development uses `.superreferrals/data.json` and `.superreferrals/kv.json` by default when Redis env vars are absent. Keep `SUPERREFERRALS_STORE_BACKEND=auto` unless you deliberately want to force `redis` or `file`. Vercel KV/Upstash env vars are normally injected by the deploy setup. Only put `KV_REST_API_URL` and `KV_REST_API_TOKEN` in a local env file when deliberately running against local or manually managed Redis.
 
 0G Compute does not require endpoint, model, or API-key env vars. The server uses the 0G serving broker with the deployed platform signer from `OG_PRIVATE_KEY` by default, discovers live inference providers, and selects the top documented chatbot model for the current 0G environment: `qwen-2.5-7b-instruct` on Galileo/testnet and `GLM-5-FP8` on mainnet. Set `OG_COMPUTE_PRIVATE_KEY` only when assistant compute should use a separate platform-funded wallet. If the platform wallet is funded with a specific provider, set `OG_COMPUTE_PROVIDER_ADDRESS`. On testnet, `OG_COMPUTE_AUTO_FUND` defaults on and will initialize the 0G Compute ledger and provider sub-account from the platform wallet when the selected provider has no sub-account yet. The default provider sub-account transfer is `0.1` 0G.
 
@@ -165,12 +165,21 @@ Vercel env changes apply to new deployments only; redeploy or push after syncing
 
 ## Deploy Storage Bootstrap
 
-`deploy.json` describes the Vercel project, required Upstash Redis resource, disabled-by-default Blob store, staging/production env files, and required 0G storage variables. A new operator can run the bootstrap script to validate 0G env, launch Vercel login/link flows when needed, and create the free Upstash Redis resource:
+`deploy.json` describes the Vercel project, required Upstash Redis resource, disabled-by-default Blob store, staging/production env files, and required 0G storage variables. The default `./deploy.sh` path runs the storage bootstrap first, so a first deploy creates or links the Vercel Upstash Redis integration without requiring a user-provided Redis connection string:
+
+```bash
+./deploy.sh
+./deploy.sh --production
+```
+
+Use `--skip-bootstrap` or `DEPLOY_SKIP_BOOTSTRAP=true` only when the Vercel storage integration is already ready and you intentionally want to skip the check. A new operator can also run the bootstrap script directly to validate 0G env, launch Vercel login/link flows when needed, and create the Upstash Redis resource:
 
 ```bash
 npm run deploy:setup:staging
 npm run deploy:setup:production
 ```
+
+Production is currently configured to reuse the staging Redis REST env vars instead of provisioning a second database. Runtime keys are still separated by environment namespaces such as `superreferrals:store:staging` and `superreferrals:store:production`. Remove `targets.production.redisFromTarget` from `deploy.json` when you want production to provision its own Redis resource.
 
 Use `--dry-run` to preview actions:
 
@@ -178,11 +187,11 @@ Use `--dry-run` to preview actions:
 npm run deploy:setup:staging -- --dry-run
 ```
 
-The script can use `VERCEL_TOKEN`, `.vercel-token`, or an active Vercel CLI login. If Vercel asks for an auth challenge, complete the browser/email flow and rerun the command. Upstash Redis provisioning first checks for an existing linked Redis resource, accepts Marketplace terms by default when provisioning is needed, and should add `KV_REST_API_URL` and `KV_REST_API_TOKEN` to the linked project. Pass `--no-accept-marketplace-terms` only if you want to complete Marketplace terms manually. Environment sync is intentionally not run by default; pass `--sync-env` when the target env file is ready to upload.
+The script can use `VERCEL_TOKEN`, `.vercel-token`, or an active Vercel CLI login. If Vercel asks for an auth challenge, complete the browser/email flow and rerun the command. Upstash Redis provisioning first checks for an existing linked Redis resource, accepts Marketplace terms by default when provisioning is needed, and should add `KV_REST_API_URL` and `KV_REST_API_TOKEN` to the linked project. Pass `--no-accept-marketplace-terms` only if you want to complete Marketplace terms manually. Environment sync is intentionally not run by default; pass `--sync-env` when the target env file is ready to upload. `./deploy.sh` uses `--skip-env-validation` so Redis provisioning is not blocked by incomplete local 0G env files; run the direct setup command without that flag before live 0G flows.
 
-Upstash Redis is required for mutable app state: authenticated user/session state, Samsar account/session cache, credits, checkout state, quotes, render hot indexes, storefront ratings, and webhook/polling state. The application fails fast with setup instructions if `KV_REST_API_URL` and `KV_REST_API_TOKEN` are missing. Vercel Blob is disabled by default because Redis holds mutable app state and 0G Storage holds render artifacts/metadata. Blob is only useful later for encrypted private object snapshots/backups or private non-KV files. Keep 0G Storage for public generation artifacts and durable public render metadata; do not put auth tokens or private user secrets into public 0G metadata.
+Upstash Redis is required for deployed mutable app state: authenticated user/session state, Samsar account/session cache, credits, checkout state, quotes, render hot indexes, storefront ratings, and webhook/polling state. In local development the app falls back to file-backed state when Redis env vars are absent. In Vercel/serverless runtimes the application fails fast with setup instructions if `KV_REST_API_URL` and `KV_REST_API_TOKEN` are still missing after bootstrap. Vercel Blob is disabled by default because Redis holds mutable app state and 0G Storage holds render artifacts/metadata. Blob is only useful later for encrypted private object snapshots/backups or private non-KV files. Keep 0G Storage for public generation artifacts and durable public render metadata; do not put auth tokens or private user secrets into public 0G metadata.
 
-The legacy local JSON store is only read once to seed an empty Redis key during migration. Runtime reads and writes go to Redis. Completed INFT views should still be recoverable through the onchain INFT token URI and 0G metadata when live 0G/INFT env vars are configured.
+The local JSON store is the default development backend and is also read once to seed an empty Redis key during migration when Redis is configured. Completed INFT views should still be recoverable through the onchain INFT token URI and 0G metadata when live 0G/INFT env vars are configured.
 
 For staging previews, Vercel needs a Git event it can deploy. Push a new commit to `develop` or open a PR from `develop`; a local branch or a branch pointer that matches an already deployed `main` commit may not create a new Preview Deployment by itself.
 
@@ -190,7 +199,8 @@ For staging previews, Vercel needs a Git event it can deploy. Push a new commit 
 
 - `SUPERREFERRALS_MOCKS`: global mock switch. Defaults to mocked behavior when unset.
 - `SUPERREFERRALS_MOCKS=false`: live mode for all providers. Provider-specific mock overrides are no longer needed in the minimal staging/production env files.
-- `KV_REST_API_URL`, `KV_REST_API_TOKEN`: injected by Vercel/Upstash setup. Add them manually only for local Redis testing.
+- `SUPERREFERRALS_STORE_BACKEND`: `auto` uses Redis when KV env vars exist and local files otherwise. Use `redis` to require Redis locally, or `file` for explicit local file-backed development only.
+- `KV_REST_API_URL`, `KV_REST_API_TOKEN`: injected by Vercel/Upstash setup. Add them manually only for local Redis testing or to override the managed Vercel Redis resource.
 - `SAMSAR_APP_SECRET`: server-only secret, at least 32 characters, used to generate Samsar long-lived storefront APP_KEY credentials and to encrypt/hash stored APP_KEY values.
 - Samsar credentials are connected per storefront owner through Stripe checkout or account sign-in. The app uses the returned auth token only to provision a long-lived APP_KEY, stores an HMAC hash plus encrypted APP_KEY server-side, and sends APP_KEY + `SAMSAR_APP_SECRET` to `/v2` Samsar routes for generation and edit operations.
 - `TRANSACTION_NETWORK`, `TRANSACTION_CHAIN_ID`, `TRANSACTION_RPC_URL`: payment and wallet network.

@@ -1571,6 +1571,55 @@ export async function runINFTAction(id: string, action: string, payload: Record<
     });
   }
 
+  if (action === "update_footer") {
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation);
+    if (!videoSessionId) {
+      throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
+    }
+    const footerMode = firstString(payload, ["mode", "footerMode", "footer_mode"]).toLowerCase();
+    const removeFooter =
+      footerMode === "remove" ||
+      payload.removeFooter === true ||
+      payload.remove_footer === true ||
+      payload.addFooterAnimation === false ||
+      payload.add_footer_animation === false;
+    const footerUrl = firstString(payload, ["footerUrl", "footer_url", "ctaUrl", "cta_url", "url"]);
+    const footerTitle = firstString(payload, ["footerTitle", "footer_title", "title"]);
+    const footerMetadata = normalizeFooterMetadata(
+      (payload.footer_metadata || payload.footerMetadata) as GenerationInput["footer_metadata"],
+      footerUrl
+    );
+    if (footerTitle && footerMetadata?.length === 1 && !footerMetadata[0]?.title) {
+      footerMetadata[0] = { ...footerMetadata[0], title: footerTitle };
+    }
+
+    if (!removeFooter && (!footerMetadata || footerMetadata.length === 0)) {
+      throw new Error("Footer metadata or a footer URL is required.");
+    }
+
+    const addFooterAnimation = typeof payload.add_footer_animation === "boolean"
+      ? payload.add_footer_animation
+      : typeof payload.addFooterAnimation === "boolean"
+        ? payload.addFooterAnimation
+        : true;
+    const actionInput: Record<string, unknown> = {
+      videoSessionId,
+      add_footer_animation: removeFooter ? false : addFooterAnimation,
+      footer_metadata: removeFooter ? [] : footerMetadata
+    };
+    if (removeFooter) {
+      actionInput.remove_footer = true;
+    }
+
+    return runPaidINFTSamsarAction({
+      inft,
+      customer,
+      action: "update_footer",
+      actionInput,
+      paymentPayload: paymentPayloadFromINFTAction(payload)
+    });
+  }
+
   if (action === "cancel_render") {
     const videoSessionId = resolveGenerationVideoActionSessionId(generation);
     if (!videoSessionId) {

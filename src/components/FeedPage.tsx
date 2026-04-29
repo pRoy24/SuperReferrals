@@ -2,6 +2,8 @@
 
 import {
   Bot,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   Heart,
   MessageCircle,
@@ -17,11 +19,21 @@ import {
   VolumeX,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type MutableRefObject, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent, type RefObject, type UIEvent, type WheelEvent } from "react";
 import { samsarAuthHeaders } from "@/lib/storefront-auth-client";
 import type { FeedSortOption, PublicFeedItem } from "@/lib/types";
 
 type FeedViewMode = "mobile" | "desktop";
+type VideoProgress = {
+  currentTime: number;
+  duration: number;
+};
+
+type DesktopDragState = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+};
 
 type FeedResponse = {
   items: PublicFeedItem[];
@@ -72,10 +84,17 @@ export default function FeedPage() {
   const [controlsVisible, setControlsVisible] = useState(false);
   const [commentItemId, setCommentItemId] = useState<string | null>(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [videoProgress, setVideoProgress] = useState<Record<string, VideoProgress>>({});
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const mobileCardRefs = useRef<Record<string, HTMLElement | null>>({});
+  const mobileFeedRef = useRef<HTMLElement | null>(null);
   const viewedItems = useRef(new Set<string>());
   const controlsHideTimer = useRef<number | null>(null);
+  const mobileScrollFrame = useRef<number | null>(null);
+  const mobileScrollTarget = useRef<number | null>(null);
+  const mobileScrollTargetTimer = useRef<number | null>(null);
+  const desktopDrag = useRef<DesktopDragState | null>(null);
+  const desktopWheelLock = useRef<number | null>(null);
 
   const visibleItems = useMemo(
     () => items.filter((item) => isVisibleInFeedMode(item, viewMode)),
@@ -147,8 +166,9 @@ export default function FeedPage() {
         .sort((left, right) => right.intersectionRatio - left.intersectionRatio)[0];
       const id = visible?.target.getAttribute("data-feed-id");
       const index = visibleItems.findIndex((item) => item.id === id);
-      if (index >= 0) {
+      if (index >= 0 && mobileScrollTarget.current === null) {
         setActiveIndex(index);
+        setPlaying(true);
       }
     }, { threshold: [0.62, 0.78] });
 
@@ -177,6 +197,15 @@ export default function FeedPage() {
     return () => {
       if (controlsHideTimer.current !== null) {
         window.clearTimeout(controlsHideTimer.current);
+      }
+      if (mobileScrollFrame.current !== null) {
+        window.cancelAnimationFrame(mobileScrollFrame.current);
+      }
+      if (mobileScrollTargetTimer.current !== null) {
+        window.clearTimeout(mobileScrollTargetTimer.current);
+      }
+      if (desktopWheelLock.current !== null) {
+        window.clearTimeout(desktopWheelLock.current);
       }
     };
   }, []);
@@ -257,11 +286,158 @@ export default function FeedPage() {
     }
     const nextIndex = (index + visibleItems.length) % visibleItems.length;
     setActiveIndex(nextIndex);
+    setPlaying(true);
     const nextItem = visibleItems[nextIndex];
     if (viewMode === "mobile" && nextItem) {
+      mobileScrollTarget.current = nextIndex;
+      if (mobileScrollTargetTimer.current !== null) {
+        window.clearTimeout(mobileScrollTargetTimer.current);
+      }
+      mobileScrollTargetTimer.current = window.setTimeout(() => {
+        mobileScrollTarget.current = null;
+        mobileScrollTargetTimer.current = null;
+      }, 760);
       window.requestAnimationFrame(() => {
-        mobileCardRefs.current[nextItem.id]?.scrollIntoView({ behavior, block: "start" });
+        const feed = mobileFeedRef.current;
+        const card = mobileCardRefs.current[nextItem.id];
+        if (feed && card) {
+          feed.scrollTo({ top: Math.max(0, card.offsetTop - feed.offsetTop), behavior });
+          return;
+        }
+        card?.scrollIntoView({ behavior, block: "start" });
       });
+    }
+  }
+
+  function handleVideoProgress(id: string, video: HTMLVideoElement) {
+    updateVideoProgress(id, video.currentTime, video.duration);
+  }
+
+  function updateVideoProgress(id: string, currentTime: number, duration: number) {
+    const nextCurrentTime = Number.isFinite(currentTime) ? Math.max(0, currentTime) : 0;
+    const nextDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
+    setVideoProgress((current) => {
+      const previous = current[id];
+      if (
+        previous &&
+        Math.abs(previous.currentTime - nextCurrentTime) < 0.12 &&
+        Math.abs(previous.duration - nextDuration) < 0.12
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        [id]: {
+          currentTime: nextCurrentTime,
+          duration: nextDuration
+        }
+      };
+    });
+  }
+
+  function seekVideo(item: PublicFeedItem, nextTime: number) {
+    const video = videoRefs.current[item.id];
+    const duration = video?.duration || videoProgress[item.id]?.duration || 0;
+    if (!Number.isFinite(duration) || duration <= 0) {
+      return;
+    }
+    const normalizedTime = Math.max(0, Math.min(duration, nextTime));
+    if (video) {
+      video.currentTime = normalizedTime;
+      if (item.id === activeItem?.id && playing) {
+        video.play().catch(() => undefined);
+      }
+    }
+    updateVideoProgress(item.id, normalizedTime, duration);
+  }
+
+  function handleMobileScroll(event: UIEvent<HTMLElement>) {
+    if (viewMode !== "mobile" || mobileScrollFrame.current !== null) {
+      return;
+    }
+    const feed = event.currentTarget;
+    mobileScrollFrame.current = window.requestAnimationFrame(() => {
+      mobileScrollFrame.current = null;
+      const lockedIndex = mobileScrollTarget.current;
+      if (lockedIndex !== null) {
+        const lockedItem = visibleItems[lockedIndex];
+        const lockedCard = lockedItem ? mobileCardRefs.current[lockedItem.id] : null;
+        const targetTop = lockedCard ? Math.max(0, lockedCard.offsetTop - feed.offsetTop) : lockedIndex * Math.max(feed.clientHeight, 1);
+        if (Math.abs(feed.scrollTop - targetTop) < 3) {
+          mobileScrollTarget.current = null;
+          if (mobileScrollTargetTimer.current !== null) {
+            window.clearTimeout(mobileScrollTargetTimer.current);
+            mobileScrollTargetTimer.current = null;
+          }
+        }
+        return;
+      }
+      const nextIndex = Math.round(feed.scrollTop / Math.max(feed.clientHeight, 1));
+      if (nextIndex >= 0 && nextIndex < visibleItems.length && nextIndex !== activeIndex) {
+        setActiveIndex(nextIndex);
+        setPlaying(true);
+      }
+    });
+  }
+
+  function handleDesktopWheel(event: WheelEvent<HTMLElement>) {
+    const target = event.target as HTMLElement;
+    if (
+      target.closest(".feed-minimal-ui, .feed-comment-drawer, .feed-assistant-popdown") ||
+      desktopWheelLock.current !== null
+    ) {
+      return;
+    }
+    const horizontalDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : 0;
+    if (Math.abs(horizontalDelta) < 24) {
+      return;
+    }
+    event.preventDefault();
+    selectItem(activeIndex + (horizontalDelta > 0 ? 1 : -1));
+    desktopWheelLock.current = window.setTimeout(() => {
+      desktopWheelLock.current = null;
+    }, 520);
+  }
+
+  function handleDesktopPointerDown(event: PointerEvent<HTMLElement>) {
+    const target = event.target as HTMLElement;
+    if (
+      viewMode !== "desktop" ||
+      target.closest("a, button, input, textarea, select, .feed-minimal-ui, .feed-comment-drawer, .feed-assistant-popdown") ||
+      (event.pointerType === "mouse" && event.button !== 0)
+    ) {
+      return;
+    }
+    desktopDrag.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleDesktopPointerUp(event: PointerEvent<HTMLElement>) {
+    const drag = desktopDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    desktopDrag.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    if (Math.abs(deltaX) > 64 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+      selectItem(activeIndex + (deltaX < 0 ? 1 : -1));
+    }
+  }
+
+  function handleDesktopPointerCancel(event: PointerEvent<HTMLElement>) {
+    if (desktopDrag.current?.pointerId === event.pointerId) {
+      desktopDrag.current = null;
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
     }
   }
 
@@ -371,7 +547,7 @@ export default function FeedPage() {
       ) : visibleItems.length === 0 ? (
         <section className="feed-empty">No {emptyFormatLabel} videos match these filters.</section>
       ) : viewMode === "mobile" ? (
-        <section className="mobile-video-feed">
+        <section className="mobile-video-feed" onScroll={handleMobileScroll} ref={mobileFeedRef}>
           {visibleItems.map((item, index) => (
             <article
               className={`mobile-feed-card ${index === activeIndex ? "active" : ""}`}
@@ -381,16 +557,15 @@ export default function FeedPage() {
                 mobileCardRefs.current[item.id] = node;
               }}
             >
-              <FeedVideo item={item} active={index === activeIndex} muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => selectItem(index + 1)} />
+              <FeedVideo item={item} active={index === activeIndex} muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => selectItem(index + 1)} onProgress={handleVideoProgress} />
               <MobileOverlay
                 item={item}
-                activeIndex={activeIndex}
-                items={visibleItems}
                 muted={muted}
                 playing={playing}
+                progress={videoProgress[item.id]}
                 volume={volume}
                 controlsVisible={controlsVisible && index === activeIndex}
-                onSelectItem={selectItem}
+                onSeek={(time) => seekVideo(item, time)}
                 onToggleMute={() => setMuted((value) => !value)}
                 onTogglePlay={() => setPlaying((value) => !value)}
                 onVolume={changeVolume}
@@ -413,23 +588,33 @@ export default function FeedPage() {
         </section>
       ) : (
         <section className="desktop-feed-layout">
-          <div className="desktop-player-stage">
+          <div
+            className="desktop-player-stage"
+            onPointerCancel={handleDesktopPointerCancel}
+            onPointerDown={handleDesktopPointerDown}
+            onPointerUp={handleDesktopPointerUp}
+            onWheel={handleDesktopWheel}
+          >
             {visibleItems.map((item, index) => (
               <article
                 className={`desktop-feed-card ${index === activeIndex ? "active" : ""}`}
                 key={item.id}
               >
-                <FeedVideo item={item} active={index === activeIndex} muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => selectItem(index + 1)} />
+                <FeedVideo item={item} active={index === activeIndex} muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => selectItem(index + 1)} onProgress={handleVideoProgress} />
               </article>
             ))}
+            <DesktopStepNavigation
+              itemCount={visibleItems.length}
+              onNext={() => selectItem(activeIndex + 1)}
+              onPrevious={() => selectItem(activeIndex - 1)}
+            />
             <DesktopMinimalControls
               item={activeItem}
-              activeIndex={activeIndex}
-              items={visibleItems}
               muted={muted}
               playing={playing}
+              progress={activeItem ? videoProgress[activeItem.id] : undefined}
               volume={volume}
-              onSelectItem={selectItem}
+              onSeek={(time) => activeItem && seekVideo(activeItem, time)}
               onToggleMute={() => setMuted((value) => !value)}
               onTogglePlay={() => setPlaying((value) => !value)}
               onVolume={changeVolume}
@@ -624,14 +809,16 @@ function FeedVideo({
   muted,
   playing,
   videoRefs,
-  onEnded
+  onEnded,
+  onProgress
 }: {
   item: PublicFeedItem;
   active: boolean;
   muted: boolean;
   playing: boolean;
-  videoRefs: MutableRefObject<Record<string, HTMLVideoElement | null>>;
+  videoRefs: RefObject<Record<string, HTMLVideoElement | null>>;
   onEnded: () => void;
+  onProgress: (id: string, video: HTMLVideoElement) => void;
 }) {
   return (
     <video
@@ -646,20 +833,24 @@ function FeedVideo({
       playsInline
       preload={active ? "auto" : "metadata"}
       autoPlay={active && playing}
+      onCanPlay={(event) => onProgress(item.id, event.currentTarget)}
+      onDurationChange={(event) => onProgress(item.id, event.currentTarget)}
       onEnded={onEnded}
+      onLoadedMetadata={(event) => onProgress(item.id, event.currentTarget)}
+      onSeeked={(event) => onProgress(item.id, event.currentTarget)}
+      onTimeUpdate={(event) => onProgress(item.id, event.currentTarget)}
     />
   );
 }
 
 function MobileOverlay({
   item,
-  activeIndex,
-  items,
   muted,
   playing,
+  progress,
   volume,
   controlsVisible,
-  onSelectItem,
+  onSeek,
   onToggleMute,
   onTogglePlay,
   onVolume,
@@ -667,13 +858,12 @@ function MobileOverlay({
   onLike
 }: {
   item: PublicFeedItem;
-  activeIndex: number;
-  items: PublicFeedItem[];
   muted: boolean;
   playing: boolean;
+  progress?: VideoProgress;
   volume: number;
   controlsVisible: boolean;
-  onSelectItem: (index: number) => void;
+  onSeek: (time: number) => void;
   onToggleMute: () => void;
   onTogglePlay: () => void;
   onVolume: (value: number) => void;
@@ -714,19 +904,42 @@ function MobileOverlay({
           </a>
         )}
       </div>
-      <FeedTimeline items={items} activeIndex={activeIndex} onSelectItem={onSelectItem} />
+      <VideoScrubber item={item} progress={progress} onSeek={onSeek} />
+    </div>
+  );
+}
+
+function DesktopStepNavigation({
+  itemCount,
+  onPrevious,
+  onNext
+}: {
+  itemCount: number;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  if (itemCount < 2) {
+    return null;
+  }
+  return (
+    <div className="desktop-step-nav" aria-label="Video navigation">
+      <button className="desktop-nav-button previous" onClick={onPrevious} title="Previous video" type="button">
+        <ChevronLeft size={30} />
+      </button>
+      <button className="desktop-nav-button next" onClick={onNext} title="Next video" type="button">
+        <ChevronRight size={30} />
+      </button>
     </div>
   );
 }
 
 function DesktopMinimalControls({
   item,
-  activeIndex,
-  items,
   muted,
   playing,
+  progress,
   volume,
-  onSelectItem,
+  onSeek,
   onToggleMute,
   onTogglePlay,
   onVolume,
@@ -734,12 +947,11 @@ function DesktopMinimalControls({
   onLike
 }: {
   item: PublicFeedItem;
-  activeIndex: number;
-  items: PublicFeedItem[];
   muted: boolean;
   playing: boolean;
+  progress?: VideoProgress;
   volume: number;
-  onSelectItem: (index: number) => void;
+  onSeek: (time: number) => void;
   onToggleMute: () => void;
   onTogglePlay: () => void;
   onVolume: (value: number) => void;
@@ -778,7 +990,7 @@ function DesktopMinimalControls({
           </a>
         )}
       </div>
-      <FeedTimeline items={items} activeIndex={activeIndex} onSelectItem={onSelectItem} />
+      <VideoScrubber item={item} progress={progress} onSeek={onSeek} />
     </div>
   );
 }
@@ -792,27 +1004,39 @@ function FeedMiniMeta({ item }: { item: PublicFeedItem }) {
   );
 }
 
-function FeedTimeline({
-  items,
-  activeIndex,
-  onSelectItem
+function VideoScrubber({
+  item,
+  progress,
+  onSeek
 }: {
-  items: PublicFeedItem[];
-  activeIndex: number;
-  onSelectItem: (index: number) => void;
+  item: PublicFeedItem;
+  progress?: VideoProgress;
+  onSeek: (time: number) => void;
 }) {
+  const duration = progress?.duration || 0;
+  const currentTime = duration > 0 ? Math.min(progress?.currentTime || 0, duration) : 0;
+  const percent = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const scrubberStyle = { "--scrubber-progress": `${percent}%` } as CSSProperties;
+
   return (
-    <div className="feed-timeline" aria-label="Feed position">
-      {items.map((item, index) => (
-        <button
-          aria-label={`Open ${item.title}`}
-          className={index === activeIndex ? "active" : ""}
-          key={item.id}
-          onClick={() => onSelectItem(index)}
-          title={item.title}
-          type="button"
-        />
-      ))}
+    <div
+      className="video-scrubber"
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <span className="video-time">{formatVideoTime(currentTime)}</span>
+      <input
+        aria-label={`Seek ${item.title}`}
+        disabled={duration <= 0}
+        max={duration || 0}
+        min="0"
+        onChange={(event) => onSeek(Number(event.target.value))}
+        step="0.05"
+        style={scrubberStyle}
+        type="range"
+        value={currentTime}
+      />
+      <span className="video-time">{formatVideoTime(duration)}</span>
     </div>
   );
 }
@@ -986,6 +1210,16 @@ function formatMetric(value: number) {
     return `${(value / 1_000).toFixed(1)}k`;
   }
   return String(value);
+}
+
+function formatVideoTime(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0:00";
+  }
+  const totalSeconds = Math.floor(value);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 function isVisibleInFeedMode(item: PublicFeedItem, viewMode: FeedViewMode) {

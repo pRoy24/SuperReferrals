@@ -18,7 +18,8 @@ export const paidINFTActions: INFTPaidAction[] = [
   "add_subtitles",
   "remove_subtitles",
   "add_outro",
-  "update_outro"
+  "update_outro",
+  "update_footer"
 ];
 
 export const defaultINFTActionPricesUsd: Record<INFTPaidAction, number> = {
@@ -27,7 +28,8 @@ export const defaultINFTActionPricesUsd: Record<INFTPaidAction, number> = {
   add_subtitles: 0.2,
   remove_subtitles: 0.2,
   add_outro: 0.35,
-  update_outro: 0.35
+  update_outro: 0.35,
+  update_footer: 0.35
 };
 
 export const defaultModelPricingConfigurations: ModelPricingConfiguration[] = [

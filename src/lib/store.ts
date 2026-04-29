@@ -24,6 +24,7 @@ import type {
 } from "./types";
 
 const STORE_FILE = "data.json";
+const LOCAL_KV_FILE = "kv.json";
 const DEFAULT_DATA_DIR = ".superreferrals";
 const DEFAULT_REDIS_STORE_KEY_PREFIX = "superreferrals:store";
 const DEFAULT_REDIS_LOCK_TTL_MS = 15_000;
@@ -37,6 +38,14 @@ type RedisRestConfig = {
   url: string;
   token: string;
 };
+
+type StoreBackendMode = "auto" | "redis" | "file";
+type StoreBackend = "redis" | "file";
+type LocalKvEntry = {
+  value: unknown;
+  expiresAt?: number;
+};
+type LocalKvDocument = Record<string, LocalKvEntry>;
 
 function dataDir() {
   const configured = env("SUPERREFERRALS_DATA_DIR", DEFAULT_DATA_DIR);
@@ -53,20 +62,85 @@ function dataPath() {
   return path.join(dataDir(), STORE_FILE);
 }
 
+function localKvPath() {
+  return path.join(dataDir(), LOCAL_KV_FILE);
+}
+
 function requireRedisRestConfig(): RedisRestConfig {
+  const config = optionalRedisRestConfig();
+  if (!config) {
+    throw missingRedisConfigError();
+  }
+  return config;
+}
+
+function optionalRedisRestConfig(): RedisRestConfig | undefined {
   const url = env("KV_REST_API_URL") || env("UPSTASH_REDIS_REST_URL");
   const token = env("KV_REST_API_TOKEN") || env("UPSTASH_REDIS_REST_TOKEN");
   if (!url || !token) {
-    throw new Error([
-      "SuperReferrals requires a durable Redis KV store.",
-      "Run `npm run deploy:setup:staging` or `npm run deploy:setup:production` to create/link Upstash Redis, then redeploy or pull Vercel env locally.",
-      "Required runtime env vars: KV_REST_API_URL and KV_REST_API_TOKEN."
-    ].join(" "));
+    return undefined;
   }
   return {
     url: url.replace(/\/+$/, ""),
     token
   };
+}
+
+function missingRedisConfigError() {
+  return new Error([
+    "SuperReferrals needs durable Redis KV in deployed/serverless runtimes.",
+    "`./deploy.sh` configures the Vercel Upstash Redis integration by default, or run `npm run deploy:setup:staging` / `npm run deploy:setup:production` directly.",
+    "Vercel should inject KV_REST_API_URL and KV_REST_API_TOKEN after the integration is linked; set those env vars manually only when overriding the managed Redis resource."
+  ].join(" "));
+}
+
+function configuredStoreBackend(): StoreBackendMode {
+  const value = env("SUPERREFERRALS_STORE_BACKEND", "auto").toLowerCase();
+  if (value === "auto" || value === "redis" || value === "file") {
+    return value;
+  }
+  throw new Error("SUPERREFERRALS_STORE_BACKEND must be one of: auto, redis, file.");
+}
+
+function storeBackend(): StoreBackend {
+  const mode = configuredStoreBackend();
+  if (mode === "redis") {
+    requireRedisRestConfig();
+    return "redis";
+  }
+  if (mode === "file") {
+    ensureLocalFileStoreAllowed();
+    return "file";
+  }
+  if (optionalRedisRestConfig()) {
+    return "redis";
+  }
+  if (!isServerlessRuntime()) {
+    return "file";
+  }
+  throw missingRedisConfigError();
+}
+
+function shouldUseLocalKvFallback() {
+  const mode = configuredStoreBackend();
+  if (mode === "redis") {
+    return false;
+  }
+  if (mode === "file") {
+    ensureLocalFileStoreAllowed();
+    return true;
+  }
+  return !optionalRedisRestConfig() && !isServerlessRuntime();
+}
+
+function ensureLocalFileStoreAllowed() {
+  if (!isServerlessRuntime()) {
+    return;
+  }
+  throw new Error([
+    "SUPERREFERRALS_STORE_BACKEND=file is only supported for local development.",
+    "Use the default deploy bootstrap to link Vercel Upstash Redis before deploying, or provide KV_REST_API_URL and KV_REST_API_TOKEN."
+  ].join(" "));
 }
 
 function redisStoreKey() {
@@ -129,15 +203,27 @@ export function emptyStore(): SuperReferralsStore {
 }
 
 export async function readStore(): Promise<SuperReferralsStore> {
-  return readRedisStore();
+  return storeBackend() === "redis" ? readRedisStore() : readFileStore();
 }
 
 async function readLegacyFileStoreForRedisSeed(): Promise<SuperReferralsStore | undefined> {
+  return readFileStoreDocument();
+}
+
+async function readFileStore(): Promise<SuperReferralsStore> {
+  const store = await readFileStoreDocument() || emptyStore();
+  const normalized = normalizeStoreForRuntime(store);
+  if (normalized.changed) {
+    await writeFileStoreDocument(normalized.store);
+  }
+  return normalized.store;
+}
+
+async function readFileStoreDocument(): Promise<SuperReferralsStore | undefined> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
       const raw = await fs.readFile(dataPath(), "utf8");
-      const parsed = JSON.parse(raw) as SuperReferralsStore;
-      const store = { ...emptyStore(), ...parsed, version: 4 as const };
+      const store = parseStoreDocument(raw, `Store file ${dataPath()}`);
       const normalized = normalizeStoreForRuntime(store);
       return normalized.store;
     } catch (error) {
@@ -155,7 +241,7 @@ async function readLegacyFileStoreForRedisSeed(): Promise<SuperReferralsStore | 
       throw error;
     }
   }
-  throw new Error("Unable to read legacy file store");
+  throw new Error(`Unable to read store file ${dataPath()}`);
 }
 
 async function readRedisStore(): Promise<SuperReferralsStore> {
@@ -301,7 +387,15 @@ function isLegacyDemoCustomer(customer: Customer) {
 }
 
 export async function writeStore(store: SuperReferralsStore) {
-  await writeRedisStoreDocument(store);
+  if (storeBackend() === "redis") {
+    await writeRedisStoreDocument(store);
+    return;
+  }
+  await writeFileStoreDocument(store);
+}
+
+async function writeFileStoreDocument(store: SuperReferralsStore) {
+  await writeJsonFile(dataPath(), store);
 }
 
 async function writeRedisStoreDocument(store: SuperReferralsStore) {
@@ -309,7 +403,14 @@ async function writeRedisStoreDocument(store: SuperReferralsStore) {
 }
 
 export async function mutateStore<T>(mutator: (store: SuperReferralsStore) => T | Promise<T>) {
-  return mutateRedisStore(mutator);
+  return storeBackend() === "redis" ? mutateRedisStore(mutator) : mutateFileStore(mutator);
+}
+
+async function mutateFileStore<T>(mutator: (store: SuperReferralsStore) => T | Promise<T>) {
+  const store = normalizeStoreForRuntime(await readFileStoreDocument() || emptyStore()).store;
+  const result = await mutator(store);
+  await writeFileStoreDocument(store);
+  return result;
 }
 
 async function mutateRedisStore<T>(mutator: (store: SuperReferralsStore) => T | Promise<T>) {
@@ -342,7 +443,13 @@ async function withRedisStoreLock<T>(operation: () => Promise<T>) {
 }
 
 export async function redisCommand<T>(command: Array<string | number>) {
-  const config = requireRedisRestConfig();
+  const config = optionalRedisRestConfig();
+  if (!config) {
+    if (shouldUseLocalKvFallback()) {
+      return localKvCommand<T>(command);
+    }
+    throw missingRedisConfigError();
+  }
   const response = await fetch(config.url, {
     method: "POST",
     headers: {
@@ -369,6 +476,157 @@ export async function redisCommand<T>(command: Array<string | number>) {
     return (body as { result: T }).result;
   }
   return body as T;
+}
+
+async function localKvCommand<T>(command: Array<string | number>) {
+  const operation = String(command[0] || "").toUpperCase();
+  switch (operation) {
+    case "GET":
+      return localKvGet<T>(String(command[1] || ""));
+    case "SET":
+      return localKvSet<T>(command);
+    case "DEL":
+      return localKvDel<T>(command.slice(1).map(String));
+    case "EVAL":
+      return localKvEval<T>(command);
+    default:
+      throw new Error(`Local KV fallback does not support Redis command ${operation || "(empty)"}.`);
+  }
+}
+
+async function localKvGet<T>(key: string) {
+  const document = await readLocalKvDocument();
+  const entry = document[key];
+  if (!entry || isLocalKvEntryExpired(entry)) {
+    if (entry) {
+      delete document[key];
+      await writeLocalKvDocument(document);
+    }
+    return null as T;
+  }
+  return entry.value as T;
+}
+
+async function localKvSet<T>(command: Array<string | number>) {
+  const key = String(command[1] || "");
+  const value = command[2];
+  const options = command.slice(3).map((item) => String(item));
+  const document = await readLocalKvDocument();
+  const existing = document[key];
+  const existingActive = Boolean(existing && !isLocalKvEntryExpired(existing));
+  if (hasRedisOption(options, "NX") && existingActive) {
+    return null as T;
+  }
+  if (existing && !existingActive) {
+    delete document[key];
+  }
+  const expiresAt = localKvExpiresAt(options);
+  document[key] = expiresAt ? { value, expiresAt } : { value };
+  await writeLocalKvDocument(document);
+  return "OK" as T;
+}
+
+async function localKvDel<T>(keys: string[]) {
+  const document = await readLocalKvDocument();
+  let deleted = 0;
+  for (const key of keys) {
+    if (document[key]) {
+      delete document[key];
+      deleted += 1;
+    }
+  }
+  if (deleted > 0) {
+    await writeLocalKvDocument(document);
+  }
+  return deleted as T;
+}
+
+async function localKvEval<T>(command: Array<string | number>) {
+  const script = String(command[1] || "");
+  if (script !== REDIS_LOCK_RELEASE_SCRIPT) {
+    throw new Error("Local KV fallback only supports the Redis lock release EVAL script.");
+  }
+  const keyCount = Number(command[2]);
+  if (keyCount !== 1) {
+    throw new Error("Local KV fallback only supports one Redis EVAL key.");
+  }
+  const key = String(command[3] || "");
+  const token = String(command[4] || "");
+  const document = await readLocalKvDocument();
+  const entry = document[key];
+  if (entry && !isLocalKvEntryExpired(entry) && String(entry.value) === token) {
+    delete document[key];
+    await writeLocalKvDocument(document);
+    return 1 as T;
+  }
+  return 0 as T;
+}
+
+async function readLocalKvDocument(): Promise<LocalKvDocument> {
+  try {
+    const raw = await fs.readFile(localKvPath(), "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new SyntaxError("Local KV document is not a JSON object");
+    }
+    const document = parsed as LocalKvDocument;
+    let changed = false;
+    for (const [key, entry] of Object.entries(document)) {
+      if (!entry || typeof entry !== "object" || isLocalKvEntryExpired(entry)) {
+        delete document[key];
+        changed = true;
+      }
+    }
+    if (changed) {
+      await writeLocalKvDocument(document);
+    }
+    return document;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      return {};
+    }
+    if (error instanceof SyntaxError) {
+      throw new Error(`Local KV file ${localKvPath()} contains invalid JSON. Stop the dev server and inspect or restore the file before continuing.`);
+    }
+    throw error;
+  }
+}
+
+async function writeLocalKvDocument(document: LocalKvDocument) {
+  await writeJsonFile(localKvPath(), document);
+}
+
+function isLocalKvEntryExpired(entry: LocalKvEntry) {
+  return typeof entry.expiresAt === "number" && entry.expiresAt <= Date.now();
+}
+
+function localKvExpiresAt(options: string[]) {
+  for (let index = 0; index < options.length; index += 1) {
+    const option = options[index].toUpperCase();
+    if (option === "EX") {
+      const seconds = Number(options[index + 1]);
+      return Number.isFinite(seconds) && seconds > 0 ? Date.now() + Math.floor(seconds * 1000) : undefined;
+    }
+    if (option === "PX") {
+      const milliseconds = Number(options[index + 1]);
+      return Number.isFinite(milliseconds) && milliseconds > 0 ? Date.now() + Math.floor(milliseconds) : undefined;
+    }
+  }
+  return undefined;
+}
+
+function hasRedisOption(options: string[], name: string) {
+  return options.some((option) => option.toUpperCase() === name);
+}
+
+async function writeJsonFile(filePath: string, value: unknown) {
+  const directory = path.dirname(filePath);
+  const basename = path.basename(filePath);
+  await fs.mkdir(directory, { recursive: true });
+  const tempPath = path.join(directory, `.${basename}.${process.pid}.${Date.now()}.tmp`);
+  await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await fs.rename(tempPath, filePath);
 }
 
 function extractRedisError(body: unknown) {

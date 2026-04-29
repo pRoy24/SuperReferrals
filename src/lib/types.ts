@@ -19,7 +19,8 @@ export type INFTPaidAction =
   | "add_subtitles"
   | "remove_subtitles"
   | "add_outro"
-  | "update_outro";
+  | "update_outro"
+  | "update_footer";
 
 export interface ModelPricingConfiguration {
   id: string;

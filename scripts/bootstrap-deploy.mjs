@@ -8,6 +8,15 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const defaultConfigPath = path.join(repoRoot, "deploy.json");
+const DEFAULT_REDIS_PLAN = "free";
+const REDIS_ENV_KEYS = [
+  "KV_REST_API_URL",
+  "KV_REST_API_TOKEN",
+  "KV_REST_API_READ_ONLY_TOKEN",
+  "UPSTASH_REDIS_REST_URL",
+  "UPSTASH_REDIS_REST_TOKEN",
+  "UPSTASH_REDIS_REST_READ_ONLY_TOKEN"
+];
 
 main();
 
@@ -26,7 +35,7 @@ function main() {
   const redisConfig = {
     integration: options.redisIntegration || config.vercel?.redis?.integration || "upstash/upstash-kv",
     resourceName: options.redisName || config.vercel?.redis?.resourceName || "superreferrals-redis",
-    plan: options.redisPlan || config.vercel?.redis?.plan || "free",
+    plan: options.redisPlan || config.vercel?.redis?.plan || DEFAULT_REDIS_PLAN,
     primaryRegion: options.redisRegion || config.vercel?.redis?.primaryRegion || "iad1",
     eviction: booleanString(config.vercel?.redis?.eviction, "false"),
     prodPack: booleanString(config.vercel?.redis?.prodPack, "false"),
@@ -35,12 +44,18 @@ function main() {
   const token = readToken();
 
   printHeader({ targetName, target, scope, project, blobConfig, redisConfig, dryRun: options.dryRun });
-  validateEnvFile(target, config.zeroG || {});
+  if (options.skipEnvValidation) {
+    console.log("0G required env: skipped by flag.");
+  } else {
+    validateEnvFile(target, config.zeroG || {});
+  }
 
   if (!options.skipVercel) {
     ensureVercelCliAuth({ token, options });
     ensureVercelProjectLinked({ scope, project, token, options });
-    if (!options.skipRedis) {
+    if (!options.skipRedis && target.redisFromTarget) {
+      reuseRedisEnvFromTarget({ config, sourceTargetName: target.redisFromTarget, target, token, options });
+    } else if (!options.skipRedis) {
       ensureUpstashRedis({ redisConfig, target, scope, token, options });
     }
     if (blobConfig.enabled && !options.skipBlob) {
@@ -53,7 +68,14 @@ function main() {
     }
   }
 
-  printNextSteps({ targetName, target, blobConfig, redisConfig, skippedVercel: options.skipVercel });
+  printNextSteps({
+    targetName,
+    target,
+    blobConfig,
+    redisConfig,
+    skippedVercel: options.skipVercel,
+    skippedEnvValidation: options.skipEnvValidation
+  });
 }
 
 function parseArgs(args) {
@@ -70,6 +92,7 @@ function parseArgs(args) {
     skipBlob: false,
     skipRedis: false,
     skipEnvSync: true,
+    skipEnvValidation: false,
     useGlobalToken: false,
     acceptMarketplaceTerms: true,
     redisIntegration: "",
@@ -135,6 +158,9 @@ function parseArgs(args) {
       case "skip-env-sync":
         options.skipEnvSync = true;
         break;
+      case "skip-env-validation":
+        options.skipEnvValidation = true;
+        break;
       case "sync-env":
         options.skipEnvSync = false;
         break;
@@ -197,7 +223,8 @@ function resolveTarget(config, targetName, options) {
     envFile: target.envFile || `.env.${targetName}`,
     fallbackEnvFiles: Array.isArray(target.fallbackEnvFiles) ? target.fallbackEnvFiles : [],
     environment: target.environment || (targetName === "production" ? "production" : "preview"),
-    branch: target.branch || ""
+    branch: target.branch || "",
+    redisFromTarget: target.redisFromTarget || ""
   };
 }
 
@@ -352,11 +379,25 @@ function ensureVercelCliAuth({ token, options }) {
     console.log(token ? "Vercel auth: using token from env/file." : "Vercel auth: using active CLI login.");
     return;
   }
+  if (hasActiveVercelCliLogin({ options })) {
+    console.log("Vercel auth: using active CLI login.");
+    return;
+  }
   if (!options.login) {
     fail("Missing Vercel token or active login. Set VERCEL_TOKEN, put it in .vercel-token, pass --use-global-token, or omit --no-login.");
   }
   console.log("Vercel auth: starting interactive login. Complete the browser/email challenge if Vercel asks for it.");
   runVercelInteractive(["login"], { token: "", options });
+}
+
+function hasActiveVercelCliLogin({ options }) {
+  const result = runVercel(["whoami"], {
+    token: "",
+    options,
+    allowFailure: true,
+    secrets: []
+  });
+  return result.status === 0;
 }
 
 function ensureVercelProjectLinked({ scope, project, token, options }) {
@@ -465,7 +506,7 @@ function ensureUpstashRedis({ redisConfig, target, scope, token, options }) {
     });
   }
 
-  console.log("Upstash Redis: creating or connecting free Redis resource.");
+  console.log(`Upstash Redis: creating or connecting Redis resource on plan ${redisConfig.plan}.`);
   const result = runVercel(installArgs, { token, options, allowFailure: true });
   const output = `${result.stdout}\n${result.stderr}`.trim();
   if (result.status === 0) {
@@ -485,7 +526,64 @@ function ensureUpstashRedis({ redisConfig, target, scope, token, options }) {
         `Then rerun this bootstrap.\n\n${redact(output, [token])}`
     );
   }
+  if (/Billing plan not found/i.test(output)) {
+    fail(
+      `Upstash Redis setup failed because plan "${redisConfig.plan}" is not available for this Vercel integration.\n` +
+        `Use --redis-plan paid or one of the plans listed by Vercel, then rerun bootstrap.\n\n${redact(output, [token])}`
+    );
+  }
   fail(`Upstash Redis setup failed.\n${redact(output, [token])}`);
+}
+
+function reuseRedisEnvFromTarget({ config, sourceTargetName, target, token, options }) {
+  const sourceTarget = resolveTarget(config, sourceTargetName, options);
+  const sourceLabel = `${sourceTargetName} (${sourceTarget.environment}${sourceTarget.branch ? `/${sourceTarget.branch}` : ""})`;
+  const targetLabel = `${target.environment}${target.branch ? `/${target.branch}` : ""}`;
+  if (options.dryRun) {
+    console.log(`Would reuse Redis env from ${sourceLabel} for ${targetLabel}: ${REDIS_ENV_KEYS.join(", ")}`);
+    return;
+  }
+
+  const dir = mkdtempSync(path.join(os.tmpdir(), "superreferrals-vercel-env-"));
+  const envPath = path.join(dir, `${sourceTargetName}.env`);
+  try {
+    console.log(`Upstash Redis: reusing Redis env from ${sourceLabel} for ${targetLabel}.`);
+    runVercel([
+      "env",
+      "pull",
+      envPath,
+      "--environment",
+      sourceTarget.environment,
+      ...(sourceTarget.branch ? ["--git-branch", sourceTarget.branch] : []),
+      "--yes"
+    ], { token, options, secrets: [token] });
+
+    const sourceVariables = parseEnv(readFileSync(envPath, "utf8"));
+    const redisVariables = REDIS_ENV_KEYS
+      .map((key) => [key, sourceVariables.get(key)])
+      .filter(([, value]) => typeof value === "string" && value.length > 0);
+    const hasKvPair = sourceVariables.get("KV_REST_API_URL") && sourceVariables.get("KV_REST_API_TOKEN");
+    const hasUpstashPair = sourceVariables.get("UPSTASH_REDIS_REST_URL") && sourceVariables.get("UPSTASH_REDIS_REST_TOKEN");
+    if (!hasKvPair && !hasUpstashPair) {
+      fail(`No Redis REST env vars were found in ${sourceLabel}. Run staging bootstrap first or add KV_REST_API_URL and KV_REST_API_TOKEN manually.`);
+    }
+
+    for (const [key, value] of redisVariables) {
+      runVercel([
+        "env",
+        "add",
+        key,
+        target.environment,
+        ...(target.branch ? [target.branch] : []),
+        "--force",
+        "--yes",
+        "--sensitive"
+      ], { token, options, input: value, secrets: [token, value] });
+      console.log(`Production Redis env set: ${key}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 function hasExistingUpstashRedisResource({ redisConfig, listArgs, token, options }) {
@@ -605,12 +703,13 @@ function quoteEnvValue(value) {
   return JSON.stringify(text);
 }
 
-function runVercel(args, { token, options, allowFailure = false }) {
+function runVercel(args, { token, options, allowFailure = false, input, secrets = [token] }) {
   const vercelBin = process.env.VERCEL_CLI_BIN || "npx";
   const vercelPrefix = process.env.VERCEL_CLI_BIN ? [] : ["--yes", "vercel@latest"];
   const child = spawnSync(vercelBin, [...vercelPrefix, ...args, "--non-interactive"], {
     cwd: repoRoot,
     encoding: "utf8",
+    input,
     env: {
       ...process.env,
       ...(token ? { VERCEL_TOKEN: token } : {}),
@@ -621,10 +720,10 @@ function runVercel(args, { token, options, allowFailure = false }) {
     fail(`Unable to run Vercel CLI: ${child.error.message}`);
   }
   if (child.status !== 0 && !allowFailure) {
-    fail(redact([child.stdout, child.stderr].filter(Boolean).join("\n"), [token]));
+    fail(redact([child.stdout, child.stderr].filter(Boolean).join("\n"), secrets));
   }
   if (options.verbose && child.stdout.trim()) {
-    console.log(redact(child.stdout.trim(), [token]));
+    console.log(redact(child.stdout.trim(), secrets));
   }
   return child;
 }
@@ -651,19 +750,27 @@ function runVercelInteractive(args, { token, options }) {
   }
 }
 
-function printNextSteps({ targetName, target, blobConfig, redisConfig, skippedVercel }) {
+function printNextSteps({ targetName, target, blobConfig, redisConfig, skippedVercel, skippedEnvValidation }) {
   console.log("\nBootstrap checklist:");
-  console.log("1. 0G env was validated from the target env file.");
+  console.log(skippedEnvValidation
+    ? "1. 0G env validation was skipped; validate before running live 0G flows."
+    : "1. 0G env was validated from the target env file.");
   if (skippedVercel) {
     console.log("2. Vercel steps were skipped by flag.");
   } else {
-    console.log(`2. Upstash Redis requested: ${redisConfig.resourceName}.`);
+    console.log(target.redisFromTarget
+      ? `2. Redis env reused from ${target.redisFromTarget}; production/staging stay separated by Redis key namespace.`
+      : `2. Upstash Redis requested: ${redisConfig.resourceName}.`);
     if (blobConfig.enabled) {
       console.log(`3. Private Vercel Blob store requested: ${blobConfig.storeName}.`);
-      console.log("4. Confirm the linked Vercel project has KV_REST_API_URL, KV_REST_API_TOKEN, and BLOB_READ_WRITE_TOKEN for the target environment.");
+      console.log(target.redisFromTarget
+        ? "4. Confirm the target environment has copied KV_REST_API_URL/KV_REST_API_TOKEN plus BLOB_READ_WRITE_TOKEN if Blob is enabled."
+        : "4. The linked Vercel integration should inject KV_REST_API_URL, KV_REST_API_TOKEN, and BLOB_READ_WRITE_TOKEN for the target environment.");
     } else {
       console.log("3. Private Vercel Blob is disabled; use Redis for app state and 0G for render artifacts/metadata.");
-      console.log("4. Confirm the linked Vercel project has KV_REST_API_URL and KV_REST_API_TOKEN for the target environment.");
+      console.log(target.redisFromTarget
+        ? "4. Confirm the target environment has copied KV_REST_API_URL and KV_REST_API_TOKEN from the source target."
+        : "4. The linked Vercel integration should inject KV_REST_API_URL and KV_REST_API_TOKEN for the target environment.");
     }
     console.log(`5. Redeploy ${targetName} after storage/env changes so the running deployment sees new values.`);
   }
@@ -685,7 +792,7 @@ function usage(exitCode) {
 Guides a new operator through durable storage setup:
   - validates 0G env in the target env file
   - logs into/links Vercel when needed
-  - creates a free Upstash Redis resource
+  - creates an Upstash Redis resource
   - creates a private Vercel Blob store only when enabled in deploy.json
   - can run repository Vercel env sync when --sync-env is passed
 
@@ -704,13 +811,14 @@ Options:
   --skip-blob              Skip Blob store creation
   --sync-env               Also sync the target env file to Vercel after storage setup
   --skip-env-sync          Do not sync env vars to Vercel (default)
+  --skip-env-validation    Provision Vercel storage without requiring local 0G env files
   --accept-marketplace-terms
                            Accept Vercel Marketplace terms for Redis integration (default)
   --no-accept-marketplace-terms
                            Do not run Marketplace terms acceptance automatically
   --redis-integration <id> Redis integration slug, default upstash/upstash-kv
   --redis-name <name>      Redis resource name
-  --redis-plan <plan>      Redis plan, default free
+  --redis-plan <plan>      Redis plan, default ${DEFAULT_REDIS_PLAN}
   --redis-region <region>  Redis primary region
   --verbose                Print extra command output
 `);

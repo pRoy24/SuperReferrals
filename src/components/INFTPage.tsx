@@ -1,6 +1,6 @@
 "use client";
 
-import { Cable, Captions, ChevronDown, Copy, Download, ExternalLink, ImagePlus, Languages, Link2, RefreshCw, Send, Share2, Wallet } from "lucide-react";
+import { Cable, Captions, ChevronDown, Copy, Download, ExternalLink, ImagePlus, Languages, Link2, PanelBottom, RefreshCw, Send, Share2, Wallet } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
 import {
@@ -36,7 +36,7 @@ type ActionPaymentFlow = {
   txHash?: string;
 };
 
-type VideoEditAction = "translate" | "add_subtitles" | "update_outro";
+type VideoEditAction = "translate" | "add_subtitles" | "update_outro" | "update_footer";
 
 const terminalActionStatuses = new Set(["COMPLETED", "FAILED", "CANCELLED", "REFUNDED"]);
 
@@ -57,6 +57,10 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [updateOutroAnimation, setUpdateOutroAnimation] = useState(true);
   const [updateOutroFocusArea, setUpdateOutroFocusArea] = useState(false);
   const [updateOutroFocusAreaJson, setUpdateOutroFocusAreaJson] = useState(JSON.stringify({ x: 680, y: 296, width: 432, height: 432 }, null, 2));
+  const [updateFooterMode, setUpdateFooterMode] = useState<"update" | "remove">("update");
+  const [updateFooterUrl, setUpdateFooterUrl] = useState("");
+  const [updateFooterTitle, setUpdateFooterTitle] = useState("");
+  const [updateFooterAnimation, setUpdateFooterAnimation] = useState(true);
   const [shareMessage, setShareMessage] = useState("");
   const [lastVideoOperation, setLastVideoOperation] = useState("");
   const [actionPoll, setActionPoll] = useState<ActionPollState | null>(null);
@@ -70,6 +74,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [actionPaymentFlow, setActionPaymentFlow] = useState<ActionPaymentFlow>({ status: "idle", message: "" });
   const publicInftPath = `/inft/${activeInft.id}`;
   const updateOutroRequiredValue = updateOutroMode === "cta" ? updateOutroCtaUrl.trim() : updateOutroImageUrl.trim();
+  const updateFooterRequiredValue = updateFooterMode === "remove" ? "remove" : updateFooterUrl.trim();
 
   useEffect(() => {
     setActiveInft(inft);
@@ -610,6 +615,40 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     runPaidAction("update_outro", payload).catch(() => undefined);
   }
 
+  function buildUpdateFooterPayload() {
+    if (updateFooterMode === "remove") {
+      return {
+        mode: "remove",
+        remove_footer: true,
+        add_footer_animation: false
+      };
+    }
+    const footerUrl = updateFooterUrl.trim();
+    if (!footerUrl) {
+      throw new Error("Footer URL is required.");
+    }
+    const footerMetadata = {
+      url: footerUrl,
+      ...(updateFooterTitle.trim() ? { title: updateFooterTitle.trim() } : {})
+    };
+    return {
+      mode: "update",
+      add_footer_animation: updateFooterAnimation,
+      footer_metadata: [footerMetadata]
+    };
+  }
+
+  function updateFooter() {
+    let payload: Record<string, unknown>;
+    try {
+      payload = buildUpdateFooterPayload();
+    } catch (error) {
+      setActionResult(error instanceof Error ? error.message : "Invalid footer update input");
+      return;
+    }
+    runPaidAction("update_footer", payload).catch(() => undefined);
+  }
+
   function toggleVideoAction(action: VideoEditAction) {
     setExpandedVideoAction((current) => current === action ? "" : action);
     setActionQuote(null);
@@ -730,6 +769,18 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                 <small>{formatActionPrice(customer, "update_outro", settlementToken?.symbol)}</small>
                 <ChevronDown size={16} aria-hidden="true" />
               </button>
+              <button
+                className={`inft-action-choice ${expandedVideoAction === "update_footer" ? "active" : ""}`}
+                type="button"
+                onClick={() => toggleVideoAction("update_footer")}
+                disabled={videoActionDisabled || !selectedPaymentToken || !settlementToken}
+                aria-expanded={expandedVideoAction === "update_footer"}
+              >
+                <PanelBottom size={16} />
+                <span>Update Footer</span>
+                <small>{formatActionPrice(customer, "update_footer", settlementToken?.symbol)}</small>
+                <ChevronDown size={16} aria-hidden="true" />
+              </button>
             </div>
             {expandedVideoAction && selectedPaymentToken && settlementToken && (
               <div className="inft-action-detail">
@@ -846,6 +897,49 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                         setActionQuote(null);
                       }}
                       onPay={updateOutro}
+                    />
+                  </div>
+                )}
+                {expandedVideoAction === "update_footer" && (
+                  <div className="form-grid">
+                    <SelectField
+                      label="Footer action"
+                      value={updateFooterMode}
+                      options={[
+                        { value: "update", label: "Update footer" },
+                        { value: "remove", label: "Remove footer" }
+                      ]}
+                      onChange={(value) => setUpdateFooterMode(value as "update" | "remove")}
+                    />
+                    {updateFooterMode === "update" && (
+                      <>
+                        <TextField label="Footer URL" value={updateFooterUrl} onChange={setUpdateFooterUrl} full />
+                        <TextField label="Footer title" value={updateFooterTitle} onChange={setUpdateFooterTitle} />
+                        <label className="toggle-row">
+                          <input
+                            type="checkbox"
+                            checked={updateFooterAnimation}
+                            onChange={(event) => setUpdateFooterAnimation(event.target.checked)}
+                          />
+                          Animate footer
+                        </label>
+                      </>
+                    )}
+                    <INFTActionPayControl
+                      icon={<PanelBottom size={16} />}
+                      label={updateFooterMode === "remove" ? "Remove Footer" : "Update Footer"}
+                      price={formatActionPrice(customer, "update_footer", settlementToken.symbol)}
+                      tokens={selectablePaymentTokens}
+                      selectedSymbol={paymentCurrency}
+                      settlementToken={settlementToken}
+                      disabled={videoActionDisabled || !updateFooterRequiredValue}
+                      busy={busy === "update_footer"}
+                      primary
+                      onSelect={(symbol) => {
+                        setPaymentCurrency(symbol);
+                        setActionQuote(null);
+                      }}
+                      onPay={updateFooter}
                     />
                   </div>
                 )}

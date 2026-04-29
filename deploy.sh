@@ -4,21 +4,25 @@ set -euo pipefail
 REMOTE="${DEPLOY_REMOTE:-origin}"
 DEVELOP_BRANCH="${DEPLOY_DEVELOP_BRANCH:-develop}"
 MAIN_BRANCH="${DEPLOY_MAIN_BRANCH:-main}"
+SKIP_BOOTSTRAP="${DEPLOY_SKIP_BOOTSTRAP:-false}"
+BOOTSTRAP_ARGS="${DEPLOY_BOOTSTRAP_ARGS:-}"
 
 PRODUCTION=false
 CUSTOM_MESSAGE=""
 
 usage() {
   cat <<USAGE
-Usage: ./deploy.sh [--production] [-m "commit message"]
+Usage: ./deploy.sh [--production] [--skip-bootstrap] [-m "commit message"]
 
-Commits and pushes all current changes to ${DEVELOP_BRANCH}.
+Bootstraps Vercel storage, then commits and pushes all current changes to ${DEVELOP_BRANCH}.
 With --production, also merges ${DEVELOP_BRANCH} into ${MAIN_BRANCH} and pushes ${MAIN_BRANCH}.
 
 Environment overrides:
   DEPLOY_REMOTE          Git remote name (default: origin)
   DEPLOY_DEVELOP_BRANCH  Development branch (default: develop)
   DEPLOY_MAIN_BRANCH     Production branch (default: main)
+  DEPLOY_SKIP_BOOTSTRAP  Set true to skip deploy storage bootstrap
+  DEPLOY_BOOTSTRAP_ARGS  Extra args for deploy:setup, for example "--scope my-team"
 USAGE
 }
 
@@ -31,6 +35,9 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --production)
       PRODUCTION=true
+      ;;
+    --skip-bootstrap)
+      SKIP_BOOTSTRAP=true
       ;;
     -m|--message)
       [[ $# -ge 2 ]] || die "missing value for $1"
@@ -50,6 +57,32 @@ done
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repository"
 cd "$ROOT"
+
+is_truthy() {
+  case "$1" in
+    1|true|TRUE|yes|YES|on|ON)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+run_bootstrap() {
+  local target="$1"
+  if is_truthy "$SKIP_BOOTSTRAP"; then
+    echo "Skipping deploy storage bootstrap for $target"
+    return
+  fi
+
+  echo "Bootstrapping Vercel storage for $target"
+  if [[ -n "$BOOTSTRAP_ARGS" ]]; then
+    npm run "deploy:setup:$target" -- --skip-env-validation $BOOTSTRAP_ARGS
+  else
+    npm run "deploy:setup:$target" -- --skip-env-validation
+  fi
+}
 
 current_branch() {
   git branch --show-current
@@ -199,6 +232,11 @@ promote_to_main() {
   git push "$REMOTE" "$MAIN_BRANCH"
 }
 
+if [[ "$PRODUCTION" == "true" ]]; then
+  run_bootstrap production
+else
+  run_bootstrap staging
+fi
 commit_develop
 push_develop
 

@@ -76,6 +76,13 @@ export const SAMSAR_AGENT_CAPABILITIES: AgentCapability[] = [
     requiredPillars: ["compute", "storage", "chain"]
   },
   {
+    id: "footer_mutation",
+    label: "Footer mutation",
+    description: "Update or remove a bottom CTA footer for an existing video session.",
+    samsarEndpoint: "/v2/update_footer_image",
+    requiredPillars: ["compute", "storage", "chain"]
+  },
+  {
     id: "add_subtitles",
     label: "Add subtitles",
     description: "Clone a session with subtitle or transcript overlays added.",
@@ -124,7 +131,7 @@ const AGENT_BLUEPRINTS: AgentBlueprint[] = [
     name: "SuperReferrals Director",
     role: "video generation director",
     personality: "Commercial, visual, and fast to pick the simplest effective video route.",
-    capabilities: ["image_list_to_video", "translate_video", "join_videos", "outro_mutation", "add_subtitles", "remove_subtitles"],
+    capabilities: ["image_list_to_video", "translate_video", "join_videos", "outro_mutation", "footer_mutation", "add_subtitles", "remove_subtitles"],
     priceUsd: 0.75
   },
   {
