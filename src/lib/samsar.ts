@@ -193,6 +193,10 @@ export async function getSamsarStatus(
       type: "video",
       result_url: MOCK_VIDEO_URL,
       result_urls: [MOCK_VIDEO_URL],
+      has_subtitles: true,
+      has_footer: false,
+      result_language: "en",
+      languages: ["en"],
       updated_at: nowIso()
     };
   }

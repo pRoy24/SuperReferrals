@@ -76,6 +76,7 @@ import type {
   INFTAttribute,
   INFTRecord,
   PaymentQuote,
+  SamsarVideoRenderMetadata,
   SubAccount,
   VideoAspectRatio,
   VideoModel
@@ -878,8 +879,10 @@ export async function syncGeneration(id: string) {
       }));
     }
 
+    const samsarVideoMetadata = buildSamsarVideoRenderMetadata(status, generation);
     const generationForFinalize = await mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
       samsarSessionId: internalSessionId || generation.samsarSessionId,
+      samsarVideoMetadata,
       resultUrl,
       errorMessage: undefined
     }));
@@ -1114,13 +1117,18 @@ async function finalizeGenerationUnlocked(
     return markGenerationFinalizedFromExistingINFT(latestGeneration, resultUrl, existingInft, feed);
   }
 
+  const samsarVideoMetadata = buildSamsarVideoRenderMetadata(undefined, latestGeneration);
   const videoArtifact = latestGeneration.storage?.video || await persistRemoteVideoToZeroG(resultUrl);
   const generationWithVideo = await saveGenerationFinalizationProgress(latestGeneration.id, resultUrl, {
     video: videoArtifact,
     metadata: latestGeneration.storage?.metadata
-  });
+  }, samsarVideoMetadata);
   const generationForMetadata = generationWithVideo || latestGeneration;
-  const attributes = buildINFTAttributes(generationForMetadata, customer, subAccount);
+  const generationWithSamsarMetadata: Generation = {
+    ...generationForMetadata,
+    ...(samsarVideoMetadata ? { samsarVideoMetadata } : {})
+  };
+  const attributes = buildINFTAttributes(generationWithSamsarMetadata, customer, subAccount);
   const inftTitle = resolveINFTTitle(generationForMetadata, subAccount);
   const metadata = {
     name: inftTitle,
@@ -1140,8 +1148,10 @@ async function finalizeGenerationUnlocked(
       referrerUrl: `${customer.referrerBaseUrl}/r/${subAccount.referrerCode}`,
       ownerWallet: subAccount.wallet,
       userProfile: subAccount.blockchainRegistration,
+      samsarVideoMetadata,
       metadata: generationForMetadata.input.metadata || {}
     },
+    samsar_video_metadata: samsarVideoMetadata,
     storage: {
       video: videoArtifact
     }
@@ -1150,7 +1160,7 @@ async function finalizeGenerationUnlocked(
   await saveGenerationFinalizationProgress(generationForMetadata.id, resultUrl, {
     video: videoArtifact,
     metadata: metadataArtifact
-  });
+  }, samsarVideoMetadata);
   const tokenMetadataUri =
     buildZeroGStorageGatewayUrl(metadataArtifact.rootHash) ||
     metadataArtifact.uri;
@@ -1176,6 +1186,7 @@ async function finalizeGenerationUnlocked(
     storageRootHash: videoArtifact.rootHash,
     metadataRootHash: metadataArtifact.rootHash,
     metadataUri: tokenMetadataUri,
+    samsarVideoMetadata,
     tokenId: mint.tokenId,
     contractAddress: mint.contractAddress,
     mintTxHash: mint.txHash,
@@ -1205,6 +1216,7 @@ async function finalizeGenerationUnlocked(
         video: videoArtifact,
         metadata: metadataArtifact
       },
+      samsarVideoMetadata,
       inftId: inft.id,
       errorMessage: undefined
     };
@@ -1308,12 +1320,14 @@ async function publishGenerationSamsarPublication(input: {
 async function saveGenerationFinalizationProgress(
   generationId: string,
   resultUrl: string,
-  storage: Generation["storage"]
+  storage: Generation["storage"],
+  samsarVideoMetadata?: SamsarVideoRenderMetadata
 ) {
   return mutateStore((mutableStore) => updateGeneration(mutableStore, generationId, {
     status: "PROCESSING",
     resultUrl,
     storage,
+    ...(samsarVideoMetadata ? { samsarVideoMetadata } : {}),
     errorMessage: undefined
   }));
 }
@@ -1352,6 +1366,7 @@ async function markGenerationFinalizedFromExistingINFT(
       resultUrl,
       storage,
       inftId: generation.inftId || inft?.id,
+      samsarVideoMetadata: generation.samsarVideoMetadata || inft?.samsarVideoMetadata,
       errorMessage: undefined
     };
     if (feed) {
@@ -1755,6 +1770,7 @@ async function finalizeINFTActionResult({
     const derivativeGenerationId = createId("gen");
     const actionName = action || "video_session_edit";
     const metadataTitle = buildDerivativeINFTTitle(latestInft, actionName);
+    const samsarVideoMetadata = buildSamsarVideoRenderMetadata(status, latestGeneration);
     const sourceMetadata = isRecord(latestGeneration.input.metadata) ? latestGeneration.input.metadata : {};
     const derivativeInput: GenerationInput = {
       ...latestGeneration.input,
@@ -1766,7 +1782,8 @@ async function finalizeINFTActionResult({
         sourceVideoUrl: latestInft.videoUrl,
         derivedFromAction: actionName,
         samsarActionRequestId: requestId,
-        samsarActionSessionId: actionSessionId || requestId
+        samsarActionSessionId: actionSessionId || requestId,
+        samsarVideoMetadata
       }
     };
     const derivativeGeneration: Generation = {
@@ -1779,6 +1796,7 @@ async function finalizeINFTActionResult({
       payment: buildDerivativeActionPayment(latestGeneration.payment, customer, actionName),
       samsarRequestId: requestId,
       samsarSessionId: actionSessionId || requestId,
+      samsarVideoMetadata,
       resultUrl,
       inftId: derivativeGenerationId,
       createdAt: timestamp,
@@ -1812,8 +1830,10 @@ async function finalizeINFTActionResult({
         referrerUrl: `${customer.referrerBaseUrl}/r/${subAccount.referrerCode}`,
         ownerWallet: subAccount.wallet,
         userProfile: subAccount.blockchainRegistration,
+        samsarVideoMetadata,
         metadata: derivativeInput.metadata || {}
       },
+      samsar_video_metadata: samsarVideoMetadata,
       storage: {
         video: videoArtifact
       }
@@ -1843,6 +1863,7 @@ async function finalizeINFTActionResult({
       storageRootHash: videoArtifact.rootHash,
       metadataRootHash: metadataArtifact.rootHash,
       metadataUri: tokenMetadataUri,
+      samsarVideoMetadata,
       tokenId: mint.tokenId,
       contractAddress: mint.contractAddress,
       mintTxHash: mint.txHash,
@@ -2504,6 +2525,204 @@ function firstNumber(record: Record<string, unknown> | undefined, keys: string[]
   return null;
 }
 
+const SAMSAR_VIDEO_METADATA_KEYS = [
+  "has_subtitles",
+  "hasSubtitles",
+  "enable_subtitles",
+  "enableSubtitles",
+  "has_footer",
+  "hasFooter",
+  "add_footer_animation",
+  "addFooterAnimation",
+  "footer_metadata",
+  "footerMetadata",
+  "footer_logo_image_path",
+  "footerLogoImagePath",
+  "footer_cta_text",
+  "footerCtaText",
+  "footer_cta_url",
+  "footerCtaUrl",
+  "footer_cta_logo",
+  "footerCtaLogo",
+  "result_language",
+  "resultLanguage",
+  "session_language",
+  "sessionLanguage",
+  "language",
+  "language_code",
+  "languageCode",
+  "langauge",
+  "language_string",
+  "languageString",
+  "languages",
+  "langauges",
+  "result_languages",
+  "resultLanguages",
+  "result_langauges",
+  "language_codes",
+  "languageCodes",
+  "provider",
+  "type"
+] as const;
+
+function buildSamsarVideoRenderMetadata(
+  status?: Record<string, unknown>,
+  generation?: Generation
+): SamsarVideoRenderMetadata | undefined {
+  const existing = sanitizeSamsarVideoMetadata(generation?.samsarVideoMetadata);
+  const metadata: SamsarVideoRenderMetadata = { ...existing };
+
+  if (status) {
+    for (const key of SAMSAR_VIDEO_METADATA_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(status, key)) {
+        const value = sanitizeSamsarMetadataValue(status[key]);
+        if (value !== undefined) {
+          (metadata as Record<string, unknown>)[key] = value;
+        }
+      }
+    }
+  }
+
+  const hasSubtitles = firstBooleanLike(
+    firstKnownValue(status, ["has_subtitles", "hasSubtitles", "enable_subtitles", "enableSubtitles"]),
+    firstKnownValue(existing, ["has_subtitles", "hasSubtitles", "enable_subtitles", "enableSubtitles"]),
+    generation?.input.enable_subtitles
+  );
+  if (hasSubtitles !== undefined) {
+    metadata.has_subtitles = hasSubtitles;
+  }
+
+  const hasFooter = firstBooleanLike(
+    firstKnownValue(status, ["has_footer", "hasFooter"]),
+    firstKnownValue(existing, ["has_footer", "hasFooter"]),
+    firstKnownValue(status, ["add_footer_animation", "addFooterAnimation"]),
+    firstKnownValue(existing, ["add_footer_animation", "addFooterAnimation"]),
+    generation?.input.add_footer_animation,
+    generation ? Array.isArray(generation.input.footer_metadata) && generation.input.footer_metadata.length > 0 : undefined
+  );
+  if (hasFooter !== undefined) {
+    metadata.has_footer = hasFooter;
+  }
+
+  const resultLanguage = firstSamsarLanguage(
+    firstKnownValue(status, ["result_language", "resultLanguage", "session_language", "sessionLanguage", "language", "language_code", "languageCode", "langauge"]),
+    firstKnownValue(existing, ["result_language", "resultLanguage", "session_language", "sessionLanguage", "language", "language_code", "languageCode", "langauge"]),
+    generation?.input.language
+  );
+  if (resultLanguage) {
+    metadata.result_language = resultLanguage;
+  }
+
+  const languages = normalizeSamsarLanguages(
+    firstKnownValue(status, ["languages", "langauges", "result_languages", "resultLanguages", "result_langauges", "language_codes", "languageCodes"]),
+    existing.languages,
+    resultLanguage
+  );
+  if (languages.length > 0) {
+    metadata.languages = languages;
+  }
+
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+function sanitizeSamsarVideoMetadata(value: unknown): SamsarVideoRenderMetadata {
+  if (!isRecord(value)) {
+    return {};
+  }
+  const metadata: SamsarVideoRenderMetadata = {};
+  for (const [key, item] of Object.entries(value)) {
+    const sanitized = sanitizeSamsarMetadataValue(item);
+    if (sanitized !== undefined) {
+      (metadata as Record<string, unknown>)[key] = sanitized;
+    }
+  }
+  return metadata;
+}
+
+function sanitizeSamsarMetadataValue(value: unknown): unknown {
+  if (value === null || ["string", "number", "boolean"].includes(typeof value)) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeSamsarMetadataValue(item))
+      .filter((item) => item !== undefined);
+  }
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .map(([key, item]) => [key, sanitizeSamsarMetadataValue(item)] as const)
+        .filter(([, item]) => item !== undefined)
+    );
+  }
+  return undefined;
+}
+
+function firstKnownValue(record: Record<string, unknown> | undefined, keys: string[]) {
+  if (!record) {
+    return undefined;
+  }
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) {
+      return record[key];
+    }
+  }
+  return undefined;
+}
+
+function firstBooleanLike(...values: unknown[]): boolean | null | undefined {
+  for (const value of values) {
+    if (value === null) {
+      return null;
+    }
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (["true", "1", "yes"].includes(normalized)) {
+        return true;
+      }
+      if (["false", "0", "no"].includes(normalized)) {
+        return false;
+      }
+    }
+  }
+  return undefined;
+}
+
+function firstSamsarLanguage(...values: unknown[]) {
+  for (const value of values) {
+    const languages = normalizeSamsarLanguages(value);
+    if (languages[0]) {
+      return languages[0];
+    }
+  }
+  return "";
+}
+
+function normalizeSamsarLanguages(...values: unknown[]): string[] {
+  const languages: string[] = [];
+  const addLanguage = (value: unknown) => {
+    if (typeof value !== "string") {
+      return;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized && normalized !== "auto" && !languages.includes(normalized)) {
+      languages.push(normalized);
+    }
+  };
+
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      value.forEach(addLanguage);
+    } else {
+      addLanguage(value);
+    }
+  }
+  return languages;
+}
+
 function optionalBooleanField(key: string, ...values: unknown[]) {
   for (const value of values) {
     if (typeof value === "boolean") {
@@ -2518,7 +2737,7 @@ function buildINFTAttributes(
   customer: Customer,
   subAccount: SubAccount
 ): INFTAttribute[] {
-  return [
+  const attributes: INFTAttribute[] = [
     { trait_type: "customer", value: customer.name },
     { trait_type: "sub_account", value: subAccount.username || subAccount.id },
     { trait_type: "referrer_code", value: subAccount.referrerCode },
@@ -2533,6 +2752,22 @@ function buildINFTAttributes(
     { trait_type: "samsar_request_id", value: generation.samsarRequestId || "" },
     { trait_type: "samsar_session_id", value: generation.samsarSessionId || "" }
   ];
+  const samsarVideoMetadata = generation.samsarVideoMetadata;
+  if (samsarVideoMetadata) {
+    if (samsarVideoMetadata.has_subtitles !== undefined) {
+      attributes.push({ trait_type: "has_subtitles", value: samsarVideoMetadata.has_subtitles ?? "" });
+    }
+    if (samsarVideoMetadata.has_footer !== undefined) {
+      attributes.push({ trait_type: "has_footer", value: samsarVideoMetadata.has_footer ?? "" });
+    }
+    if (typeof samsarVideoMetadata.result_language === "string" && samsarVideoMetadata.result_language) {
+      attributes.push({ trait_type: "result_language", value: samsarVideoMetadata.result_language });
+    }
+    if (Array.isArray(samsarVideoMetadata.languages) && samsarVideoMetadata.languages.length > 0) {
+      attributes.push({ trait_type: "languages", value: samsarVideoMetadata.languages.join(",") });
+    }
+  }
+  return attributes;
 }
 
 function firstImageUrl(input: GenerationInput) {

@@ -13,8 +13,8 @@ type MosaicTileLayout = {
 };
 
 type MosaicLayout = {
-  columns: number;
   height: number;
+  rows: number;
   tiles: Record<string, MosaicTileLayout>;
 };
 
@@ -47,15 +47,10 @@ export default function VideoMosaic({
   showFeedLink = true,
   showInftLink = true
 }: VideoMosaicProps) {
-  const rowLimit = maxRows ? maxRows * 3 : undefined;
-  const visibleLimit = [limit, rowLimit]
-    .filter((value): value is number => typeof value === "number")
-    .reduce<number | undefined>((smallest, value) => smallest === undefined ? value : Math.min(smallest, value), undefined);
   const visibleItems = useMemo(
-    () => typeof visibleLimit === "number" ? items.slice(0, visibleLimit) : items,
-    [items, visibleLimit]
+    () => typeof limit === "number" ? items.slice(0, limit) : items,
+    [items, limit]
   );
-  const hiddenCount = Math.max(0, items.length - visibleItems.length);
   const [activeId, setActiveId] = useState("");
   const [copiedWalletId, setCopiedWalletId] = useState("");
   const [muted, setMuted] = useState(false);
@@ -64,6 +59,11 @@ export default function VideoMosaic({
   const [mosaicLayout, setMosaicLayout] = useState<MosaicLayout | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
+  const displayedItems = useMemo(
+    () => mosaicLayout ? visibleItems.filter((item) => mosaicLayout.tiles[item.id]) : visibleItems,
+    [mosaicLayout, visibleItems]
+  );
+  const hiddenCount = Math.max(0, items.length - displayedItems.length);
 
   useEffect(() => {
     const storedVolume = readFeedVideoVolume();
@@ -129,12 +129,17 @@ export default function VideoMosaic({
         return;
       }
       const styles = window.getComputedStyle(gridNode);
+      const minColumnWidth = cssNumber(styles.getPropertyValue("--mosaic-min-column"), 170);
       const nextLayout = buildMosaicLayout(visibleItems, {
         containerWidth: nodeWidth,
         gap: cssNumber(styles.getPropertyValue("--mosaic-gap"), 12),
-        landscapeSpan: cssInteger(styles.getPropertyValue("--mosaic-landscape-span"), 2),
         maxColumns: cssInteger(styles.getPropertyValue("--mosaic-max-columns"), 6),
-        minColumnWidth: cssNumber(styles.getPropertyValue("--mosaic-min-column"), 170)
+        maxRows,
+        minColumnWidth,
+        targetRowHeight: cssNumber(
+          styles.getPropertyValue("--mosaic-target-row-height"),
+          defaultMosaicRowHeight(nodeWidth, minColumnWidth)
+        )
       });
       setMosaicLayout((current) => mosaicLayoutsEqual(current, nextLayout) ? current : nextLayout);
     }
@@ -155,7 +160,7 @@ export default function VideoMosaic({
         window.cancelAnimationFrame(frame);
       }
     };
-  }, [visibleItems]);
+  }, [maxRows, visibleItems]);
 
   function markVideoReady(item: PublicFeedItem) {
     setVideoReadyById((current) => current[item.id] ? current : { ...current, [item.id]: true });
@@ -233,12 +238,13 @@ export default function VideoMosaic({
         ref={gridRef}
         style={mosaicLayout ? { "--mosaic-height": `${mosaicLayout.height}px` } as CSSProperties : undefined}
       >
-        {visibleItems.map((item) => {
+        {displayedItems.map((item) => {
           const isActive = activeId === item.id;
           const creatorWallet = showCreatorWallet ? getCreatorWallet?.(item) : "";
           const shouldShowFeedLink = typeof showFeedLink === "function" ? showFeedLink(item) : showFeedLink;
           const shouldShowInftLink = showInftLink && Boolean(item.inftId);
           const layout = mosaicLayout?.tiles[item.id];
+          const posterUrl = layout ? item.posterUrl : undefined;
           const tileStyle = {
             "--tile-height": layout ? `${layout.height}px` : undefined,
             "--tile-ratio": item.aspectRatio === "9:16" ? "9 / 16" : "16 / 9",
@@ -257,11 +263,11 @@ export default function VideoMosaic({
                 className="video-mosaic-media"
                 onClick={() => togglePlayback(item)}
               >
-                {item.posterUrl && (
+                {posterUrl && (
                   <img
                     alt=""
                     className={`video-mosaic-poster ${videoReadyById[item.id] ? "hidden" : ""}`}
-                    src={item.posterUrl}
+                    src={posterUrl}
                   />
                 )}
                 <video
@@ -270,7 +276,7 @@ export default function VideoMosaic({
                     videoRefs.current[item.id] = node;
                   }}
                   src={item.videoUrl}
-                  poster={item.posterUrl}
+                  poster={posterUrl}
                   muted={muted || volume === 0}
                   playsInline
                   preload="metadata"
@@ -385,59 +391,137 @@ function buildMosaicLayout(
   options: {
     containerWidth: number;
     gap: number;
-    landscapeSpan: number;
     maxColumns: number;
+    maxRows?: number;
     minColumnWidth: number;
+    targetRowHeight: number;
   }
 ): MosaicLayout {
   const gap = Math.max(0, options.gap);
   const minColumnWidth = Math.max(120, options.minColumnWidth);
   const maxColumns = Math.max(1, options.maxColumns);
-  const rawColumns = Math.floor((options.containerWidth + gap) / (minColumnWidth + gap));
-  const columns = Math.max(1, Math.min(maxColumns, rawColumns || 1));
-  const columnWidth = (options.containerWidth - gap * (columns - 1)) / columns;
-  const columnHeights = Array.from({ length: columns }, () => 0);
+  const maxItemsPerRow = Math.max(1, Math.min(
+    maxColumns,
+    Math.floor((options.containerWidth + gap) / (minColumnWidth + gap)) || 1
+  ));
+  const targetRowHeight = Math.max(140, options.targetRowHeight);
+  const rows = buildJustifiedRows(items, {
+    containerWidth: options.containerWidth,
+    gap,
+    maxItemsPerRow,
+    maxRows: options.maxRows,
+    targetRowHeight
+  });
   const tiles: Record<string, MosaicTileLayout> = {};
+  let y = 0;
 
-  for (const item of items) {
-    const preferredSpan = item.aspectRatio === "9:16" ? 1 : Math.max(1, options.landscapeSpan);
-    const span = Math.min(columns, preferredSpan);
-    let bestColumn = 0;
-    let bestY = Number.POSITIVE_INFINITY;
+  for (const row of rows) {
+    const availableWidth = Math.max(1, options.containerWidth - gap * (row.length - 1));
+    const rowAspect = row.reduce((total, item) => total + mosaicItemAspect(item), 0);
+    const rowHeight = availableWidth / Math.max(rowAspect, 0.1);
+    let x = 0;
 
-    for (let column = 0; column <= columns - span; column += 1) {
-      const candidateY = Math.max(...columnHeights.slice(column, column + span));
-      if (candidateY < bestY) {
-        bestY = candidateY;
-        bestColumn = column;
-      }
+    for (let index = 0; index < row.length; index += 1) {
+      const item = row[index];
+      const isLast = index === row.length - 1;
+      const width = isLast
+        ? Math.max(1, options.containerWidth - x)
+        : rowHeight * mosaicItemAspect(item);
+
+      tiles[item.id] = {
+        height: roundCssNumber(rowHeight),
+        width: roundCssNumber(width),
+        x: roundCssNumber(x),
+        y: roundCssNumber(y)
+      };
+      x += width + gap;
     }
 
-    const width = columnWidth * span + gap * (span - 1);
-    const ratio = item.aspectRatio === "9:16" ? 16 / 9 : 9 / 16;
-    const height = width * ratio;
-    const x = bestColumn * (columnWidth + gap);
-    const y = bestY;
-    const nextHeight = y + height + gap;
-
-    for (let column = bestColumn; column < bestColumn + span; column += 1) {
-      columnHeights[column] = nextHeight;
-    }
-
-    tiles[item.id] = {
-      height: roundCssNumber(height),
-      width: roundCssNumber(width),
-      x: roundCssNumber(x),
-      y: roundCssNumber(y)
-    };
+    y += rowHeight + gap;
   }
 
-  const height = Math.max(0, Math.max(...columnHeights) - gap);
+  const height = rows.length > 0 ? y - gap : 0;
   return {
-    columns,
     height: roundCssNumber(height),
+    rows: rows.length,
     tiles
   };
+}
+
+function buildJustifiedRows(
+  items: PublicFeedItem[],
+  options: {
+    containerWidth: number;
+    gap: number;
+    maxItemsPerRow: number;
+    maxRows?: number;
+    targetRowHeight: number;
+  }
+) {
+  const rows: PublicFeedItem[][] = [];
+  let currentRow: PublicFeedItem[] = [];
+  let currentAspect = 0;
+
+  for (const item of items) {
+    currentRow.push(item);
+    currentAspect += mosaicItemAspect(item);
+
+    const projectedWidth = currentAspect * options.targetRowHeight + options.gap * (currentRow.length - 1);
+    const fillsRow = projectedWidth >= options.containerWidth * 0.94;
+    const reachedRowLimit = currentRow.length >= options.maxItemsPerRow;
+
+    if (fillsRow || reachedRowLimit) {
+      rows.push(currentRow);
+      if (options.maxRows && rows.length >= options.maxRows) {
+        return rebalanceFinalSingleRow(rows);
+      }
+      currentRow = [];
+      currentAspect = 0;
+    }
+  }
+
+  if (currentRow.length > 0 && (!options.maxRows || rows.length < options.maxRows)) {
+    rows.push(currentRow);
+  }
+
+  return rebalanceFinalSingleRow(rows);
+}
+
+function rebalanceFinalSingleRow(rows: PublicFeedItem[][]) {
+  if (rows.length < 2 || rows[rows.length - 1].length !== 1) {
+    return rows;
+  }
+
+  const finalRow = rows[rows.length - 1];
+  const previousRow = rows[rows.length - 2];
+  if (previousRow.length < 2) {
+    return rows;
+  }
+  if (previousRow.length > 2) {
+    const movedItem = previousRow.pop();
+    if (movedItem) {
+      finalRow.unshift(movedItem);
+    }
+    return rows;
+  }
+
+  previousRow.push(finalRow[0]);
+  rows.pop();
+  return rows;
+}
+
+function mosaicItemAspect(item: PublicFeedItem) {
+  return item.aspectRatio === "9:16" ? 9 / 16 : 16 / 9;
+}
+
+function defaultMosaicRowHeight(containerWidth: number, minColumnWidth: number) {
+  if (containerWidth < 520) {
+    return 260;
+  }
+  if (containerWidth < 840) {
+    return 220;
+  }
+  return Math.max(190, Math.min(240, minColumnWidth * 1.2));
 }
 
 function cssNumber(value: string, fallback: number) {
@@ -455,7 +539,7 @@ function roundCssNumber(value: number) {
 }
 
 function mosaicLayoutsEqual(left: MosaicLayout | null, right: MosaicLayout) {
-  if (!left || left.columns !== right.columns || left.height !== right.height) {
+  if (!left || left.rows !== right.rows || left.height !== right.height) {
     return false;
   }
   const leftIds = Object.keys(left.tiles);

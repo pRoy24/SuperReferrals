@@ -880,11 +880,40 @@ function FeedVideo({
   onProgress: (id: string, video: HTMLVideoElement) => void;
 }) {
   const ratio = feedAspectRatioStyle(item);
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const [frameReady, setFrameReady] = useState(false);
   const [posterVisible, setPosterVisible] = useState(Boolean(item.posterUrl));
+  const posterUrl = frameReady ? item.posterUrl : undefined;
 
   useEffect(() => {
     setPosterVisible(Boolean(item.posterUrl));
   }, [item.id, item.posterUrl, item.videoUrl]);
+
+  useEffect(() => {
+    setFrameReady(false);
+    const node = frameRef.current;
+    if (!node) {
+      return;
+    }
+    const measuredNode = node;
+
+    let frame = 0;
+    function measureFrame() {
+      frame = 0;
+      const rect = measuredNode.getBoundingClientRect();
+      setFrameReady(rect.width > 0 && rect.height > 0);
+    }
+
+    frame = window.requestAnimationFrame(measureFrame);
+    const observer = new ResizeObserver(measureFrame);
+    observer.observe(measuredNode);
+    return () => {
+      observer.disconnect();
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+    };
+  }, [item.id, item.aspectRatio]);
 
   function revealVideoFrame() {
     setPosterVisible(false);
@@ -893,13 +922,14 @@ function FeedVideo({
   return (
     <div
       className={`feed-video-frame ${item.aspectRatio === "9:16" ? "portrait" : "landscape"}`}
+      ref={frameRef}
       style={ratio}
     >
-      {item.posterUrl && (
+      {posterUrl && (
         <img
           alt=""
           className={`feed-video-poster ${posterVisible ? "" : "hidden"}`}
-          src={item.posterUrl}
+          src={posterUrl}
         />
       )}
       <video
@@ -909,7 +939,7 @@ function FeedVideo({
           videoRefs.current[item.id] = node;
         }}
         src={item.videoUrl}
-        poster={item.posterUrl}
+        poster={posterUrl}
         muted={muted}
         loop={false}
         playsInline

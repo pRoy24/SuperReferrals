@@ -246,6 +246,14 @@ export interface SamsarPublicationRecord {
   errorMessage?: string;
 }
 
+export interface SamsarVideoRenderMetadata {
+  has_subtitles?: boolean | null;
+  has_footer?: boolean | null;
+  result_language?: string;
+  languages?: string[];
+  [key: string]: unknown;
+}
+
 export interface GenerationPayment {
   quoteId?: string;
   txHash?: string;
@@ -310,6 +318,7 @@ export interface Generation {
   payment: GenerationPayment;
   samsarRequestId?: string;
   samsarSessionId?: string;
+  samsarVideoMetadata?: SamsarVideoRenderMetadata;
   resultUrl?: string;
   feed?: GenerationFeedSettings;
   storage?: {
@@ -398,6 +407,7 @@ export interface INFTRecord {
   storageRootHash: string;
   metadataRootHash: string;
   metadataUri: string;
+  samsarVideoMetadata?: SamsarVideoRenderMetadata;
   tokenId?: string;
   contractAddress?: string;
   mintTxHash?: string;

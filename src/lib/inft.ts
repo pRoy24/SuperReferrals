@@ -345,6 +345,12 @@ async function recoverINFTToken(
   const attributes = Array.isArray(metadata.attributes)
     ? metadata.attributes.filter(isINFTAttribute)
     : [];
+  const samsarVideoMetadata = normalizeSamsarVideoMetadata(
+    superreferrals.samsarVideoMetadata ||
+    superreferrals.samsar_video_metadata ||
+    metadata.samsarVideoMetadata ||
+    metadata.samsar_video_metadata
+  );
   const timestamp = new Date().toISOString();
   const title = stringValue(metadata.name) ||
     titleFromSlug(stringValue(superreferrals.referrerCode) || stringValue(superreferrals.referrer_code)) ||
@@ -362,6 +368,7 @@ async function recoverINFTToken(
     storageRootHash: videoRootHash,
     metadataRootHash,
     metadataUri: tokenUri,
+    samsarVideoMetadata,
     tokenId: tokenId.toString(),
     contractAddress,
     agentWalletAddress: agentData.agentWallet,
@@ -433,6 +440,35 @@ function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function normalizeSamsarVideoMetadata(value: unknown): Record<string, unknown> | undefined {
+  const record = recordValue(value);
+  const metadata = Object.fromEntries(
+    Object.entries(record)
+      .map(([key, item]) => [key, normalizeJsonMetadataValue(item)] as const)
+      .filter(([, item]) => item !== undefined)
+  );
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+function normalizeJsonMetadataValue(value: unknown): unknown {
+  if (value === null || ["string", "number", "boolean"].includes(typeof value)) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => normalizeJsonMetadataValue(item))
+      .filter((item) => item !== undefined);
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .map(([key, item]) => [key, normalizeJsonMetadataValue(item)] as const)
+        .filter(([, item]) => item !== undefined)
+    );
+  }
+  return undefined;
 }
 
 function stringValue(value: unknown) {

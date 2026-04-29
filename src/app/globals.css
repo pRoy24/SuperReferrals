@@ -856,9 +856,9 @@ a:hover {
 
 .video-mosaic-grid {
   --mosaic-gap: 12px;
-  --mosaic-landscape-span: 2;
   --mosaic-max-columns: 6;
   --mosaic-min-column: 170px;
+  --mosaic-target-row-height: 210px;
   min-width: 0;
 }
 
@@ -935,7 +935,7 @@ a:hover {
   height: 100%;
   aspect-ratio: var(--tile-ratio);
   display: block;
-  object-fit: contain;
+  object-fit: cover;
   background: #020505;
   opacity: 1;
   transition: opacity 120ms ease;
@@ -3406,7 +3406,7 @@ button.item {
   height: 100%;
   aspect-ratio: var(--feed-video-ratio);
   display: block;
-  object-fit: contain;
+  object-fit: cover;
   background: #000;
   opacity: 1;
   transition: opacity 120ms ease;
@@ -4118,13 +4118,13 @@ button.item {
   }
 
   .video-mosaic-grid {
-    --mosaic-landscape-span: 1;
     --mosaic-max-columns: 1;
     --mosaic-min-column: 280px;
+    --mosaic-target-row-height: 260px;
   }
 
   .video-mosaic-controls {
-    grid-template-columns: 36px 36px minmax(78px, 1fr);
+    gap: 6px;
   }
 
   .public-main {
