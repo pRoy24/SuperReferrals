@@ -231,6 +231,16 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
     };
   }, []);
 
+  useEffect(() => {
+    return () => {
+      document.body.classList.remove("feed-controls-visible");
+    };
+  }, []);
+
+  useEffect(() => {
+    document.body.classList.toggle("feed-controls-visible", controlsVisible || assistantOpen);
+  }, [assistantOpen, controlsVisible]);
+
   async function loadFeed() {
     setLoading(true);
     try {
