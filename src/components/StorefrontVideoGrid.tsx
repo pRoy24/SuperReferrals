@@ -52,6 +52,7 @@ type StorefrontVideoGridProps = {
 };
 
 const inftBurnAbi = parseAbi(["function burnAgent(uint256 tokenId)"]);
+const INFT_BURN_GAS_LIMIT = "0x7a120";
 
 export default function StorefrontVideoGrid({
   actor,
@@ -557,7 +558,7 @@ async function requestWalletINFTBurn({
     }),
     value: "0x0"
   };
-  const gas = await estimateWalletGas(provider, transaction, chain.name);
+  const gas = await resolveINFTBurnGas(provider, transaction, chain);
   const txHash = String(await provider.request({
     method: "eth_sendTransaction",
     params: [compactTransaction({ ...transaction, gas })]
@@ -604,7 +605,7 @@ async function ensureWalletNetwork(provider: EthereumProvider, chain: INFTBurnCh
   }
 }
 
-async function estimateWalletGas(provider: EthereumProvider, transaction: Record<string, unknown>, chainName: string) {
+async function resolveINFTBurnGas(provider: EthereumProvider, transaction: Record<string, unknown>, chain: INFTBurnChain) {
   try {
     const gas = BigInt(String(await provider.request({
       method: "eth_estimateGas",
@@ -612,8 +613,19 @@ async function estimateWalletGas(provider: EthereumProvider, transaction: Record
     })));
     return `0x${((gas * 12n) / 10n + 1n).toString(16)}`;
   } catch (error) {
-    throw new Error(`INFT burn gas estimate failed on ${chainName}: ${formatErrorMessage(error, "wallet gas estimate failed")}.`);
+    if (isZeroGChain(chain)) {
+      console.warn("Falling back to a fixed 0G INFT burn gas limit after estimateGas failed.", {
+        chainId: chain.id,
+        error
+      });
+      return INFT_BURN_GAS_LIMIT;
+    }
+    throw new Error(`INFT burn gas estimate failed on ${chain.name}: ${formatErrorMessage(error, "wallet gas estimate failed")}.`);
   }
+}
+
+function isZeroGChain(chain: INFTBurnChain) {
+  return chain.id === 16602 || chain.id === 16661 || /0g/i.test(chain.name);
 }
 
 async function waitForWalletReceipt(provider: EthereumProvider, txHash: string, timeoutMs = 60000) {
