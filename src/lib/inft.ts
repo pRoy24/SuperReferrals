@@ -3,6 +3,7 @@ import type { TransactionReceipt } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { env, isProviderMock } from "./env";
 import { createId, shortHash } from "./ids";
+import { DEFAULT_RENDITION_LANGUAGE_CODE, resolveRenditionLanguageCode } from "./rendition-language";
 import { buildZeroGStorageGatewayUrl } from "./zero-g";
 import {
   delay,
@@ -789,12 +790,21 @@ async function recoverINFTToken(
   const attributes = Array.isArray(metadata.attributes)
     ? metadata.attributes.filter(isINFTAttribute)
     : [];
-  const samsarVideoMetadata = normalizeSamsarVideoMetadata(
+  const baseSamsarVideoMetadata = normalizeSamsarVideoMetadata(
     superreferrals.samsarVideoMetadata ||
     superreferrals.samsar_video_metadata ||
     metadata.samsarVideoMetadata ||
     metadata.samsar_video_metadata
   );
+  const languageCode = resolveRenditionLanguageCode(
+    superreferrals,
+    metadata,
+    baseSamsarVideoMetadata,
+    attributes.find((attribute) => attribute.trait_type === "language_code")?.value,
+    attributes.find((attribute) => attribute.trait_type === "result_language")?.value,
+    DEFAULT_RENDITION_LANGUAGE_CODE
+  );
+  const samsarVideoMetadata = withRecoveredRenditionLanguage(baseSamsarVideoMetadata, languageCode);
   const timestamp = new Date().toISOString();
   const title = stringValue(metadata.name) ||
     titleFromSlug(stringValue(superreferrals.referrerCode) || stringValue(superreferrals.referrer_code)) ||
@@ -813,6 +823,7 @@ async function recoverINFTToken(
     metadataRootHash,
     metadataUri: tokenUri,
     samsarVideoMetadata,
+    languageCode,
     tokenId: tokenId.toString(),
     contractAddress,
     agentWalletAddress: agentData.agentWallet,
@@ -894,6 +905,29 @@ function normalizeSamsarVideoMetadata(value: unknown): Record<string, unknown> |
       .filter(([, item]) => item !== undefined)
   );
   return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+function withRecoveredRenditionLanguage(metadata: Record<string, unknown> | undefined, languageCode: string) {
+  if (!languageCode) {
+    return metadata;
+  }
+
+  const next = { ...(metadata || {}) };
+  next.result_language = languageCode;
+  next.languageCode = languageCode;
+  next.language_code = languageCode;
+
+  const languages = Array.isArray(next.languages)
+    ? next.languages
+      .map((value) => resolveRenditionLanguageCode(value))
+      .filter(Boolean)
+    : [];
+  if (!languages.includes(languageCode)) {
+    languages.push(languageCode);
+  }
+  next.languages = languages;
+
+  return next;
 }
 
 function normalizeJsonMetadataValue(value: unknown): unknown {

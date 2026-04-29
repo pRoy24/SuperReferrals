@@ -250,6 +250,8 @@ export interface SamsarVideoRenderMetadata {
   has_subtitles?: boolean | null;
   has_footer?: boolean | null;
   result_language?: string;
+  languageCode?: string;
+  language_code?: string;
   languages?: string[];
   [key: string]: unknown;
 }
@@ -319,6 +321,7 @@ export interface Generation {
   samsarRequestId?: string;
   samsarSessionId?: string;
   samsarVideoMetadata?: SamsarVideoRenderMetadata;
+  languageCode?: string;
   resultUrl?: string;
   feed?: GenerationFeedSettings;
   storage?: {
@@ -382,6 +385,7 @@ export interface PublicFeedItem {
   posterUrl?: string;
   aspectRatio: VideoAspectRatio;
   videoModel: VideoModel;
+  languageCode?: string;
   tags: string[];
   metrics: FeedMetrics;
   comments: FeedComment[];
@@ -408,6 +412,7 @@ export interface INFTRecord {
   metadataRootHash: string;
   metadataUri: string;
   samsarVideoMetadata?: SamsarVideoRenderMetadata;
+  languageCode?: string;
   tokenId?: string;
   contractAddress?: string;
   mintTxHash?: string;

@@ -31,6 +31,11 @@ import {
   priceINFTAction,
   refundAmountForFailure
 } from "./pricing";
+import {
+  DEFAULT_RENDITION_LANGUAGE_CODE,
+  languageCodeMetadata,
+  resolveRenditionLanguageCode
+} from "./rendition-language";
 import { assertStorefrontRenderAccess, assertStorefrontWalletAllowed } from "./storefront-access";
 import { hasStoredSamsarAppKey, samsarAppClientCredentials } from "./samsar-app-credentials";
 import {
@@ -659,6 +664,7 @@ export async function createGeneration(input: {
   validateGenerationAssetUrls(input.generation);
   const priced = priceGeneration(customer, imageCount, input.generation);
   const normalizedInput = normalizeGenerationInput(input.generation);
+  const initialLanguageCode = resolveRenditionLanguageCode(normalizedInput.language);
   const quote = input.payment?.quoteId
     ? store.quotes.find((item) => item.id === input.payment?.quoteId)
     : undefined;
@@ -766,6 +772,7 @@ export async function createGeneration(input: {
     input: normalizedInput,
     feed: buildGenerationFeedSettings(input.feed, normalizedInput.metadata),
     payment,
+    ...(initialLanguageCode ? { languageCode: initialLanguageCode } : {}),
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -880,9 +887,11 @@ export async function syncGeneration(id: string) {
     }
 
     const samsarVideoMetadata = buildSamsarVideoRenderMetadata(status, generation);
+    const languageCode = resolveCompletedGenerationLanguageCode(generation, samsarVideoMetadata);
     const generationForFinalize = await mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
       samsarSessionId: internalSessionId || generation.samsarSessionId,
       samsarVideoMetadata,
+      languageCode,
       resultUrl,
       errorMessage: undefined
     }));
@@ -1118,15 +1127,17 @@ async function finalizeGenerationUnlocked(
   }
 
   const samsarVideoMetadata = buildSamsarVideoRenderMetadata(undefined, latestGeneration);
+  const languageCode = resolveCompletedGenerationLanguageCode(latestGeneration, samsarVideoMetadata);
   const videoArtifact = latestGeneration.storage?.video || await persistRemoteVideoToZeroG(resultUrl);
   const generationWithVideo = await saveGenerationFinalizationProgress(latestGeneration.id, resultUrl, {
     video: videoArtifact,
     metadata: latestGeneration.storage?.metadata
-  }, samsarVideoMetadata);
+  }, samsarVideoMetadata, languageCode);
   const generationForMetadata = generationWithVideo || latestGeneration;
   const generationWithSamsarMetadata: Generation = {
     ...generationForMetadata,
-    ...(samsarVideoMetadata ? { samsarVideoMetadata } : {})
+    ...(samsarVideoMetadata ? { samsarVideoMetadata } : {}),
+    languageCode
   };
   const attributes = buildINFTAttributes(generationWithSamsarMetadata, customer, subAccount);
   const inftTitle = resolveINFTTitle(generationForMetadata, subAccount);
@@ -1136,11 +1147,13 @@ async function finalizeGenerationUnlocked(
     animation_url: resultUrl,
     external_url: `${appBaseUrl()}/inft/${generationForMetadata.id}`,
     image: firstImageUrl(generationForMetadata.input),
+    ...languageCodeMetadata(languageCode),
     attributes,
     superreferrals: {
       generationId: generationForMetadata.id,
       customerId: customer.id,
       subAccountId: subAccount.id,
+      ...languageCodeMetadata(languageCode),
       title: inftTitle,
       samsarRequestId: generationForMetadata.samsarRequestId,
       samsarSessionId: generationForMetadata.samsarSessionId,
@@ -1160,7 +1173,7 @@ async function finalizeGenerationUnlocked(
   await saveGenerationFinalizationProgress(generationForMetadata.id, resultUrl, {
     video: videoArtifact,
     metadata: metadataArtifact
-  }, samsarVideoMetadata);
+  }, samsarVideoMetadata, languageCode);
   const tokenMetadataUri =
     buildZeroGStorageGatewayUrl(metadataArtifact.rootHash) ||
     metadataArtifact.uri;
@@ -1187,6 +1200,7 @@ async function finalizeGenerationUnlocked(
     metadataRootHash: metadataArtifact.rootHash,
     metadataUri: tokenMetadataUri,
     samsarVideoMetadata,
+    languageCode,
     tokenId: mint.tokenId,
     contractAddress: mint.contractAddress,
     mintTxHash: mint.txHash,
@@ -1217,6 +1231,7 @@ async function finalizeGenerationUnlocked(
         metadata: metadataArtifact
       },
       samsarVideoMetadata,
+      languageCode,
       inftId: inft.id,
       errorMessage: undefined
     };
@@ -1321,13 +1336,15 @@ async function saveGenerationFinalizationProgress(
   generationId: string,
   resultUrl: string,
   storage: Generation["storage"],
-  samsarVideoMetadata?: SamsarVideoRenderMetadata
+  samsarVideoMetadata?: SamsarVideoRenderMetadata,
+  languageCode?: string
 ) {
   return mutateStore((mutableStore) => updateGeneration(mutableStore, generationId, {
     status: "PROCESSING",
     resultUrl,
     storage,
     ...(samsarVideoMetadata ? { samsarVideoMetadata } : {}),
+    ...(languageCode ? { languageCode } : {}),
     errorMessage: undefined
   }));
 }
@@ -1361,12 +1378,24 @@ async function markGenerationFinalizedFromExistingINFT(
   } : undefined);
 
   return mutateStore((mutableStore) => {
+    const existingSamsarVideoMetadata = generation.samsarVideoMetadata || inft?.samsarVideoMetadata;
+    const languageCode = resolveCompletedGenerationLanguageCode(
+      generation,
+      existingSamsarVideoMetadata,
+      inft
+    );
+    const samsarVideoMetadata = buildSamsarVideoRenderMetadata(undefined, {
+      ...generation,
+      samsarVideoMetadata: existingSamsarVideoMetadata,
+      languageCode
+    });
     const patch: Partial<Generation> = {
       status: "COMPLETED",
       resultUrl,
       storage,
       inftId: generation.inftId || inft?.id,
-      samsarVideoMetadata: generation.samsarVideoMetadata || inft?.samsarVideoMetadata,
+      samsarVideoMetadata,
+      languageCode,
       errorMessage: undefined
     };
     if (feed) {
@@ -1503,6 +1532,7 @@ export async function runINFTAction(id: string, action: string, payload: Record<
         customer,
         generation,
         inft,
+        languageCode: resolveRenditionLanguageCode(payload),
         requestId,
         resultUrl,
         status,
@@ -1655,7 +1685,7 @@ export async function runINFTAction(id: string, action: string, payload: Record<
       action: "translate",
       actionInput: {
         videoSessionId,
-        language: payload.language || "es"
+        language: resolveRenditionLanguageCode(payload.languageCode, payload.language_code, payload.language, "ES")
       },
       paymentPayload: paymentPayloadFromINFTAction(payload)
     });
@@ -1724,6 +1754,7 @@ async function finalizeINFTActionResult({
   customer,
   generation,
   inft,
+  languageCode: requestedLanguageCode,
   requestId,
   resultUrl,
   status,
@@ -1733,6 +1764,7 @@ async function finalizeINFTActionResult({
   customer: Customer;
   generation: Generation;
   inft: INFTRecord;
+  languageCode?: string;
   requestId: string;
   resultUrl: string;
   status: Record<string, unknown>;
@@ -1770,10 +1802,15 @@ async function finalizeINFTActionResult({
     const derivativeGenerationId = createId("gen");
     const actionName = action || "video_session_edit";
     const metadataTitle = buildDerivativeINFTTitle(latestInft, actionName);
-    const samsarVideoMetadata = buildSamsarVideoRenderMetadata(status, latestGeneration);
+    const languageContext: Generation = requestedLanguageCode
+      ? { ...latestGeneration, languageCode: requestedLanguageCode }
+      : latestGeneration;
+    const samsarVideoMetadata = buildSamsarVideoRenderMetadata(status, languageContext);
+    const languageCode = resolveCompletedGenerationLanguageCode(languageContext, samsarVideoMetadata, latestInft);
     const sourceMetadata = isRecord(latestGeneration.input.metadata) ? latestGeneration.input.metadata : {};
     const derivativeInput: GenerationInput = {
       ...latestGeneration.input,
+      ...(requestedLanguageCode ? { language: requestedLanguageCode.toLowerCase() } : {}),
       metadata: {
         ...sourceMetadata,
         sourceInftId: latestInft.id,
@@ -1783,7 +1820,8 @@ async function finalizeINFTActionResult({
         derivedFromAction: actionName,
         samsarActionRequestId: requestId,
         samsarActionSessionId: actionSessionId || requestId,
-        samsarVideoMetadata
+        samsarVideoMetadata,
+        languageCode
       }
     };
     const derivativeGeneration: Generation = {
@@ -1797,6 +1835,7 @@ async function finalizeINFTActionResult({
       samsarRequestId: requestId,
       samsarSessionId: actionSessionId || requestId,
       samsarVideoMetadata,
+      languageCode,
       resultUrl,
       inftId: derivativeGenerationId,
       createdAt: timestamp,
@@ -1814,11 +1853,13 @@ async function finalizeINFTActionResult({
       animation_url: resultUrl,
       external_url: `${appBaseUrl()}/inft/${derivativeGenerationId}`,
       image: firstImageUrl(derivativeGeneration.input),
+      ...languageCodeMetadata(languageCode),
       attributes,
       superreferrals: {
         generationId: derivativeGenerationId,
         customerId: customer.id,
         subAccountId: subAccount.id,
+        ...languageCodeMetadata(languageCode),
         title: metadataTitle,
         samsarRequestId: requestId,
         samsarSessionId: actionSessionId || requestId,
@@ -1864,6 +1905,7 @@ async function finalizeINFTActionResult({
       metadataRootHash: metadataArtifact.rootHash,
       metadataUri: tokenMetadataUri,
       samsarVideoMetadata,
+      languageCode,
       tokenId: mint.tokenId,
       contractAddress: mint.contractAddress,
       mintTxHash: mint.txHash,
@@ -1983,9 +2025,11 @@ async function runPaidINFTSamsarAction({
   if (remainingCredits !== null) {
     await updateCustomerSamsarCreditBalance(customer.id, remainingCredits);
   }
+  const languageCode = resolveRenditionLanguageCode(actionInput);
   return {
     ...result,
     action,
+    ...(languageCode ? { languageCode } : {}),
     payment
   };
 }
@@ -2525,6 +2569,22 @@ function firstNumber(record: Record<string, unknown> | undefined, keys: string[]
   return null;
 }
 
+function resolveCompletedGenerationLanguageCode(
+  generation: Generation,
+  samsarVideoMetadata?: SamsarVideoRenderMetadata,
+  inft?: INFTRecord
+) {
+  return resolveRenditionLanguageCode(
+    samsarVideoMetadata,
+    generation.languageCode,
+    generation.samsarVideoMetadata,
+    inft?.languageCode,
+    inft?.samsarVideoMetadata,
+    generation.input.language,
+    DEFAULT_RENDITION_LANGUAGE_CODE
+  );
+}
+
 const SAMSAR_VIDEO_METADATA_KEYS = [
   "has_subtitles",
   "hasSubtitles",
@@ -2551,6 +2611,8 @@ const SAMSAR_VIDEO_METADATA_KEYS = [
   "language",
   "language_code",
   "languageCode",
+  "rendition_language_code",
+  "renditionLanguageCode",
   "langauge",
   "language_string",
   "languageString",
@@ -2605,12 +2667,16 @@ function buildSamsarVideoRenderMetadata(
   }
 
   const resultLanguage = firstSamsarLanguage(
-    firstKnownValue(status, ["result_language", "resultLanguage", "session_language", "sessionLanguage", "language", "language_code", "languageCode", "langauge"]),
-    firstKnownValue(existing, ["result_language", "resultLanguage", "session_language", "sessionLanguage", "language", "language_code", "languageCode", "langauge"]),
-    generation?.input.language
+    firstKnownValue(status, ["languageCode", "language_code", "renditionLanguageCode", "rendition_language_code", "result_language", "resultLanguage", "session_language", "sessionLanguage", "language", "langauge"]),
+    firstKnownValue(existing, ["languageCode", "language_code", "renditionLanguageCode", "rendition_language_code", "result_language", "resultLanguage", "session_language", "sessionLanguage", "language", "langauge"]),
+    generation?.languageCode,
+    generation?.input.language,
+    DEFAULT_RENDITION_LANGUAGE_CODE
   );
   if (resultLanguage) {
     metadata.result_language = resultLanguage;
+    metadata.languageCode = resultLanguage;
+    metadata.language_code = resultLanguage;
   }
 
   const languages = normalizeSamsarLanguages(
@@ -2704,11 +2770,8 @@ function firstSamsarLanguage(...values: unknown[]) {
 function normalizeSamsarLanguages(...values: unknown[]): string[] {
   const languages: string[] = [];
   const addLanguage = (value: unknown) => {
-    if (typeof value !== "string") {
-      return;
-    }
-    const normalized = value.trim().toLowerCase();
-    if (normalized && normalized !== "auto" && !languages.includes(normalized)) {
+    const normalized = resolveRenditionLanguageCode(value);
+    if (normalized && !languages.includes(normalized)) {
       languages.push(normalized);
     }
   };
@@ -2762,6 +2825,9 @@ function buildINFTAttributes(
     }
     if (typeof samsarVideoMetadata.result_language === "string" && samsarVideoMetadata.result_language) {
       attributes.push({ trait_type: "result_language", value: samsarVideoMetadata.result_language });
+    }
+    if (typeof samsarVideoMetadata.languageCode === "string" && samsarVideoMetadata.languageCode) {
+      attributes.push({ trait_type: "language_code", value: samsarVideoMetadata.languageCode });
     }
     if (Array.isArray(samsarVideoMetadata.languages) && samsarVideoMetadata.languages.length > 0) {
       attributes.push({ trait_type: "languages", value: samsarVideoMetadata.languages.join(",") });

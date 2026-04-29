@@ -461,6 +461,7 @@ function buildStorefrontINFTItem(store: SuperReferralsStore, inft: INFTRecord): 
     posterUrl: generation ? firstImageUrl(generation) : undefined,
     aspectRatio: generation?.input.aspect_ratio || inftAspectRatio(inft),
     videoModel: generation?.input.video_model || inftVideoModel(inft),
+    languageCode: generation?.languageCode || inft.languageCode,
     tags: generation?.feed?.tags || [],
     metrics: {
       likes,

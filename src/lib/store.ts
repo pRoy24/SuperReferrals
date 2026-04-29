@@ -6,6 +6,10 @@ import { createId, makeReferrerCode, nowIso, normalizeWallet } from "./ids";
 import { isINFTTokenMissing, recoverINFTFromChain } from "./inft";
 import { findPaymentToken, getTransactionChainId, settlementTokenForCurrency } from "./payment-tokens";
 import { defaultINFTActionPricesUsd, defaultModelPricingConfigurations, defaultPricing } from "./pricing";
+import {
+  DEFAULT_RENDITION_LANGUAGE_CODE,
+  resolveRenditionLanguageCode
+} from "./rendition-language";
 import { normalizeWalletList } from "./storefront-access";
 import { isUsableEvmAddress } from "./wallet-address";
 import type {
@@ -303,6 +307,7 @@ function normalizeStoreForRuntime(store: SuperReferralsStore) {
     changed = true;
   }
   changed = removeLegacyDemoStorefront(store) || changed;
+  changed = backfillVideoLanguageCodes(store) || changed;
   for (const customer of store.customers) {
     const pricing = customer.pricing || defaultPricing;
     const previousChainId = pricing.chainId;
@@ -339,6 +344,95 @@ function normalizeStoreForRuntime(store: SuperReferralsStore) {
     }
   }
   return { store, changed };
+}
+
+function backfillVideoLanguageCodes(store: SuperReferralsStore) {
+  let changed = false;
+  const generationLanguageCodes = new Map<string, string>();
+
+  for (const generation of store.generations) {
+    if (!isVideoGeneration(generation)) {
+      continue;
+    }
+
+    const languageCode = resolveRenditionLanguageCode(
+      generation.languageCode,
+      generation.samsarVideoMetadata,
+      generation.input?.language,
+      DEFAULT_RENDITION_LANGUAGE_CODE
+    );
+    generationLanguageCodes.set(generation.id, languageCode);
+    changed = applyVideoLanguageCode(generation, languageCode) || changed;
+  }
+
+  for (const inft of store.infts) {
+    const languageCode = resolveRenditionLanguageCode(
+      inft.languageCode,
+      inft.samsarVideoMetadata,
+      generationLanguageCodes.get(inft.generationId),
+      generationLanguageCodes.get(inft.id),
+      DEFAULT_RENDITION_LANGUAGE_CODE
+    );
+    changed = applyVideoLanguageCode(inft, languageCode) || changed;
+  }
+
+  return changed;
+}
+
+function isVideoGeneration(generation: Generation) {
+  return Boolean(
+    generation.status === "COMPLETED" ||
+    generation.resultUrl ||
+    generation.inftId ||
+    generation.storage?.video
+  );
+}
+
+function applyVideoLanguageCode(
+  record: Pick<Generation | INFTRecord, "languageCode" | "samsarVideoMetadata">,
+  languageCode: string
+) {
+  if (!languageCode) {
+    return false;
+  }
+
+  let changed = false;
+  if (record.languageCode !== languageCode) {
+    record.languageCode = languageCode;
+    changed = true;
+  }
+
+  if (!isPlainObject(record.samsarVideoMetadata)) {
+    record.samsarVideoMetadata = {};
+    changed = true;
+  }
+
+  const metadata = record.samsarVideoMetadata as Record<string, unknown>;
+  for (const key of ["result_language", "languageCode", "language_code"]) {
+    if (resolveRenditionLanguageCode(metadata[key]) !== languageCode) {
+      metadata[key] = languageCode;
+      changed = true;
+    }
+  }
+
+  const languages = Array.isArray(metadata.languages)
+    ? metadata.languages
+      .map((value) => resolveRenditionLanguageCode(value))
+      .filter(Boolean)
+    : [];
+  if (!languages.includes(languageCode)) {
+    languages.push(languageCode);
+  }
+  if (!Array.isArray(metadata.languages) || languages.join(",") !== metadata.languages.join(",")) {
+    metadata.languages = languages;
+    changed = true;
+  }
+
+  return changed;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function removeLegacyDemoStorefront(store: SuperReferralsStore) {

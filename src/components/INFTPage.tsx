@@ -2,6 +2,7 @@
 
 import { Cable, Captions, ChevronDown, Copy, Download, ExternalLink, ImagePlus, Languages, Link2, PanelBottom, RefreshCw, Send, Share2, Wallet } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import BreadcrumbNav from "@/components/BreadcrumbNav";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
 import {
   detectBrowserWalletProviders,
@@ -19,6 +20,7 @@ import {
   type TransactionChainConfig
 } from "@/lib/payment-tokens";
 import { defaultINFTActionPricesUsd } from "@/lib/pricing";
+import { resolveRenditionLanguageCode, supportedSamsarProcessorLanguageOptions } from "@/lib/rendition-language";
 import { isUsableEvmAddress } from "@/lib/wallet-address";
 import type { Customer, INFTPaidAction, INFTRecord, PaymentCurrencySymbol, PaymentQuote, PaymentRail, SuperReferralsStore } from "@/lib/types";
 
@@ -28,6 +30,7 @@ type ActionPollState = {
   status: string;
   resultUrl?: string;
   errorMessage?: string;
+  languageCode?: string;
 };
 
 type ActionPaymentFlow = {
@@ -45,7 +48,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [actionResult, setActionResult] = useState("");
   const [busy, setBusy] = useState("");
   const [peerId, setPeerId] = useState("mock-peer-video-a");
-  const [language, setLanguage] = useState("es");
+  const [language, setLanguage] = useState(supportedSamsarProcessorLanguageOptions[1]?.value || "ES");
   const [subtitleLanguage, setSubtitleLanguage] = useState("en");
   const [expandedVideoAction, setExpandedVideoAction] = useState<VideoEditAction | "">("");
   const [updateOutroMode, setUpdateOutroMode] = useState<"cta" | "image">("cta");
@@ -69,6 +72,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [walletAddress, setWalletAddress] = useState(activeInft.ownerWallet || "");
   const [walletProviders, setWalletProviders] = useState<BrowserWalletProvider[]>([]);
   const [activeWalletProvider, setActiveWalletProvider] = useState<BrowserWalletProvider | null>(null);
+  const [walletConnectedOnTransactionChain, setWalletConnectedOnTransactionChain] = useState(false);
   const [paymentCurrency, setPaymentCurrency] = useState<PaymentCurrencySymbol>("USDC");
   const [actionQuote, setActionQuote] = useState<PaymentQuote | null>(null);
   const [actionPaymentFlow, setActionPaymentFlow] = useState<ActionPaymentFlow>({ status: "idle", message: "" });
@@ -122,6 +126,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const actionFlowPending = ["payment", "confirming", "starting", "started"].includes(actionPaymentFlow.status);
   const videoOperationPending = actionRenderPending || actionFlowPending;
   const videoActionDisabled = Boolean(busy) || videoOperationPending;
+  const walletActionLabel = walletConnectedOnTransactionChain ? "Switch wallet" : "Connect wallet";
 
   useEffect(() => {
     const firstToken = selectablePaymentTokens[0];
@@ -137,6 +142,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     }
     const pollRequestId = actionPoll.requestId;
     const pollAction = actionPoll.action;
+    const pollLanguageCode = actionPoll.languageCode;
     let cancelled = false;
 
     async function pollActionStatus() {
@@ -146,7 +152,11 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             action: "action_status",
-            payload: { requestId: pollRequestId, sourceAction: pollAction }
+            payload: {
+              requestId: pollRequestId,
+              sourceAction: pollAction,
+              ...(pollLanguageCode ? { languageCode: pollLanguageCode } : {})
+            }
           })
         });
         const data = await parseResponse(response);
@@ -213,7 +223,60 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [actionPoll?.action, actionPoll?.requestId, actionPoll?.status, activeInft.id]);
+  }, [actionPoll?.action, actionPoll?.languageCode, actionPoll?.requestId, actionPoll?.status, activeInft.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let detectedProviders: BrowserWalletProvider[] = [];
+    const cleanups: Array<() => void> = [];
+
+    async function inspectConnectedWallet(providers: BrowserWalletProvider[]) {
+      const connected = await findConnectedWalletOnChain(providers, transactionChain);
+      if (cancelled) {
+        return;
+      }
+      if (!connected) {
+        setWalletConnectedOnTransactionChain(false);
+        return;
+      }
+      setActiveWalletProvider(connected.walletProvider);
+      setWalletAddress(connected.account);
+      setWalletConnectedOnTransactionChain(true);
+    }
+
+    async function initializeWalletState() {
+      const detected = await detectBrowserWalletProviders();
+      if (cancelled) {
+        return;
+      }
+      detectedProviders = detected;
+      setWalletProviders(detected);
+      const refreshWalletState = () => {
+        inspectConnectedWallet(detectedProviders).catch(() => undefined);
+      };
+      const listeningProviders = new Set<EthereumProvider>();
+      for (const walletProvider of detected) {
+        const provider = walletProvider.provider;
+        if (listeningProviders.has(provider)) {
+          continue;
+        }
+        listeningProviders.add(provider);
+        provider.on?.("accountsChanged", refreshWalletState);
+        provider.on?.("chainChanged", refreshWalletState);
+        cleanups.push(() => {
+          provider.removeListener?.("accountsChanged", refreshWalletState);
+          provider.removeListener?.("chainChanged", refreshWalletState);
+        });
+      }
+      await inspectConnectedWallet(detected);
+    }
+
+    initializeWalletState().catch(() => undefined);
+    return () => {
+      cancelled = true;
+      cleanups.forEach((cleanup) => cleanup());
+    };
+  }, [transactionChain]);
 
   function getPublicInftUrl() {
     if (typeof window === "undefined") {
@@ -272,11 +335,13 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   async function connectWallet(walletProvider?: BrowserWalletProvider) {
     setBusy("wallet");
     setActionPaymentFlow({ status: "idle", message: "" });
+    let providersForReconnectCheck = walletProvider ? [walletProvider] : walletProviders;
     try {
       const shouldDetectProviders = !walletProvider && walletProviders.length === 0;
       const detectedProviders = shouldDetectProviders
         ? await detectBrowserWalletProviders()
         : walletProviders;
+      providersForReconnectCheck = walletProvider ? [walletProvider] : detectedProviders;
       if (shouldDetectProviders && detectedProviders.length > 0) {
         setWalletProviders(detectedProviders);
       }
@@ -292,12 +357,21 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       await ensureWalletNetwork(selected.provider, transactionChain);
       setActiveWalletProvider(selected.walletProvider);
       setWalletAddress(firstAccount);
+      setWalletConnectedOnTransactionChain(true);
       setActionQuote(null);
       setActionPaymentFlow({
         status: "idle",
         message: `Wallet connected on ${transactionChain.name}.`
       });
     } catch (error) {
+      const connected = await findConnectedWalletOnChain(providersForReconnectCheck, transactionChain).catch(() => null);
+      if (connected) {
+        setActiveWalletProvider(connected.walletProvider);
+        setWalletAddress(connected.account);
+        setWalletConnectedOnTransactionChain(true);
+      } else {
+        setWalletConnectedOnTransactionChain(false);
+      }
       setActionPaymentFlow({
         status: "failed",
         message: error instanceof Error ? error.message : "Wallet connection failed."
@@ -317,6 +391,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       setCreatedInft(null);
     }
     try {
+      const languageCode = actionLanguageCode(action, payload);
       const response = await fetch(`/api/infts/${activeInft.id}/actions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -333,7 +408,8 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
             requestId,
             status: extractActionStatus(data.result) || "QUEUED",
             resultUrl: extractActionResultUrl(data.result),
-            errorMessage: extractActionError(data.result)
+            errorMessage: extractActionError(data.result),
+            languageCode
           });
         }
       }
@@ -501,6 +577,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     setCreatedInft(null);
     setActionPaymentFlow({ status: "payment", message: "Preparing payment quote." });
     try {
+      const languageCode = actionLanguageCode(action, payload);
       if (!selectedPaymentToken) {
         throw new Error("No supported payment token is available.");
       }
@@ -554,7 +631,8 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
           requestId,
           status: extractActionStatus(data.result) || "QUEUED",
           resultUrl: extractActionResultUrl(data.result),
-          errorMessage: extractActionError(data.result)
+          errorMessage: extractActionError(data.result),
+          languageCode
         });
       }
       setActionPaymentFlow({
@@ -667,9 +745,12 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
           <h1>{activeInft.title}</h1>
           <p className="subtle">{activeInft.description}</p>
         </div>
-        <a className="btn" href="/">
-          <RefreshCw size={16} /> Dashboard
-        </a>
+        <div className="page-top-actions">
+          <BreadcrumbNav />
+          <a className="btn" href="/">
+            <RefreshCw size={16} /> Dashboard
+          </a>
+        </div>
       </div>
 
       <div className="inft-grid">
@@ -707,7 +788,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                 }}
               />
               <button className="btn" onClick={() => connectWallet()} disabled={busy === "wallet"}>
-                <Wallet size={16} /> Connect wallet
+                <Wallet size={16} /> {walletActionLabel}
               </button>
             </div>
             {selectedPaymentToken && settlementToken && (
@@ -786,7 +867,12 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
               <div className="inft-action-detail">
                 {expandedVideoAction === "translate" && (
                   <div className="form-grid">
-                    <TextField label="Target language" value={language} onChange={setLanguage} />
+                    <SelectField
+                      label="Target language"
+                      value={language}
+                      options={supportedSamsarProcessorLanguageOptions}
+                      onChange={setLanguage}
+                    />
                     <INFTActionPayControl
                       icon={<Languages size={16} />}
                       label="Retranslate"
@@ -801,7 +887,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                         setPaymentCurrency(symbol);
                         setActionQuote(null);
                       }}
-                      onPay={() => runPaidAction("translate", { language })}
+                      onPay={() => runPaidAction("translate", { languageCode: language })}
                     />
                   </div>
                 )}
@@ -1059,6 +1145,35 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       </div>
     </main>
   );
+}
+
+async function findConnectedWalletOnChain(walletProviders: BrowserWalletProvider[], chain: TransactionChainConfig) {
+  const providers = walletProviders.length > 0 ? walletProviders : fallbackBrowserWalletProviders();
+  for (const walletProvider of providers) {
+    const provider = walletProvider.provider;
+    const accounts = await provider.request({ method: "eth_accounts" }).catch(() => []);
+    const account = Array.isArray(accounts) ? String(accounts[0] || "") : "";
+    if (!account) {
+      continue;
+    }
+    const chainId = await provider.request({ method: "eth_chainId" }).catch(() => "");
+    if (String(chainId).toLowerCase() === chain.hexChainId.toLowerCase()) {
+      return { walletProvider, account };
+    }
+  }
+  return null;
+}
+
+function fallbackBrowserWalletProviders(): BrowserWalletProvider[] {
+  if (typeof window === "undefined" || !window.ethereum) {
+    return [];
+  }
+  return [{
+    id: "legacy:browser-wallet",
+    name: "Browser wallet",
+    provider: window.ethereum,
+    detectedBy: "legacy"
+  }];
 }
 
 function TextField({
@@ -1592,6 +1707,19 @@ function extractActionStatus(value: unknown) {
 
 function extractActionError(value: unknown) {
   return firstStringValue(value, "message", "error", "errorMessage");
+}
+
+function actionLanguageCode(action: string, payload: Record<string, unknown>) {
+  if (!["translate", "add_subtitles"].includes(action)) {
+    return undefined;
+  }
+  return resolveRenditionLanguageCode(
+    payload.languageCode,
+    payload.language_code,
+    payload.language,
+    payload.subtitleLanguage,
+    payload.subtitle_language
+  ) || undefined;
 }
 
 function extractActionResultUrl(value: unknown): string | undefined {

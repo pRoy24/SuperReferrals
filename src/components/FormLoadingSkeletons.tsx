@@ -16,6 +16,7 @@ import {
   Zap
 } from "lucide-react";
 import type { ReactNode } from "react";
+import BreadcrumbNav from "@/components/BreadcrumbNav";
 
 export function CustomerStoreCreatorSkeleton() {
   return (
@@ -49,7 +50,10 @@ export function CustomerStoreCreatorSkeleton() {
             <SkeletonLine className="skeleton-copy-line" />
             <SkeletonLine className="skeleton-w-xl" />
           </div>
-          <SkeletonButton icon={<RefreshCw size={16} />} />
+          <div className="page-top-actions">
+            <BreadcrumbNav />
+            <SkeletonButton icon={<RefreshCw size={16} />} />
+          </div>
         </div>
 
         <section className="stat-row">
@@ -187,6 +191,7 @@ export function UserStoreCreatorSkeleton() {
           </div>
         </div>
         <div className="landing-hero-actions">
+          <BreadcrumbNav />
           <SkeletonButton icon={<Store size={16} />} />
           <SkeletonButton icon={<RefreshCw size={16} />} />
         </div>

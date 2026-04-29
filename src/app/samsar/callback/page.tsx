@@ -3,6 +3,7 @@
 import { RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import BreadcrumbNav from "@/components/BreadcrumbNav";
 import {
   authCredentialsFromCurrentUrl,
   fetchWithSamsarAuth,
@@ -59,11 +60,14 @@ export default function SamsarCallbackPage() {
 
   return (
     <main className="inft-layout">
-      <div className="hero-band">
-        <div className="eyebrow">SuperReferrals Account</div>
-        <h1>Account connection</h1>
-        <p className="subtle">{message}</p>
-        <div className="button-row">
+      <div className="topbar hero-band">
+        <div>
+          <div className="eyebrow">SuperReferrals Account</div>
+          <h1>Account connection</h1>
+          <p className="subtle">{message}</p>
+        </div>
+        <div className="page-top-actions">
+          <BreadcrumbNav />
           <a className="btn primary" href="/dashboard">Open dashboard</a>
           <span className="badge">
             <RefreshCw size={14} /> Syncing

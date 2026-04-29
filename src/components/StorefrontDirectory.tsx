@@ -2,6 +2,7 @@
 
 import { ExternalLink, Film, RefreshCw, Search, ShieldCheck, SlidersHorizontal, Star, Store, Wallet } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import BreadcrumbNav from "@/components/BreadcrumbNav";
 import {
   getAllowedModelPricingConfigurations,
   getStorefrontConditionTiles,
@@ -46,6 +47,7 @@ export default function StorefrontDirectory() {
           </p>
         </div>
         <div className="landing-hero-actions">
+          <BreadcrumbNav />
           <button className="btn" onClick={() => load()} title="Refresh storefronts">
             <RefreshCw size={16} /> Refresh
           </button>

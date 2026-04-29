@@ -3,6 +3,7 @@
 import { RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import BreadcrumbNav from "@/components/BreadcrumbNav";
 import {
   authCredentialsFromCurrentUrl,
   fetchWithSamsarAuth,
@@ -98,11 +99,14 @@ export default function PaymentSuccessPage() {
 
   return (
     <main className="inft-layout">
-      <div className="hero-band">
-        <div className="eyebrow">SuperReferrals Checkout</div>
-        <h1>Payment received</h1>
-        <p className="subtle">{syncState.message}</p>
-        <div className="button-row">
+      <div className="topbar hero-band">
+        <div>
+          <div className="eyebrow">SuperReferrals Checkout</div>
+          <h1>Payment received</h1>
+          <p className="subtle">{syncState.message}</p>
+        </div>
+        <div className="page-top-actions">
+          <BreadcrumbNav />
           <a className="btn primary" href="/dashboard">Open dashboard</a>
           {syncState.status === "syncing" && (
             <span className="badge">

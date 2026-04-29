@@ -229,6 +229,7 @@ function buildPublicFeedItem(
     posterUrl: firstImageUrl(generation.input),
     aspectRatio: generation.input.aspect_ratio,
     videoModel: generation.input.video_model,
+    languageCode: generation.languageCode || inft?.languageCode,
     tags: uniqueTags(baseTags),
     metrics,
     comments,

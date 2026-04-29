@@ -1,7 +1,8 @@
 "use client";
 
-import { AlertTriangle, ArrowDown, ArrowUp, Bot, ChevronDown, CircleDollarSign, Code2, ExternalLink, GripVertical, ListChecks, Play, Plus, RefreshCw, Store, Trash2, Undo2, Upload, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Bot, ChevronDown, CircleDollarSign, CircleHelp, Code2, ExternalLink, GripVertical, ListChecks, Play, Plus, RefreshCw, Store, Trash2, Undo2, Upload, Wallet } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from "react";
+import BreadcrumbNav from "@/components/BreadcrumbNav";
 import { UserStoreCreatorSkeleton } from "@/components/FormLoadingSkeletons";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
 import StorefrontVideoGrid from "@/components/StorefrontVideoGrid";
@@ -139,14 +140,18 @@ const starterImages = [
 
 const starterImageMetadata = JSON.stringify(starterImages, null, 2);
 
-const starterCampaignTitle = "Tech lifestyle launch";
-const starterCampaignMetadata = JSON.stringify({ campaign: "customer-store" }, null, 2);
-const starterPrompt = [
+const legacyStarterCampaignTitle = "Tech lifestyle launch";
+const legacyStarterCampaignMetadata = JSON.stringify({ campaign: "customer-store" }, null, 2);
+const legacyStarterPrompt = [
   "Create a polished tech lifestyle ad with smooth cinematic motion and clean transitions.",
   "Make each scene feel premium, useful, and aspirational.",
   "End with a strong modern product-launch energy."
 ].join("\n");
-const defaultOutroFocusArea = JSON.stringify({ x: 680, y: 296, width: 432, height: 432 }, null, 2);
+const legacyDefaultOutroFocusArea = JSON.stringify({ x: 680, y: 296, width: 432, height: 432 }, null, 2);
+const legacyStarterCtaUrl = "https://www.pexels.com/search/technology%20lifestyle/";
+const legacyStarterCtaTextTop = "Scan to learn more";
+const legacyStarterCtaTextBottom = "Open the offer";
+const legacyStarterFeedTags = "tech, lifestyle, product";
 const supportedRenditionLanguages = [
   { value: "auto", label: "Auto detect" },
   { value: "en", label: "English" },
@@ -167,27 +172,56 @@ const supportedRenditionLanguages = [
 ];
 const supportedRenditionLanguageCodes = new Set<string>(supportedRenditionLanguages.map((language) => language.value));
 
+const renderFormTooltips = {
+  inftTitle: "Optional title saved into the render metadata and associated INFT.",
+  imageScenes: "Add the product or scene images that should drive the video. Each image can include optional title and scene text.",
+  imageUrl: "Paste a public http(s) image URL or upload an image from your device.",
+  imageTitle: "Optional per-scene title used by the generated video and footer metadata.",
+  imageText: "Optional copy for the scene, such as a product detail or callout.",
+  prompt: "Describe the motion, style, pacing, and campaign direction for the generated product video.",
+  language: "Select the spoken or subtitle language, or leave auto detect for mixed-language content.",
+  subtitles: "Includes subtitles in the render when the selected model supports them.",
+  campaignMetadata: "Optional key-value metadata stored with the render and INFT payload.",
+  metadataField: "Metadata key to include in the generated payload.",
+  metadataValue: "Metadata value to include for this key. JSON values such as numbers and objects are supported.",
+  publishTargets: "Choose where completed videos should be visible after the render finishes.",
+  feedTags: "Optional comma-separated tags for discovery in the public feed.",
+  outro: "Optional CTA URL used to generate a final outro image and per-scene footer links.",
+  ctaUrl: "Destination URL for the generated CTA outro and footer links.",
+  ctaTextTop: "Optional top line rendered on the generated CTA outro.",
+  ctaTextBottom: "Optional bottom line rendered on the generated CTA outro.",
+  ctaLogo: "Optional public image URL for a logo displayed on the generated CTA outro.",
+  outroAnimation: "Animates the server-generated CTA outro image at the end of the video.",
+  outroFocusAnimation: "Uses an explicit focus area when animating the generated outro image.",
+  footerAnimation: "Adds a CTA footer animation to individual scenes using the CTA URL.",
+  outroFocusArea: "Optional pixel rectangle that guides where the outro animation should focus.",
+  paymentTxHash: "Optional transaction hash to use when payment was completed outside the wallet flow.",
+  imageJson: "Advanced JSON array of image URL strings or image objects.",
+  metadataJson: "Advanced JSON object stored with the generated render and INFT.",
+  payloadPreview: "Read-only preview of the SuperReferrals generation payload assembled from this form."
+};
+
 function createDefaultGenerationForm(modelSelection?: Pick<GenerationFormState, "videoModel" | "aspectRatio">): GenerationFormState {
   return {
-    imageUrls: starterImageMetadata,
-    inftTitle: starterCampaignTitle,
-    metadata: starterCampaignMetadata,
-    prompt: starterPrompt,
+    imageUrls: "",
+    inftTitle: "",
+    metadata: "",
+    prompt: "",
     videoModel: modelSelection?.videoModel || ("RUNWAYML" as VideoModel),
     aspectRatio: modelSelection?.aspectRatio || ("9:16" as VideoAspectRatio),
-    language: "en",
+    language: "auto",
     enableSubtitles: true,
     addOutroAnimation: true,
     addOutroFocusArea: true,
-    outroFocusArea: defaultOutroFocusArea,
-    ctaUrl: "https://www.pexels.com/search/technology%20lifestyle/",
-    ctaTextTop: "Scan to learn more",
-    ctaTextBottom: "Open the offer",
+    outroFocusArea: "",
+    ctaUrl: "",
+    ctaTextTop: "",
+    ctaTextBottom: "",
     ctaLogo: "",
     addFooterAnimation: true,
     publishToFeed: true,
     publishToSamsarGallery: true,
-    feedTags: "tech, lifestyle, product",
+    feedTags: "",
     txHash: ""
   };
 }
@@ -236,10 +270,74 @@ function restorePersistedGenerationForm(
       next.inftTitle = extractMetadataTitle(next.metadata) || next.inftTitle;
     }
   }
+  clearLegacyStarterContent(next);
   return {
     ...next,
     ...resolveValidModelSelection(pricingOptions, next)
   };
+}
+
+function clearLegacyStarterContent(form: GenerationFormState) {
+  let cleared = false;
+  if (isLegacyStarterImageMetadata(form.imageUrls)) {
+    form.imageUrls = "";
+    cleared = true;
+  }
+  if (form.inftTitle.trim() === legacyStarterCampaignTitle) {
+    form.inftTitle = "";
+    cleared = true;
+  }
+  if (isMatchingJsonObject(form.metadata, legacyStarterCampaignMetadata)) {
+    form.metadata = "";
+    cleared = true;
+  }
+  if (form.prompt.trim() === legacyStarterPrompt) {
+    form.prompt = "";
+    cleared = true;
+  }
+  if (isMatchingJsonObject(form.outroFocusArea, legacyDefaultOutroFocusArea)) {
+    form.outroFocusArea = "";
+    cleared = true;
+  }
+  if (form.ctaUrl.trim() === legacyStarterCtaUrl) {
+    form.ctaUrl = "";
+    cleared = true;
+  }
+  if (form.ctaTextTop.trim() === legacyStarterCtaTextTop) {
+    form.ctaTextTop = "";
+    cleared = true;
+  }
+  if (form.ctaTextBottom.trim() === legacyStarterCtaTextBottom) {
+    form.ctaTextBottom = "";
+    cleared = true;
+  }
+  if (form.feedTags.trim() === legacyStarterFeedTags) {
+    form.feedTags = "";
+    cleared = true;
+  }
+  if (cleared && form.language === "en") {
+    form.language = "auto";
+  }
+}
+
+function isLegacyStarterImageMetadata(raw: string) {
+  const items = parseImageWizardItems(raw);
+  return items.length === starterImages.length && items.every((item, index) => {
+    const starter = starterImages[index];
+    return (
+      item.image_url === starter.image_url &&
+      item.title === starter.title &&
+      item.image_text === starter.image_text
+    );
+  });
+}
+
+function isMatchingJsonObject(raw: string, expectedRaw: string) {
+  try {
+    return JSON.stringify(parseJsonObject(raw)) === JSON.stringify(parseJsonObject(expectedRaw));
+  } catch {
+    return false;
+  }
 }
 
 function resolveValidModelSelection(
@@ -278,9 +376,9 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   });
   const [generationForm, setGenerationForm] = useState<GenerationFormState>(() => createDefaultGenerationForm());
   const [renderFormMode, setRenderFormMode] = useState<RenderFormMode>("simple");
-  const [imageWizardItems, setImageWizardItems] = useState<ImageWizardItem[]>(() => parseImageWizardItems(starterImageMetadata));
-  const [metadataWizardItems, setMetadataWizardItems] = useState<MetadataWizardItem[]>(() => parseMetadataWizardItems(starterCampaignMetadata));
-  const [outroFocusAreaWizard, setOutroFocusAreaWizard] = useState<OutroFocusAreaWizard>(() => parseOutroFocusAreaWizard(defaultOutroFocusArea));
+  const [imageWizardItems, setImageWizardItems] = useState<ImageWizardItem[]>(() => parseImageWizardItems(""));
+  const [metadataWizardItems, setMetadataWizardItems] = useState<MetadataWizardItem[]>(() => parseMetadataWizardItems(""));
+  const [outroFocusAreaWizard, setOutroFocusAreaWizard] = useState<OutroFocusAreaWizard>(() => parseOutroFocusAreaWizard(""));
   const [paymentCurrency, setPaymentCurrency] = useState<PaymentCurrencySymbol>("USDC");
   const [quote, setQuote] = useState<PaymentQuote | null>(null);
   const [autoPolling, setAutoPolling] = useState(false);
@@ -428,6 +526,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     const nextForm = createDefaultGenerationForm(selection);
     setGenerationForm(nextForm);
     syncRenderWizardState(nextForm);
+    setRenderFormMode("simple");
     setQuote(null);
     setRenderSessionLocked(false);
     generationSubmitInFlightRef.current = false;
@@ -517,14 +616,11 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     try {
       const persisted = JSON.parse(raw) as {
         form?: Partial<GenerationFormState>;
-        renderFormMode?: RenderFormMode;
       };
       const nextForm = restorePersistedGenerationForm(persisted.form, pricingOptions);
       setGenerationForm(nextForm);
       syncRenderWizardState(nextForm);
-      if (persisted.renderFormMode === "simple" || persisted.renderFormMode === "advanced") {
-        setRenderFormMode(persisted.renderFormMode);
-      }
+      setRenderFormMode("simple");
       setRenderFormHydratedKey(renderFormStorageKey);
     } catch {
       window.localStorage.removeItem(renderFormStorageKey);
@@ -537,10 +633,9 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       return;
     }
     window.localStorage.setItem(renderFormStorageKey, JSON.stringify({
-      form: generationForm,
-      renderFormMode
+      form: generationForm
     }));
-  }, [customer, generationForm, renderFormHydratedKey, renderFormMode, renderFormStorageKey]);
+  }, [customer, generationForm, renderFormHydratedKey, renderFormStorageKey]);
 
   useEffect(() => {
     if (!customer || !connectedSubAccount || !subAccountPreferenceKey || serverRenderFormHydratedKey === subAccountPreferenceKey) {
@@ -552,9 +647,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       setGenerationForm(nextForm);
       syncRenderWizardState(nextForm);
     }
-    if (preferences?.renderFormMode === "simple" || preferences?.renderFormMode === "advanced") {
-      setRenderFormMode(preferences.renderFormMode);
-    }
+    setRenderFormMode("simple");
     setServerRenderFormHydratedKey(subAccountPreferenceKey);
   }, [connectedSubAccount, customer, pricingOptions, serverRenderFormHydratedKey, subAccountPreferenceKey]);
 
@@ -578,8 +671,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
           customerId: customer.id,
           wallet: connectedSubAccount.wallet,
           preferences: {
-            renderForm: generationForm,
-            renderFormMode
+            renderForm: generationForm
           }
         })
       }).catch(() => undefined);
@@ -593,7 +685,6 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     connectedSubAccount?.wallet,
     customer?.id,
     generationForm,
-    renderFormMode,
     serverRenderFormHydratedKey,
     subAccountPreferenceKey
   ]);
@@ -1193,6 +1284,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
           </div>
         </div>
         <div className="landing-hero-actions">
+          <BreadcrumbNav />
           <a className="btn" href="/storefronts">
             <Store size={16} /> Directory
           </a>
@@ -1544,10 +1636,17 @@ function SimpleRenderForm({
 
   return (
     <div className="form-grid render-wizard-grid">
-      <TextField label="INFT title" value={form.inftTitle} onChange={(inftTitle) => onPatch({ inftTitle })} full />
+      <TextField
+        label="INFT title"
+        tooltip={renderFormTooltips.inftTitle}
+        value={form.inftTitle}
+        onChange={(inftTitle) => onPatch({ inftTitle })}
+        full
+      />
 
       <WizardSection
         title="Image scenes"
+        tooltip={renderFormTooltips.imageScenes}
         badge={`${imageCount} ready`}
         actionLabel="Add image"
         onAction={onImageAdd}
@@ -1565,7 +1664,7 @@ function SimpleRenderForm({
               <div className="wizard-image-grid">
                 <div className="image-source-toolbar full">
                   <div className="field image-url-field">
-                    <label>Image URL</label>
+                    <label><LabelWithTooltip label="Image URL" tooltip={renderFormTooltips.imageUrl} /></label>
                     <input
                       value={item.image_url}
                       onChange={(event) => onImageChange(index, { image_url: event.target.value })}
@@ -1618,11 +1717,13 @@ function SimpleRenderForm({
                 <ImageUrlPreview rawUrl={item.image_url} title={item.title} />
                 <TextField
                   label="Title"
+                  tooltip={renderFormTooltips.imageTitle}
                   value={item.title}
                   onChange={(title) => onImageChange(index, { title })}
                 />
                 <TextField
                   label="Image text"
+                  tooltip={renderFormTooltips.imageText}
                   value={item.image_text}
                   onChange={(image_text) => onImageChange(index, { image_text })}
                 />
@@ -1633,17 +1734,18 @@ function SimpleRenderForm({
       </WizardSection>
 
       <div className="field full">
-        <label>Prompt</label>
+        <label><LabelWithTooltip label="Prompt" tooltip={renderFormTooltips.prompt} /></label>
         <textarea value={form.prompt} onChange={(event) => onPatch({ prompt: event.target.value })} />
       </div>
 
       <SelectField
         label="Rendition language"
+        tooltip={renderFormTooltips.language}
         value={form.language}
         options={supportedRenditionLanguages}
         onChange={(language) => onPatch({ language })}
       />
-      <label className="toggle-row">
+      <label className="toggle-row" title={renderFormTooltips.subtitles}>
         <input
           type="checkbox"
           checked={form.enableSubtitles}
@@ -1652,12 +1754,17 @@ function SimpleRenderForm({
         Enable subtitles
       </label>
 
-      <WizardSection title="Campaign metadata" actionLabel="Add field" onAction={onMetadataAdd}>
+      <WizardSection
+        title="Campaign metadata"
+        tooltip={renderFormTooltips.campaignMetadata}
+        actionLabel="Add field"
+        onAction={onMetadataAdd}
+      >
         <div className="wizard-list">
           {metadataWizardItems.map((item, index) => (
             <div className="wizard-key-value" key={`metadata-${index}`}>
               <div className="field">
-                <label>Field</label>
+                <label><LabelWithTooltip label="Field" tooltip={renderFormTooltips.metadataField} /></label>
                 <input
                   value={item.key}
                   onChange={(event) => onMetadataChange(index, { key: event.target.value })}
@@ -1665,7 +1772,7 @@ function SimpleRenderForm({
                 />
               </div>
               <div className="field">
-                <label>Value</label>
+                <label><LabelWithTooltip label="Value" tooltip={renderFormTooltips.metadataValue} /></label>
                 <input
                   value={item.value}
                   onChange={(event) => onMetadataChange(index, { value: event.target.value })}
@@ -1681,33 +1788,37 @@ function SimpleRenderForm({
       </WizardSection>
 
       <PublishTargets form={form} onPatch={onPatch} />
-      <TextField label="Feed tags" value={form.feedTags} onChange={(feedTags) => onPatch({ feedTags })} />
+      <TextField label="Feed tags" tooltip={renderFormTooltips.feedTags} value={form.feedTags} onChange={(feedTags) => onPatch({ feedTags })} />
 
       <WizardSection
         title="Server-side outro image from URL"
+        tooltip={renderFormTooltips.outro}
         badge={usesServerGeneratedOutro ? "enabled" : "URL required"}
       >
         <div className="form-grid">
-          <TextField label="CTA outro URL" value={form.ctaUrl} onChange={(ctaUrl) => onPatch({ ctaUrl })} />
+          <TextField label="CTA outro URL" tooltip={renderFormTooltips.ctaUrl} value={form.ctaUrl} onChange={(ctaUrl) => onPatch({ ctaUrl })} />
           {usesServerGeneratedOutro && (
             <>
               <TextField
                 label="CTA top text"
+                tooltip={renderFormTooltips.ctaTextTop}
                 value={form.ctaTextTop}
                 onChange={(ctaTextTop) => onPatch({ ctaTextTop })}
               />
               <TextField
                 label="CTA bottom text"
+                tooltip={renderFormTooltips.ctaTextBottom}
                 value={form.ctaTextBottom}
                 onChange={(ctaTextBottom) => onPatch({ ctaTextBottom })}
               />
               <TextField
                 label="CTA logo URL"
+                tooltip={renderFormTooltips.ctaLogo}
                 value={form.ctaLogo}
                 onChange={(ctaLogo) => onPatch({ ctaLogo })}
                 full
               />
-              <label className="toggle-row">
+              <label className="toggle-row" title={renderFormTooltips.outroAnimation}>
                 <input
                   type="checkbox"
                   checked={form.addOutroAnimation}
@@ -1715,7 +1826,7 @@ function SimpleRenderForm({
                 />
                 Animate server-generated outro
               </label>
-              <label className="toggle-row">
+              <label className="toggle-row" title={renderFormTooltips.outroFocusAnimation}>
                 <input
                   type="checkbox"
                   checked={form.addOutroFocusArea}
@@ -1723,7 +1834,7 @@ function SimpleRenderForm({
                 />
                 Animate outro image focus area
               </label>
-              <label className="toggle-row">
+              <label className="toggle-row" title={renderFormTooltips.footerAnimation}>
                 <input
                   type="checkbox"
                   checked={form.addFooterAnimation}
@@ -1737,11 +1848,11 @@ function SimpleRenderForm({
       </WizardSection>
 
       {usesServerGeneratedOutro && form.addOutroFocusArea && (
-        <WizardSection title="Outro focus area">
+        <WizardSection title="Outro focus area" tooltip={renderFormTooltips.outroFocusArea}>
           <div className="focus-area-grid">
             {(["x", "y", "width", "height"] as Array<keyof OutroFocusAreaWizard>).map((field) => (
               <div className="field" key={field}>
-                <label>{field}</label>
+                <label><LabelWithTooltip label={field} tooltip={renderFormTooltips.outroFocusArea} /></label>
                 <input
                   type="number"
                   min="0"
@@ -1754,7 +1865,13 @@ function SimpleRenderForm({
         </WizardSection>
       )}
 
-      <TextField label="Payment tx hash (manual fallback)" value={form.txHash} onChange={(txHash) => onPatch({ txHash })} full />
+      <TextField
+        label="Payment tx hash (manual fallback)"
+        tooltip={renderFormTooltips.paymentTxHash}
+        value={form.txHash}
+        onChange={(txHash) => onPatch({ txHash })}
+        full
+      />
     </div>
   );
 }
@@ -1914,7 +2031,7 @@ function PublishTargets({
 }) {
   return (
     <div className="field full publish-targets">
-      <label>Publish to</label>
+      <label><LabelWithTooltip label="Publish to" tooltip={renderFormTooltips.publishTargets} /></label>
       <div className="publish-target-options">
         <label className="toggle-row" title="Publishes to the application feed">
           <input
@@ -1948,28 +2065,29 @@ function AdvancedRenderForm({
 }) {
   return (
     <div className="form-grid">
-      <TextField label="INFT title" value={form.inftTitle} onChange={(inftTitle) => onPatch({ inftTitle })} full />
+      <TextField label="INFT title" tooltip={renderFormTooltips.inftTitle} value={form.inftTitle} onChange={(inftTitle) => onPatch({ inftTitle })} full />
       <div className="field full">
-        <label>Image URL metadata JSON array</label>
+        <label><LabelWithTooltip label="Image URL metadata JSON array" tooltip={renderFormTooltips.imageJson} /></label>
         <textarea value={form.imageUrls} onChange={(event) => onPatch({ imageUrls: event.target.value })} />
       </div>
       <div className="field full">
-        <label>JSON payload metadata</label>
+        <label><LabelWithTooltip label="JSON payload metadata" tooltip={renderFormTooltips.metadataJson} /></label>
         <textarea value={form.metadata} onChange={(event) => onPatch({ metadata: event.target.value })} />
       </div>
       <PublishTargets form={form} onPatch={onPatch} />
-      <TextField label="Feed tags" value={form.feedTags} onChange={(feedTags) => onPatch({ feedTags })} />
+      <TextField label="Feed tags" tooltip={renderFormTooltips.feedTags} value={form.feedTags} onChange={(feedTags) => onPatch({ feedTags })} />
       <div className="field full">
-        <label>Prompt</label>
+        <label><LabelWithTooltip label="Prompt" tooltip={renderFormTooltips.prompt} /></label>
         <textarea value={form.prompt} onChange={(event) => onPatch({ prompt: event.target.value })} />
       </div>
       <SelectField
         label="Rendition language"
+        tooltip={renderFormTooltips.language}
         value={form.language}
         options={supportedRenditionLanguages}
         onChange={(language) => onPatch({ language })}
       />
-      <label className="toggle-row">
+      <label className="toggle-row" title={renderFormTooltips.subtitles}>
         <input
           type="checkbox"
           checked={form.enableSubtitles}
@@ -1977,12 +2095,12 @@ function AdvancedRenderForm({
         />
         Enable subtitles
       </label>
-      <TextField label="CTA outro URL" value={form.ctaUrl} onChange={(ctaUrl) => onPatch({ ctaUrl })} />
-      <TextField label="CTA top text" value={form.ctaTextTop} onChange={(ctaTextTop) => onPatch({ ctaTextTop })} />
-      <TextField label="CTA bottom text" value={form.ctaTextBottom} onChange={(ctaTextBottom) => onPatch({ ctaTextBottom })} />
-      <TextField label="CTA logo URL" value={form.ctaLogo} onChange={(ctaLogo) => onPatch({ ctaLogo })} full />
-      <TextField label="Payment tx hash (manual fallback)" value={form.txHash} onChange={(txHash) => onPatch({ txHash })} full />
-      <label className="toggle-row">
+      <TextField label="CTA outro URL" tooltip={renderFormTooltips.ctaUrl} value={form.ctaUrl} onChange={(ctaUrl) => onPatch({ ctaUrl })} />
+      <TextField label="CTA top text" tooltip={renderFormTooltips.ctaTextTop} value={form.ctaTextTop} onChange={(ctaTextTop) => onPatch({ ctaTextTop })} />
+      <TextField label="CTA bottom text" tooltip={renderFormTooltips.ctaTextBottom} value={form.ctaTextBottom} onChange={(ctaTextBottom) => onPatch({ ctaTextBottom })} />
+      <TextField label="CTA logo URL" tooltip={renderFormTooltips.ctaLogo} value={form.ctaLogo} onChange={(ctaLogo) => onPatch({ ctaLogo })} full />
+      <TextField label="Payment tx hash (manual fallback)" tooltip={renderFormTooltips.paymentTxHash} value={form.txHash} onChange={(txHash) => onPatch({ txHash })} full />
+      <label className="toggle-row" title={renderFormTooltips.outroAnimation}>
         <input
           type="checkbox"
           checked={form.addOutroAnimation}
@@ -1990,7 +2108,7 @@ function AdvancedRenderForm({
         />
         Animate server-generated outro
       </label>
-      <label className="toggle-row">
+      <label className="toggle-row" title={renderFormTooltips.outroFocusAnimation}>
         <input
           type="checkbox"
           checked={form.addOutroFocusArea}
@@ -1998,7 +2116,7 @@ function AdvancedRenderForm({
         />
         Animate outro image focus area
       </label>
-      <label className="toggle-row">
+      <label className="toggle-row" title={renderFormTooltips.footerAnimation}>
         <input
           type="checkbox"
           checked={form.addFooterAnimation}
@@ -2007,14 +2125,14 @@ function AdvancedRenderForm({
         Animate per-scene CTA footer
       </label>
       <div className="field full">
-        <label>Outro focus area JSON</label>
+        <label><LabelWithTooltip label="Outro focus area JSON" tooltip={renderFormTooltips.outroFocusArea} /></label>
         <textarea
           value={form.outroFocusArea}
           onChange={(event) => onPatch({ outroFocusArea: event.target.value })}
         />
       </div>
       <div className="field full">
-        <label>Generated SuperReferrals payload preview</label>
+        <label><LabelWithTooltip label="Generated SuperReferrals payload preview" tooltip={renderFormTooltips.payloadPreview} /></label>
         <textarea className="payload-preview" value={generationPayloadPreview} readOnly />
       </div>
     </div>
@@ -2023,12 +2141,14 @@ function AdvancedRenderForm({
 
 function WizardSection({
   title,
+  tooltip,
   badge,
   actionLabel,
   onAction,
   children
 }: {
   title: string;
+  tooltip?: string;
   badge?: string;
   actionLabel?: string;
   onAction?: () => void;
@@ -2038,7 +2158,7 @@ function WizardSection({
     <div className="wizard-section full">
       <div className="wizard-section-header">
         <div>
-          <label>{title}</label>
+          <label><LabelWithTooltip label={title} tooltip={tooltip} /></label>
           {badge && <span className="badge">{badge}</span>}
         </div>
         {actionLabel && onAction && (
@@ -2383,14 +2503,30 @@ function formatAtomicAmountString(amountAtomic?: string, decimals?: number) {
   }
 }
 
+type SelectFieldOption = string | { value: string; label: string };
+
+function LabelWithTooltip({ label, tooltip }: { label: ReactNode; tooltip?: string }) {
+  if (!tooltip) {
+    return <>{label}</>;
+  }
+  return (
+    <span className="label-with-tooltip" title={tooltip}>
+      <span>{label}</span>
+      <CircleHelp size={13} aria-hidden="true" />
+    </span>
+  );
+}
+
 function TextField({
   label,
+  tooltip,
   value,
   onChange,
   type = "text",
   full = false
 }: {
   label: string;
+  tooltip?: string;
   value: string | number;
   onChange: (value: string) => void;
   type?: string;
@@ -2398,28 +2534,28 @@ function TextField({
 }) {
   return (
     <div className={`field ${full ? "full" : ""}`}>
-      <label>{label}</label>
+      <label><LabelWithTooltip label={label} tooltip={tooltip} /></label>
       <input type={type} value={value} onChange={(event) => onChange(event.target.value)} />
     </div>
   );
 }
 
-type SelectFieldOption = string | { value: string; label: string };
-
 function SelectField({
   label,
+  tooltip,
   value,
   options,
   onChange
 }: {
   label: string;
+  tooltip?: string;
   value: string;
   options: SelectFieldOption[];
   onChange: (value: string) => void;
 }) {
   return (
     <div className="field">
-      <label>{label}</label>
+      <label><LabelWithTooltip label={label} tooltip={tooltip} /></label>
       <select value={value} onChange={(event) => onChange(event.target.value)}>
         {options.map((option) => {
           const optionValue = typeof option === "string" ? option : option.value;

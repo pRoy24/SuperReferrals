@@ -20,7 +20,8 @@ import {
   VolumeX,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent, type RefObject, type UIEvent, type WheelEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent, type PointerEvent, type RefObject, type UIEvent, type WheelEvent } from "react";
+import BreadcrumbNav from "@/components/BreadcrumbNav";
 import { DEFAULT_FEED_VIDEO_VOLUME, persistFeedVideoVolume, readFeedVideoVolume, subscribeFeedVideoVolume } from "@/lib/feed-video-preferences";
 import { samsarAuthHeaders } from "@/lib/storefront-auth-client";
 import type { FeedSortOption, PublicFeedItem } from "@/lib/types";
@@ -557,6 +558,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
           <h1>Video Feed</h1>
         </div>
         <div className="feed-toolbar">
+          <BreadcrumbNav />
           <button className={`icon-toggle ${viewMode === "mobile" ? "active" : ""}`} onClick={() => setViewMode("mobile")} title="Mobile feed">
             <Smartphone size={18} />
           </button>
@@ -624,7 +626,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
                 mobileCardRefs.current[item.id] = node;
               }}
             >
-              <FeedVideo item={item} active={index === activeIndex} muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => selectItem(index + 1)} onProgress={handleVideoProgress} />
+              <FeedVideo item={item} active={index === activeIndex} muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => selectItem(index + 1)} onProgress={handleVideoProgress} onPlayStateChange={setPlaying} />
               <MobileOverlay
                 item={item}
                 muted={muted}
@@ -668,7 +670,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
                 className={`desktop-feed-card ${index === activeIndex ? "active" : ""}`}
                 key={item.id}
               >
-                <FeedVideo item={item} active={index === activeIndex} muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => selectItem(index + 1)} onProgress={handleVideoProgress} />
+                <FeedVideo item={item} active={index === activeIndex} muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => selectItem(index + 1)} onProgress={handleVideoProgress} onPlayStateChange={setPlaying} />
               </article>
             ))}
             <DesktopStepNavigation
@@ -879,7 +881,8 @@ function FeedVideo({
   playing,
   videoRefs,
   onEnded,
-  onProgress
+  onProgress,
+  onPlayStateChange
 }: {
   item: PublicFeedItem;
   active: boolean;
@@ -888,9 +891,11 @@ function FeedVideo({
   videoRefs: RefObject<Record<string, HTMLVideoElement | null>>;
   onEnded: () => void;
   onProgress: (id: string, video: HTMLVideoElement) => void;
+  onPlayStateChange: (nextPlaying: boolean) => void;
 }) {
   const ratio = feedAspectRatioStyle(item);
   const frameRef = useRef<HTMLDivElement | null>(null);
+  const pointerStart = useRef<{ x: number; y: number } | null>(null);
   const [frameReady, setFrameReady] = useState(false);
   const [posterVisible, setPosterVisible] = useState(Boolean(item.posterUrl));
   const posterUrl = frameReady ? item.posterUrl : undefined;
@@ -929,6 +934,34 @@ function FeedVideo({
     setPosterVisible(false);
   }
 
+  function handleVideoPointerDown(event: PointerEvent<HTMLVideoElement>) {
+    pointerStart.current = { x: event.clientX, y: event.clientY };
+  }
+
+  function handleVideoClick(event: MouseEvent<HTMLVideoElement>) {
+    const start = pointerStart.current;
+    pointerStart.current = null;
+    if (!active) {
+      return;
+    }
+    if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) {
+      return;
+    }
+    event.stopPropagation();
+    const video = event.currentTarget;
+    const nextPlaying = video.paused || video.ended;
+    if (nextPlaying) {
+      if (video.ended) {
+        video.currentTime = 0;
+      }
+      onPlayStateChange(true);
+      video.play().catch(() => onPlayStateChange(false));
+      return;
+    }
+    video.pause();
+    onPlayStateChange(false);
+  }
+
   return (
     <div
       className={`feed-video-frame ${item.aspectRatio === "9:16" ? "portrait" : "landscape"}`}
@@ -957,9 +990,11 @@ function FeedVideo({
         autoPlay={active && playing}
         width={item.aspectRatio === "9:16" ? 9 : 16}
         onCanPlay={(event) => onProgress(item.id, event.currentTarget)}
+        onClick={handleVideoClick}
         onDurationChange={(event) => onProgress(item.id, event.currentTarget)}
         onEnded={onEnded}
         onLoadedMetadata={(event) => onProgress(item.id, event.currentTarget)}
+        onPointerDown={handleVideoPointerDown}
         onPlaying={revealVideoFrame}
         onSeeked={(event) => onProgress(item.id, event.currentTarget)}
         onTimeUpdate={(event) => onProgress(item.id, event.currentTarget)}

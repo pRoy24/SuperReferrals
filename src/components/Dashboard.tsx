@@ -42,6 +42,7 @@ import {
   removeAuthCredentialsFromCurrentUrl,
   storeSamsarCredentials
 } from "@/lib/storefront-auth-client";
+import BreadcrumbNav from "@/components/BreadcrumbNav";
 import StorefrontVideoGrid from "@/components/StorefrontVideoGrid";
 import { isUsableEvmAddress } from "@/lib/wallet-address";
 import type { Customer, INFTPaidAction, ModelPricingConfiguration, PaymentCurrencySymbol, SuperReferralsStore, VideoAspectRatio, VideoModel } from "@/lib/types";
@@ -643,9 +644,12 @@ export default function Dashboard() {
               Purchase credits or sign in, define public per-second render pricing in USDC, and publish your SuperReferrals storefront.
             </p>
           </div>
-          <button className="btn" onClick={() => load()} title="Refresh data">
-            <RefreshCw size={16} /> Refresh
-          </button>
+          <div className="page-top-actions">
+            <BreadcrumbNav />
+            <button className="btn" onClick={() => load()} title="Refresh data">
+              <RefreshCw size={16} /> Refresh
+            </button>
+          </div>
         </div>
 
         {showStagingEnvironmentNotice && (
