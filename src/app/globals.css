@@ -1771,6 +1771,51 @@ h3 {
   margin-top: 10px;
 }
 
+.storefront-user-main .section-title.compact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.task-history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.task-status-item {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+}
+
+.task-status-item .item-title,
+.task-status-item .subtle,
+.task-status-item .button-row {
+  margin-bottom: 0;
+}
+
+.task-status-item .button-row {
+  margin-top: 2px;
+}
+
+.task-status-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  line-height: 1.35;
+}
+
+.task-status-summary span:not(:last-child)::after {
+  content: "·";
+  margin-left: 10px;
+  color: var(--border);
+}
+
+.rotate-180 {
+  transform: rotate(180deg);
+}
+
 .storefront-user-main input,
 .storefront-user-main textarea,
 .storefront-user-main select {

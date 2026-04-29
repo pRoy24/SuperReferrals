@@ -15,6 +15,21 @@ type BurnAuthorization = {
   expiresAt?: string;
 };
 
+type BurnGenerationINFTResult = {
+  burned: boolean;
+  cleanupOnly?: boolean;
+  inftId?: string;
+  tokenId?: string;
+  contractAddress?: string;
+  txHash?: string;
+  mock?: boolean;
+  recorded?: boolean;
+  authorizedBy?: string;
+  audit?: ZeroGArtifact;
+  warning?: string;
+  reason?: string;
+};
+
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const generation = await getGeneration(id);
@@ -63,19 +78,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (!current) {
         throw new Error("generation not found");
       }
-      if (burnResult?.burned) {
+      if (burnResult?.burned || burnResult?.cleanupOnly) {
         if (burnResult.audit) {
           addAgentTownEvent(store, {
             id: createId("evt"),
             fromAgentId: "superreferrals-platform",
             channel: "0g",
             eventType: "receipt",
-            content: `INFT ${burnResult.inftId || current.inftId || id} burn authorized by token owner and executed by platform contract owner.`,
+            content: burnResult.burned
+              ? `INFT ${burnResult.inftId || current.inftId || id} burn authorized by token owner and executed by platform contract owner.`
+              : `INFT ${burnResult.inftId || current.inftId || id} burn was authorized by token owner, but on-chain burn failed. Local video, feed, and INFT records were removed.`,
             payload: {
               generationId: id,
               inftId: burnResult.inftId || current.inftId,
               tokenId: burnResult.tokenId,
               txHash: burnResult.txHash,
+              cleanupOnly: burnResult.cleanupOnly,
+              warning: burnResult.warning,
               audit: burnResult.audit
             },
             createdAt: nowIso()
@@ -86,7 +105,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           inftId: burnResult.inftId || current.inftId,
           tokenId: burnResult.tokenId,
           contractAddress: burnResult.contractAddress,
-          reason: "burned",
+          reason: burnResult.burned ? "burned" : "deleted",
           txHash: burnResult.txHash
         });
         return {
@@ -152,7 +171,7 @@ async function prepareGenerationINFTBurn(id: string, body: Record<string, unknow
   };
 }
 
-async function burnGenerationINFT(generation: Generation, body: Record<string, unknown>) {
+async function burnGenerationINFT(generation: Generation, body: Record<string, unknown>): Promise<BurnGenerationINFTResult> {
   const store = await readStore();
   const inft = findGenerationINFT(store, generation);
   const burnTxHash = cleanOptionalString(body.burnTxHash || body.txHash);
@@ -168,42 +187,76 @@ async function burnGenerationINFT(generation: Generation, body: Record<string, u
     return { burned: false, inftId: generation.inftId, reason: "INFT was not found in the local store." };
   }
   if (burnTxHash) {
-    await verifyINFTBurnTransaction({
-      txHash: burnTxHash,
-      tokenId: inft.tokenId,
-      contractAddress: inft.contractAddress
-    });
-    return {
-      burned: true,
-      inftId: inft.id,
-      tokenId: inft.tokenId,
-      contractAddress: inft.contractAddress,
-      txHash: burnTxHash,
-      recorded: true
-    };
+    try {
+      await verifyINFTBurnTransaction({
+        txHash: burnTxHash,
+        tokenId: inft.tokenId,
+        contractAddress: inft.contractAddress
+      });
+      return {
+        burned: true,
+        inftId: inft.id,
+        tokenId: inft.tokenId,
+        contractAddress: inft.contractAddress,
+        txHash: burnTxHash,
+        recorded: true
+      };
+    } catch (error) {
+      return buildLocalBurnCleanupResult(generation, inft, error, { txHash: burnTxHash });
+    }
   }
-  const preflight = await preflightINFTBurn({ tokenId: inft.tokenId, contractAddress: inft.contractAddress });
   const authorization = await verifyBurnAuthorization(body.burnAuthorization, generation, inft);
   const audit = await persistBurnAuditToZeroG({
     generation,
     inft,
     authorization
   });
-  const result = await burnINFT({
-    tokenId: inft.tokenId,
-    contractAddress: inft.contractAddress,
-    burnFunctionName: preflight.burnFunctionName,
-    skipPreflight: true
-  });
+  try {
+    const preflight = await preflightINFTBurn({ tokenId: inft.tokenId, contractAddress: inft.contractAddress });
+    const result = await burnINFT({
+      tokenId: inft.tokenId,
+      contractAddress: inft.contractAddress,
+      burnFunctionName: preflight.burnFunctionName,
+      skipPreflight: true
+    });
+    return {
+      burned: true,
+      inftId: inft.id,
+      tokenId: inft.tokenId,
+      contractAddress: inft.contractAddress,
+      txHash: result.txHash,
+      mock: result.mock,
+      authorizedBy: authorization.signer,
+      audit
+    };
+  } catch (error) {
+    return buildLocalBurnCleanupResult(generation, inft, error, {
+      authorizedBy: authorization.signer,
+      audit
+    });
+  }
+}
+
+function buildLocalBurnCleanupResult(
+  generation: Generation,
+  inft: INFTRecord,
+  error: unknown,
+  extra: {
+    txHash?: string;
+    authorizedBy?: string;
+    audit?: ZeroGArtifact;
+  } = {}
+): BurnGenerationINFTResult {
   return {
-    burned: true,
-    inftId: inft.id,
+    burned: false,
+    cleanupOnly: true,
+    inftId: inft.id || generation.inftId,
     tokenId: inft.tokenId,
     contractAddress: inft.contractAddress,
-    txHash: result.txHash,
-    mock: result.mock,
-    authorizedBy: authorization.signer,
-    audit
+    txHash: extra.txHash,
+    authorizedBy: extra.authorizedBy,
+    audit: extra.audit,
+    warning: error instanceof Error ? error.message : String(error)
   };
 }
 

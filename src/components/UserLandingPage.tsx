@@ -385,6 +385,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const [renderFlow, setRenderFlow] = useState<RenderFlowState>({ status: "idle", message: "" });
   const [renderSessionLocked, setRenderSessionLocked] = useState(false);
   const [renderOrientationWarning, setRenderOrientationWarning] = useState<RenderOrientationWarning | null>(null);
+  const [showOlderTasks, setShowOlderTasks] = useState(false);
   const generationSubmitInFlightRef = useRef(false);
   const pendingRenderCurrencyRef = useRef<PaymentCurrencySymbol | null>(null);
 
@@ -450,6 +451,28 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const userGenerations = connectedSubAccount
     ? store?.generations.filter((generation) => generation.subAccountId === connectedSubAccount.id) || []
     : [];
+  const sortedUserGenerations = useMemo(
+    () => [...userGenerations].sort((left, right) => generationTime(right) - generationTime(left)),
+    [userGenerations]
+  );
+  const latestCompletedGeneration = sortedUserGenerations.find((generation) => generation.status === "COMPLETED");
+  const primaryTaskGenerations = useMemo(() => {
+    const visible = new Map<string, Generation>();
+    const latest = sortedUserGenerations[0];
+    if (latest) {
+      visible.set(latest.id, latest);
+    }
+    if (latestCompletedGeneration) {
+      visible.set(latestCompletedGeneration.id, latestCompletedGeneration);
+    }
+    return [...visible.values()];
+  }, [latestCompletedGeneration, sortedUserGenerations]);
+  const olderTaskGenerations = useMemo(
+    () => sortedUserGenerations.filter((generation) =>
+      !primaryTaskGenerations.some((visible) => visible.id === generation.id)
+    ),
+    [primaryTaskGenerations, sortedUserGenerations]
+  );
   const trackedGeneration = renderFlow.generationId
     ? userGenerations.find((generation) => generation.id === renderFlow.generationId)
     : undefined;
@@ -1489,18 +1512,44 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
             <div className="list">
               <div className="section-title compact">
                 <h3>Task status</h3>
+                {olderTaskGenerations.length > 0 && (
+                  <button
+                    className="btn small"
+                    onClick={() => setShowOlderTasks((current) => !current)}
+                    type="button"
+                  >
+                    <ChevronDown size={15} className={showOlderTasks ? "rotate-180" : ""} />
+                    {showOlderTasks ? "Hide older" : `View older (${olderTaskGenerations.length})`}
+                  </button>
+                )}
               </div>
               {connectedSubAccount && userGenerations.length === 0 && <p className="subtle">No render tasks for this wallet yet.</p>}
-              {userGenerations.map((generation) => (
+              {primaryTaskGenerations.map((generation) => (
                 <GenerationItem
                   key={generation.id}
                   generation={generation}
                   quote={store?.quotes.find((quote) => quote.id === generation.payment.quoteId) || null}
                   busy={busy === generation.id}
+                  showReview={generation.id === latestCompletedGeneration?.id}
                   wallet={connectedSubAccount?.wallet || walletAddress}
                   onSync={() => syncGeneration(generation.id)}
                 />
               ))}
+              {showOlderTasks && olderTaskGenerations.length > 0 && (
+                <div className="task-history-list">
+                  {olderTaskGenerations.map((generation) => (
+                    <GenerationItem
+                      key={generation.id}
+                      generation={generation}
+                      quote={store?.quotes.find((quote) => quote.id === generation.payment.quoteId) || null}
+                      busy={busy === generation.id}
+                      showReview={false}
+                      wallet={connectedSubAccount?.wallet || walletAddress}
+                      onSync={() => syncGeneration(generation.id)}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </section>
@@ -2412,32 +2461,60 @@ function resolveUserPaymentRail(paymentToken: PaymentToken, settlementToken: Pay
   return paymentToken.address.toLowerCase() === settlementToken.address.toLowerCase() ? "direct" : "keeperhub";
 }
 
+function generationTime(generation: Generation) {
+  return Date.parse(generation.updatedAt || generation.createdAt) || 0;
+}
+
+function generationTaskTitle(generation: Generation) {
+  const metadataTitle = typeof generation.input.metadata?.title === "string"
+    ? generation.input.metadata.title.trim()
+    : "";
+  return metadataTitle || `Render ${generation.id.slice(0, 10)}`;
+}
+
+function formatGenerationTimestamp(generation: Generation) {
+  const value = Date.parse(generation.updatedAt || generation.createdAt);
+  if (!Number.isFinite(value)) {
+    return "recent";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(value);
+}
+
 function GenerationItem({
   generation,
   quote,
   busy,
+  showReview,
   wallet,
   onSync
 }: {
   generation: Generation;
   quote?: PaymentQuote | null;
   busy: boolean;
+  showReview: boolean;
   wallet?: string;
   onSync: () => void;
 }) {
   const badgeClass = generation.status === "COMPLETED" ? "badge ok" : generation.status === "FAILED" ? "badge fail" : "badge";
   const paymentSummary = formatGenerationPaymentSummary(generation, quote);
   return (
-    <div className="item">
+    <div className="item task-status-item">
       <div className="item-title">
-        <strong>{generation.id}</strong>
+        <strong>{generationTaskTitle(generation)}</strong>
         <span className={badgeClass}>{generation.status}</span>
       </div>
-      <p className="subtle">
-        {generation.input.image_urls.length} images · {generation.input.video_model} · {generation.input.aspect_ratio} · {paymentSummary}
+      <p className="subtle task-status-summary">
+        <span>{formatGenerationTimestamp(generation)}</span>
+        <span>{generation.input.image_urls.length} image{generation.input.image_urls.length === 1 ? "" : "s"}</span>
+        <span>{generation.input.video_model}</span>
+        <span>{generation.input.aspect_ratio}</span>
+        <span>{paymentSummary}</span>
       </p>
-      <div className="mono">{generation.samsarSessionId || "pending SuperReferrals session"}</div>
-      {generation.payment.keeperExecutionId && <div className="mono">keeper {generation.payment.keeperExecutionId}</div>}
       {generation.errorMessage && <p className="subtle">{generation.errorMessage}</p>}
       <div className="button-row">
         <button className="btn" onClick={onSync} disabled={busy || generation.status === "COMPLETED"}>
@@ -2446,7 +2523,7 @@ function GenerationItem({
         {generation.inftId && <a className="btn" href={`/inft/${generation.inftId}`}><ExternalLink size={16} /> Open INFT</a>}
         {generation.feed?.published && generation.status === "COMPLETED" && <a className="btn" href={feedHrefForGeneration(generation)}><ExternalLink size={16} /> View in feed</a>}
       </div>
-      {generation.status === "COMPLETED" && (
+      {showReview && generation.status === "COMPLETED" && (
         <StorefrontRatingForm
           customerId={generation.customerId}
           subAccountId={generation.subAccountId}

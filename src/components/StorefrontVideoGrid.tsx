@@ -341,6 +341,12 @@ function VideoActions({
 }
 
 function actionMessage(action: StorefrontVideoAction, result?: Record<string, unknown>) {
+  const burn = result?.burn && typeof result.burn === "object" && !Array.isArray(result.burn)
+    ? result.burn as Record<string, unknown>
+    : {};
+  if (burn.cleanupOnly) {
+    return "On-chain INFT burn was unavailable, so the video, feed, and INFT records were removed locally.";
+  }
   if (action === "publish") {
     return "INFT published to the video feed.";
   }
