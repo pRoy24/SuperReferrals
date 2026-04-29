@@ -2,7 +2,7 @@
 
 import { Flame, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { encodeFunctionData, parseAbi } from "viem";
+import { decodeFunctionResult, encodeFunctionData, parseAbi } from "viem";
 import VideoMosaic from "@/components/VideoMosaic";
 import { requestWalletAccounts, type EthereumProvider } from "@/lib/browser-wallets";
 import { fetchWithSamsarAuth } from "@/lib/storefront-auth-client";
@@ -34,6 +34,21 @@ type INFTBurnRequest = {
   mock?: boolean;
   chain?: INFTBurnChain;
 };
+type INFTBurnDiagnostics = {
+  tokenId: string;
+  contractAddress: string;
+  from: string;
+  owner?: string;
+  contractOwner?: string;
+  approved?: string;
+  approvedForAll?: boolean;
+  authorized: boolean;
+  ownerReadError?: string;
+  contractOwnerReadError?: string;
+  approvalReadError?: string;
+  operatorApprovalReadError?: string;
+  burnCallError?: string;
+};
 
 type StorefrontVideoGridProps = {
   actor: "owner" | "user";
@@ -51,7 +66,13 @@ type StorefrontVideoGridProps = {
   wallet?: string;
 };
 
-const inftBurnAbi = parseAbi(["function burnAgent(uint256 tokenId)"]);
+const inftBurnAbi = parseAbi([
+  "function burnAgent(uint256 tokenId)",
+  "function owner() view returns (address)",
+  "function ownerOf(uint256 tokenId) view returns (address)",
+  "function getApproved(uint256 tokenId) view returns (address)",
+  "function isApprovedForAll(address owner, address operator) view returns (bool)"
+]);
 const INFT_BURN_GAS_LIMIT = "0x7a120";
 
 export default function StorefrontVideoGrid({
@@ -547,6 +568,12 @@ async function requestWalletINFTBurn({
   if (owner && !sameWallet(from, owner)) {
     throw new Error("The connected wallet does not match the INFT owner wallet.");
   }
+  const diagnostics = await readINFTBurnDiagnostics(provider, {
+    contractAddress,
+    from,
+    tokenId
+  });
+  assertINFTBurnAuthorized(diagnostics);
 
   const transaction = {
     from,
@@ -558,6 +585,7 @@ async function requestWalletINFTBurn({
     }),
     value: "0x0"
   };
+  await preflightINFTBurn(provider, transaction, diagnostics);
   const gas = await resolveINFTBurnGas(provider, transaction, chain);
   const txHash = String(await provider.request({
     method: "eth_sendTransaction",
@@ -568,9 +596,120 @@ async function requestWalletINFTBurn({
     throw new Error("Timed out waiting for the INFT burn transaction to confirm.");
   }
   if (!isSuccessfulReceipt(receipt)) {
-    throw new Error("INFT burn transaction reverted.");
+    const latestDiagnostics = await readINFTBurnDiagnostics(provider, {
+      contractAddress,
+      from,
+      tokenId
+    }).catch(() => diagnostics);
+    throw new Error(`INFT burn transaction reverted. ${formatINFTBurnDiagnostics(latestDiagnostics)} Transaction: ${shortHash(txHash)}.`);
   }
   return txHash;
+}
+
+async function readINFTBurnDiagnostics(
+  provider: EthereumProvider,
+  input: { contractAddress: string; from: string; tokenId: string }
+): Promise<INFTBurnDiagnostics> {
+  const diagnostics: INFTBurnDiagnostics = {
+    tokenId: input.tokenId,
+    contractAddress: input.contractAddress,
+    from: input.from,
+    authorized: false
+  };
+  const tokenIdArg = BigInt(input.tokenId);
+
+  try {
+    diagnostics.owner = String(await readINFTContract(provider, {
+      contractAddress: input.contractAddress,
+      functionName: "ownerOf",
+      args: [tokenIdArg]
+    }));
+  } catch (error) {
+    diagnostics.ownerReadError = formatErrorMessage(error, "ownerOf failed");
+    return diagnostics;
+  }
+  try {
+    diagnostics.contractOwner = String(await readINFTContract(provider, {
+      contractAddress: input.contractAddress,
+      functionName: "owner",
+      args: []
+    }));
+  } catch (error) {
+    diagnostics.contractOwnerReadError = formatErrorMessage(error, "owner failed");
+  }
+  try {
+    diagnostics.approved = String(await readINFTContract(provider, {
+      contractAddress: input.contractAddress,
+      functionName: "getApproved",
+      args: [tokenIdArg]
+    }));
+  } catch (error) {
+    diagnostics.approvalReadError = formatErrorMessage(error, "getApproved failed");
+  }
+  try {
+    diagnostics.approvedForAll = Boolean(await readINFTContract(provider, {
+      contractAddress: input.contractAddress,
+      functionName: "isApprovedForAll",
+      args: [diagnostics.owner, input.from]
+    }));
+  } catch (error) {
+    diagnostics.operatorApprovalReadError = formatErrorMessage(error, "isApprovedForAll failed");
+  }
+
+  diagnostics.authorized = Boolean(
+    sameWallet(input.from, diagnostics.owner) ||
+    sameWallet(input.from, diagnostics.contractOwner) ||
+    sameWallet(input.from, diagnostics.approved) ||
+    diagnostics.approvedForAll
+  );
+  return diagnostics;
+}
+
+async function readINFTContract(
+  provider: EthereumProvider,
+  input: { contractAddress: string; functionName: "owner" | "ownerOf" | "getApproved" | "isApprovedForAll"; args: unknown[] }
+) {
+  const data = encodeFunctionData({
+    abi: inftBurnAbi,
+    functionName: input.functionName,
+    args: input.args as never
+  });
+  const result = await provider.request({
+    method: "eth_call",
+    params: [{ to: input.contractAddress, data }, "latest"]
+  });
+  return decodeFunctionResult({
+    abi: inftBurnAbi,
+    functionName: input.functionName,
+    data: String(result) as `0x${string}`
+  });
+}
+
+function assertINFTBurnAuthorized(diagnostics: INFTBurnDiagnostics) {
+  if (!diagnostics.owner) {
+    throw new Error(`Cannot read owner for INFT token ${diagnostics.tokenId}. ${diagnostics.ownerReadError || "The token may already be burned, the token id may be wrong, or the wallet is on the wrong 0G contract."}`);
+  }
+  if (!diagnostics.authorized) {
+    throw new Error(`Connected wallet cannot burn this INFT. ${formatINFTBurnDiagnostics(diagnostics)} Connect the token owner wallet, contract owner wallet, or approve this wallet for the token before burning.`);
+  }
+}
+
+async function preflightINFTBurn(provider: EthereumProvider, transaction: Record<string, unknown>, diagnostics: INFTBurnDiagnostics) {
+  try {
+    await provider.request({
+      method: "eth_call",
+      params: [compactTransaction({ ...transaction, gas: INFT_BURN_GAS_LIMIT }), "latest"]
+    });
+  } catch (error) {
+    diagnostics.burnCallError = formatErrorMessage(error, "burnAgent call failed");
+    if (isContractRevertError(error)) {
+      throw new Error(`INFT burn preflight reverted before wallet submission. ${formatINFTBurnDiagnostics(diagnostics)} Revert: ${diagnostics.burnCallError}.`);
+    }
+    console.warn("0G INFT burn preflight call failed; continuing to wallet submission because Galileo RPC calls can be noisy.", {
+      diagnostics,
+      error
+    });
+  }
 }
 
 async function ensureWalletNetwork(provider: EthereumProvider, chain: INFTBurnChain) {
@@ -680,8 +819,51 @@ function formatErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function formatINFTBurnDiagnostics(diagnostics: INFTBurnDiagnostics) {
+  const parts = [
+    `token ${diagnostics.tokenId}`,
+    `contract ${shortWallet(diagnostics.contractAddress)}`,
+    `sender ${shortWallet(diagnostics.from)}`,
+    diagnostics.owner ? `token owner ${shortWallet(diagnostics.owner)}` : `ownerOf failed (${diagnostics.ownerReadError || "unknown"})`,
+    diagnostics.contractOwner ? `contract owner ${shortWallet(diagnostics.contractOwner)}` : undefined,
+    diagnostics.approved && !isZeroAddress(diagnostics.approved) ? `approved ${shortWallet(diagnostics.approved)}` : undefined,
+    diagnostics.approvedForAll ? "operator approved" : undefined,
+    diagnostics.contractOwnerReadError ? `owner() error ${diagnostics.contractOwnerReadError}` : undefined,
+    diagnostics.approvalReadError ? `getApproved error ${diagnostics.approvalReadError}` : undefined,
+    diagnostics.operatorApprovalReadError ? `isApprovedForAll error ${diagnostics.operatorApprovalReadError}` : undefined
+  ].filter(Boolean);
+  return parts.join("; ");
+}
+
+function isContractRevertError(error: unknown) {
+  const message = formatErrorMessage(error, "").toLowerCase();
+  return (
+    message.includes("execution reverted") ||
+    message.includes("reverted") ||
+    message.includes("not authorized") ||
+    message.includes("erc721") ||
+    message.includes("nonexistent token")
+  );
+}
+
 function sameWallet(left?: string, right?: string) {
   return Boolean(left && right && left.trim().toLowerCase() === right.trim().toLowerCase());
+}
+
+function isZeroAddress(value?: string) {
+  return /^0x0{40}$/i.test(value || "");
+}
+
+function shortWallet(value = "") {
+  const trimmed = value.trim();
+  if (trimmed.length <= 12) {
+    return trimmed || "wallet";
+  }
+  return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`;
+}
+
+function shortHash(value = "") {
+  return value.length > 14 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value;
 }
 
 function delay(ms: number) {
