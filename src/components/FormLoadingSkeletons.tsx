@@ -193,8 +193,8 @@ export function UserStoreCreatorSkeleton() {
       </section>
 
       <div className="grid public-grid">
-        <section className="stack">
-          <div className="panel">
+        <section className="stack storefront-setup-stack">
+          <div className="panel storefront-wallet-panel">
             <SkeletonPanelHeader icon={<Wallet size={18} />} />
             <div className="form-grid">
               <SkeletonField full />
@@ -212,7 +212,7 @@ export function UserStoreCreatorSkeleton() {
             </div>
           </div>
 
-          <div className="panel">
+          <div className="panel storefront-pricing-panel">
             <SkeletonPanelHeader icon={<CircleDollarSign size={18} />} />
             <div className="list">
               <div className="storefront-condition-tiles">
@@ -226,8 +226,8 @@ export function UserStoreCreatorSkeleton() {
           </div>
         </section>
 
-        <section className="stack">
-          <div className="panel panel-strong">
+        <section className="stack storefront-workflow-stack">
+          <div className="panel panel-strong storefront-render-panel">
             <SkeletonPanelHeader icon={<Play size={18} />} />
             <div className="render-mode-toolbar">
               <SkeletonLine className="skeleton-w-xs" />

@@ -1206,8 +1206,8 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       {paymentSetupNotice && <p className="notice">{paymentSetupNotice}</p>}
 
       <div className="grid public-grid">
-        <section className="stack">
-          <div className="panel">
+        <section className="stack storefront-setup-stack">
+          <div className="panel storefront-wallet-panel">
             <div className="panel-header">
               <h2>Wallet</h2>
               <Wallet size={18} />
@@ -1242,7 +1242,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
             </div>
           </div>
 
-          <div className="panel">
+          <div className="panel storefront-pricing-panel">
             <div className="panel-header">
               <h2>Pricing</h2>
               <CircleDollarSign size={18} />
@@ -1273,8 +1273,8 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
           )}
         </section>
 
-        <section className="stack">
-          <div className="panel panel-strong">
+        <section className="stack storefront-workflow-stack">
+          <div className="panel panel-strong storefront-render-panel">
             <div className="panel-header">
               <h2>Render Task</h2>
               <Play size={18} />

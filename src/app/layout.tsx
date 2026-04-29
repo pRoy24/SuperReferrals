@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import BreadcrumbNav from "@/components/BreadcrumbNav";
 import PageAssistant from "@/components/PageAssistant";
 import ProductionHackathonBanner from "@/components/ProductionHackathonBanner";
 import TextareaAutosizeInstaller from "@/components/TextareaAutosizeInstaller";
@@ -38,6 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           enabled={deploymentEnvironment === "production"}
           stagingUrl={hackathonStagingUrl}
         />
+        <BreadcrumbNav />
         {children}
         <PageAssistant />
       </body>
