@@ -223,17 +223,14 @@ function resolveZeroGComputePrivateKey(config: ZeroGComputeConfig): ZeroGCompute
     return { privateKey: match.value, source: match.name };
   }
 
-  if (allowsLegacyComputeKeyFallback(config)) {
-    const privateKey = env("OG_PRIVATE_KEY");
-    if (privateKey) {
-      return { privateKey, source: "OG_PRIVATE_KEY" };
-    }
+  const privateKey = env("OG_PRIVATE_KEY");
+  if (privateKey) {
+    return { privateKey, source: "OG_PRIVATE_KEY" };
   }
 
   const candidates = scopedEnvCandidates("OG_COMPUTE_PRIVATE_KEY", config).slice(0, 8).join(", ");
   throw new Error(
-    `A platform 0G Compute signer is required for live assistant requests. Configure one of: ${candidates}. ` +
-      "Deployed assistant compute intentionally does not fall back to customer/project OG_PRIVATE_KEY."
+    `A platform 0G Compute signer is required for live assistant requests. Configure OG_PRIVATE_KEY or one of: ${candidates}.`
   );
 }
 
@@ -288,11 +285,6 @@ function normalizeEnvSuffix(value: string) {
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values.filter(Boolean))];
-}
-
-function allowsLegacyComputeKeyFallback(config: ZeroGComputeConfig) {
-  const deployment = normalizeEnvSuffix(config.deploymentEnvironment);
-  return !process.env.VERCEL && !process.env.NOW_REGION && !["PRODUCTION", "PREVIEW", "STAGING"].includes(deployment);
 }
 
 function getRuntimeDeploymentEnvironment() {
