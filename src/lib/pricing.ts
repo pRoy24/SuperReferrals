@@ -15,6 +15,7 @@ const allAspectRatios: VideoAspectRatio[] = ["16:9", "9:16"];
 export const paidINFTActions: INFTPaidAction[] = [
   "translate",
   "join",
+  "add_subtitles",
   "remove_subtitles",
   "add_outro",
   "update_outro"
@@ -23,6 +24,7 @@ export const paidINFTActions: INFTPaidAction[] = [
 export const defaultINFTActionPricesUsd: Record<INFTPaidAction, number> = {
   translate: 0.75,
   join: 0.75,
+  add_subtitles: 0.2,
   remove_subtitles: 0.2,
   add_outro: 0.35,
   update_outro: 0.35

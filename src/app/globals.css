@@ -1717,7 +1717,12 @@ button.item {
   transform: translate(-50%, -50%);
 }
 
+.payment-action-currency-label {
+  display: none;
+}
+
 .inft-layout .payment-action-control {
+  grid-template-columns: minmax(0, 1fr) minmax(74px, 86px);
   min-width: min(100%, 360px);
 }
 
@@ -1725,6 +1730,116 @@ button.item {
   min-width: 0;
   white-space: normal;
   line-height: 1.15;
+}
+
+.inft-layout .payment-action-currency {
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-left: 0;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.inft-layout .payment-action-currency-label {
+  position: absolute;
+  inset: 0 28px 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 900;
+  pointer-events: none;
+}
+
+.inft-layout .payment-action-currency-icon {
+  left: auto;
+  right: 8px;
+  color: #1d4ed8;
+  transform: translateY(-50%);
+}
+
+.inft-wallet-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  min-width: 0;
+}
+
+.inft-action-picker {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+  min-width: 0;
+}
+
+.inft-action-choice {
+  min-height: 68px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  align-items: center;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 10px;
+  text-align: left;
+  transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+  min-width: 0;
+}
+
+.inft-action-choice svg:first-child {
+  color: #1d4ed8;
+}
+
+.inft-action-choice span {
+  font-size: 13px;
+  font-weight: 900;
+  min-width: 0;
+}
+
+.inft-action-choice small {
+  grid-column: 2 / 4;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.inft-action-choice > svg:last-child {
+  color: #64748b;
+  transition: transform 180ms ease;
+}
+
+.inft-action-choice:hover,
+.inft-action-choice.active {
+  border-color: rgba(37, 99, 235, 0.34);
+  background: var(--soft-blue);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.08);
+}
+
+.inft-action-choice.active > svg:last-child {
+  transform: rotate(180deg);
+}
+
+.inft-action-choice:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.inft-action-detail {
+  margin-top: 10px;
+  border: 1px solid rgba(37, 99, 235, 0.12);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.82);
+  padding: 12px;
+}
+
+.inft-action-detail .payment-action-control,
+.inft-peer-actions .btn {
+  align-self: end;
 }
 
 .render-mode-toolbar {
@@ -3208,6 +3323,8 @@ button.item {
   .stat-row,
   .payment-summary,
   .amount-grid,
+  .inft-wallet-action-row,
+  .inft-action-picker,
   .account-status-strip,
   .account-wallet-link,
   .environment-banner,

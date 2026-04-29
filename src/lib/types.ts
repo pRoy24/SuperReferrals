@@ -16,6 +16,7 @@ export type VideoAspectRatio = "16:9" | "9:16";
 export type INFTPaidAction =
   | "translate"
   | "join"
+  | "add_subtitles"
   | "remove_subtitles"
   | "add_outro"
   | "update_outro";

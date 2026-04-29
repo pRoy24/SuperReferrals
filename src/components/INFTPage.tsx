@@ -1,6 +1,6 @@
 "use client";
 
-import { Cable, ChevronDown, Clapperboard, Copy, Download, ExternalLink, ImagePlus, Languages, Link2, RefreshCw, Scissors, Send, Share2, Wallet } from "lucide-react";
+import { Cable, Captions, ChevronDown, Copy, Download, ExternalLink, ImagePlus, Languages, Link2, RefreshCw, Send, Share2, Wallet } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
 import {
@@ -36,6 +36,8 @@ type ActionPaymentFlow = {
   txHash?: string;
 };
 
+type VideoEditAction = "translate" | "add_subtitles" | "update_outro";
+
 const terminalActionStatuses = new Set(["COMPLETED", "FAILED", "CANCELLED", "REFUNDED"]);
 
 export default function INFTPage({ inft }: { inft: INFTRecord }) {
@@ -43,9 +45,9 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [actionResult, setActionResult] = useState("");
   const [busy, setBusy] = useState("");
   const [peerId, setPeerId] = useState("mock-peer-video-a");
-  const [joinSession, setJoinSession] = useState("");
   const [language, setLanguage] = useState("es");
-  const [outroImageUrl, setOutroImageUrl] = useState("");
+  const [subtitleLanguage, setSubtitleLanguage] = useState("en");
+  const [expandedVideoAction, setExpandedVideoAction] = useState<VideoEditAction | "">("");
   const [updateOutroMode, setUpdateOutroMode] = useState<"cta" | "image">("cta");
   const [updateOutroImageUrl, setUpdateOutroImageUrl] = useState("");
   const [updateOutroCtaUrl, setUpdateOutroCtaUrl] = useState("");
@@ -53,7 +55,6 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [updateOutroTextBottom, setUpdateOutroTextBottom] = useState("");
   const [updateOutroCtaLogo, setUpdateOutroCtaLogo] = useState("");
   const [updateOutroAnimation, setUpdateOutroAnimation] = useState(true);
-  const [showUpdateOutro, setShowUpdateOutro] = useState(false);
   const [updateOutroFocusArea, setUpdateOutroFocusArea] = useState(false);
   const [updateOutroFocusAreaJson, setUpdateOutroFocusAreaJson] = useState(JSON.stringify({ x: 680, y: 296, width: 432, height: 432 }, null, 2));
   const [shareMessage, setShareMessage] = useState("");
@@ -609,6 +610,16 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     runPaidAction("update_outro", payload).catch(() => undefined);
   }
 
+  function toggleVideoAction(action: VideoEditAction) {
+    setExpandedVideoAction((current) => current === action ? "" : action);
+    setActionQuote(null);
+  }
+
+  function addSubtitles() {
+    const cleanLanguage = subtitleLanguage.trim();
+    runPaidAction("add_subtitles", cleanLanguage ? { language: cleanLanguage } : {}).catch(() => undefined);
+  }
+
   return (
     <main className="inft-layout">
       <div className="topbar">
@@ -644,14 +655,10 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
 
           <div className="panel">
             <div className="panel-header">
-              <h2>Agent Actions</h2>
+              <h2>Video Actions</h2>
               <Cable size={18} />
             </div>
-            <div className="form-grid">
-              <TextField label="Target language" value={language} onChange={setLanguage} />
-              <TextField label="Join with session id" value={joinSession} onChange={setJoinSession} />
-              <TextField label="Add outro image URL" value={outroImageUrl} onChange={setOutroImageUrl} full />
-              <TextField label="AXL peer id" value={peerId} onChange={setPeerId} full />
+            <div className="inft-wallet-action-row">
               <TextField
                 label="Payer wallet"
                 value={walletAddress}
@@ -659,8 +666,10 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                   setWalletAddress(value);
                   setActionQuote(null);
                 }}
-                full
               />
+              <button className="btn" onClick={() => connectWallet()} disabled={busy === "wallet"}>
+                <Wallet size={16} /> Connect wallet
+              </button>
             </div>
             {selectedPaymentToken && settlementToken && (
               <INFTActionPaymentSummary
@@ -671,151 +680,161 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                 paymentRail={paymentRail}
               />
             )}
-            <div className="button-row">
-              <button className="btn" onClick={() => connectWallet()} disabled={busy === "wallet"}>
-                <Wallet size={16} /> Connect wallet
-              </button>
-              {actionQuote && (
+            {actionQuote && (
+              <div className="button-row">
                 <span className="badge ok">
                   {actionQuote.totalUsd.toFixed(2)} {actionQuote.settlementCurrency || "USDC"} quote · pay {formatQuotePaymentAmount(actionQuote, selectedPaymentToken)}
                 </span>
-              )}
-              {actionQuote?.checkoutUrl && actionQuote.paymentRail === "uniswap" && (
-                <a className="btn" href={actionQuote.checkoutUrl} target="_blank" rel="noreferrer">
-                  <ExternalLink size={16} /> Open Uniswap
-                </a>
-              )}
-            </div>
-            {actionPaymentFlow.message && <p className="notice">{actionPaymentFlow.message}</p>}
-            <div className="button-row">
-              {selectedPaymentToken && settlementToken && (
-                <>
-                  <INFTActionPayControl
-                    icon={<Languages size={16} />}
-                    label={`Retranslate ${formatActionPrice(customer, "translate")}`}
-                    tokens={selectablePaymentTokens}
-                    selectedSymbol={paymentCurrency}
-                    settlementToken={settlementToken}
-                    disabled={videoActionDisabled}
-                    busy={busy === "translate"}
-                    onSelect={(symbol) => {
-                      setPaymentCurrency(symbol);
-                      setActionQuote(null);
-                    }}
-                    onPay={() => runPaidAction("translate", { language })}
-                  />
-                  <INFTActionPayControl
-                    icon={<Clapperboard size={16} />}
-                    label={`Join ${formatActionPrice(customer, "join")}`}
-                    tokens={selectablePaymentTokens}
-                    selectedSymbol={paymentCurrency}
-                    settlementToken={settlementToken}
-                    disabled={videoActionDisabled || !joinSession}
-                    busy={busy === "join"}
-                    onSelect={(symbol) => {
-                      setPaymentCurrency(symbol);
-                      setActionQuote(null);
-                    }}
-                    onPay={() => runPaidAction("join", { session_id: joinSession, blend_scenes: true })}
-                  />
-                  <INFTActionPayControl
-                    icon={<Scissors size={16} />}
-                    label={`Remove subtitles ${formatActionPrice(customer, "remove_subtitles")}`}
-                    tokens={selectablePaymentTokens}
-                    selectedSymbol={paymentCurrency}
-                    settlementToken={settlementToken}
-                    disabled={videoActionDisabled}
-                    busy={busy === "remove_subtitles"}
-                    onSelect={(symbol) => {
-                      setPaymentCurrency(symbol);
-                      setActionQuote(null);
-                    }}
-                    onPay={() => runPaidAction("remove_subtitles")}
-                  />
-                  <INFTActionPayControl
-                    icon={<ImagePlus size={16} />}
-                    label={`Add outro ${formatActionPrice(customer, "add_outro")}`}
-                    tokens={selectablePaymentTokens}
-                    selectedSymbol={paymentCurrency}
-                    settlementToken={settlementToken}
-                    disabled={videoActionDisabled || !outroImageUrl}
-                    busy={busy === "add_outro"}
-                    onSelect={(symbol) => {
-                      setPaymentCurrency(symbol);
-                      setActionQuote(null);
-                    }}
-                    onPay={() => runPaidAction("add_outro", { outro_image_url: outroImageUrl, add_outro_animation: true })}
-                  />
-                </>
-              )}
-              <button className="btn" onClick={() => setShowUpdateOutro((visible) => !visible)} disabled={videoActionDisabled}>
-                <ImagePlus size={16} /> Update outro options
-              </button>
-              <button className="btn" onClick={() => runAction("message_peer", { peerId, message: "Can we compose a cross-referrer outro trade?" })} disabled={busy === "message_peer"}>
-                <Send size={16} /> AXL message
-              </button>
-            </div>
-            {showUpdateOutro && (
-              <div className="form-grid action-form">
-                <SelectField
-                  label="Update mode"
-                  value={updateOutroMode}
-                  options={[
-                    { value: "cta", label: "Generate CTA outro" },
-                    { value: "image", label: "Use image URL" }
-                  ]}
-                  onChange={(value) => setUpdateOutroMode(value as "cta" | "image")}
-                />
-                {updateOutroMode === "image" ? (
-                  <TextField label="New outro image URL" value={updateOutroImageUrl} onChange={setUpdateOutroImageUrl} full />
-                ) : (
-                  <>
-                    <TextField label="CTA URL" value={updateOutroCtaUrl} onChange={setUpdateOutroCtaUrl} full />
-                    <TextField label="Top text" value={updateOutroTextTop} onChange={setUpdateOutroTextTop} />
-                    <TextField label="Bottom text" value={updateOutroTextBottom} onChange={setUpdateOutroTextBottom} />
-                    <TextField label="CTA logo URL" value={updateOutroCtaLogo} onChange={setUpdateOutroCtaLogo} full />
-                  </>
+                {actionQuote.checkoutUrl && actionQuote.paymentRail === "uniswap" && (
+                  <a className="btn" href={actionQuote.checkoutUrl} target="_blank" rel="noreferrer">
+                    <ExternalLink size={16} /> Open Uniswap
+                  </a>
                 )}
-                <label className="toggle-row">
-                  <input
-                    type="checkbox"
-                    checked={updateOutroAnimation}
-                    disabled={updateOutroMode === "image" && updateOutroFocusArea}
-                    onChange={(event) => setUpdateOutroAnimation(event.target.checked)}
-                  />
-                  Animate outro update
-                </label>
-                {updateOutroMode === "image" && (
-                  <>
+              </div>
+            )}
+            {actionPaymentFlow.message && <p className="notice">{actionPaymentFlow.message}</p>}
+            <div className="inft-action-picker" role="tablist" aria-label="INFT edit video actions">
+              <button
+                className={`inft-action-choice ${expandedVideoAction === "translate" ? "active" : ""}`}
+                type="button"
+                onClick={() => toggleVideoAction("translate")}
+                disabled={videoActionDisabled || !selectedPaymentToken || !settlementToken}
+                aria-expanded={expandedVideoAction === "translate"}
+              >
+                <Languages size={16} />
+                <span>Retranslate</span>
+                <small>{formatActionPrice(customer, "translate", settlementToken?.symbol)}</small>
+                <ChevronDown size={16} aria-hidden="true" />
+              </button>
+              <button
+                className={`inft-action-choice ${expandedVideoAction === "add_subtitles" ? "active" : ""}`}
+                type="button"
+                onClick={() => toggleVideoAction("add_subtitles")}
+                disabled={videoActionDisabled || !selectedPaymentToken || !settlementToken}
+                aria-expanded={expandedVideoAction === "add_subtitles"}
+              >
+                <Captions size={16} />
+                <span>Add Subtitles</span>
+                <small>{formatActionPrice(customer, "add_subtitles", settlementToken?.symbol)}</small>
+                <ChevronDown size={16} aria-hidden="true" />
+              </button>
+              <button
+                className={`inft-action-choice ${expandedVideoAction === "update_outro" ? "active" : ""}`}
+                type="button"
+                onClick={() => toggleVideoAction("update_outro")}
+                disabled={videoActionDisabled || !selectedPaymentToken || !settlementToken}
+                aria-expanded={expandedVideoAction === "update_outro"}
+              >
+                <ImagePlus size={16} />
+                <span>Update Outro</span>
+                <small>{formatActionPrice(customer, "update_outro", settlementToken?.symbol)}</small>
+                <ChevronDown size={16} aria-hidden="true" />
+              </button>
+            </div>
+            {expandedVideoAction && selectedPaymentToken && settlementToken && (
+              <div className="inft-action-detail">
+                {expandedVideoAction === "translate" && (
+                  <div className="form-grid">
+                    <TextField label="Target language" value={language} onChange={setLanguage} />
+                    <INFTActionPayControl
+                      icon={<Languages size={16} />}
+                      label="Retranslate"
+                      price={formatActionPrice(customer, "translate", settlementToken.symbol)}
+                      tokens={selectablePaymentTokens}
+                      selectedSymbol={paymentCurrency}
+                      settlementToken={settlementToken}
+                      disabled={videoActionDisabled}
+                      busy={busy === "translate"}
+                      primary
+                      onSelect={(symbol) => {
+                        setPaymentCurrency(symbol);
+                        setActionQuote(null);
+                      }}
+                      onPay={() => runPaidAction("translate", { language })}
+                    />
+                  </div>
+                )}
+                {expandedVideoAction === "add_subtitles" && (
+                  <div className="form-grid">
+                    <TextField label="Subtitle language" value={subtitleLanguage} onChange={setSubtitleLanguage} />
+                    <INFTActionPayControl
+                      icon={<Captions size={16} />}
+                      label="Add Subtitles"
+                      price={formatActionPrice(customer, "add_subtitles", settlementToken.symbol)}
+                      tokens={selectablePaymentTokens}
+                      selectedSymbol={paymentCurrency}
+                      settlementToken={settlementToken}
+                      disabled={videoActionDisabled}
+                      busy={busy === "add_subtitles"}
+                      primary
+                      onSelect={(symbol) => {
+                        setPaymentCurrency(symbol);
+                        setActionQuote(null);
+                      }}
+                      onPay={addSubtitles}
+                    />
+                  </div>
+                )}
+                {expandedVideoAction === "update_outro" && (
+                  <div className="form-grid">
+                    <SelectField
+                      label="Update mode"
+                      value={updateOutroMode}
+                      options={[
+                        { value: "cta", label: "Generate CTA outro" },
+                        { value: "image", label: "Use image URL" }
+                      ]}
+                      onChange={(value) => setUpdateOutroMode(value as "cta" | "image")}
+                    />
+                    {updateOutroMode === "image" ? (
+                      <TextField label="New outro image URL" value={updateOutroImageUrl} onChange={setUpdateOutroImageUrl} full />
+                    ) : (
+                      <>
+                        <TextField label="CTA URL" value={updateOutroCtaUrl} onChange={setUpdateOutroCtaUrl} full />
+                        <TextField label="Top text" value={updateOutroTextTop} onChange={setUpdateOutroTextTop} />
+                        <TextField label="Bottom text" value={updateOutroTextBottom} onChange={setUpdateOutroTextBottom} />
+                        <TextField label="CTA logo URL" value={updateOutroCtaLogo} onChange={setUpdateOutroCtaLogo} full />
+                      </>
+                    )}
                     <label className="toggle-row">
                       <input
                         type="checkbox"
-                        checked={updateOutroFocusArea}
-                        onChange={(event) => {
-                          const checked = event.target.checked;
-                          setUpdateOutroFocusArea(checked);
-                          if (checked) {
-                            setUpdateOutroAnimation(true);
-                          }
-                        }}
+                        checked={updateOutroAnimation}
+                        disabled={updateOutroMode === "image" && updateOutroFocusArea}
+                        onChange={(event) => setUpdateOutroAnimation(event.target.checked)}
                       />
-                      Add outro focus area
+                      Animate outro update
                     </label>
-                    {updateOutroFocusArea && (
-                      <TextAreaField
-                        label="Outro focus area JSON"
-                        value={updateOutroFocusAreaJson}
-                        onChange={setUpdateOutroFocusAreaJson}
-                        full
-                      />
+                    {updateOutroMode === "image" && (
+                      <>
+                        <label className="toggle-row">
+                          <input
+                            type="checkbox"
+                            checked={updateOutroFocusArea}
+                            onChange={(event) => {
+                              const checked = event.target.checked;
+                              setUpdateOutroFocusArea(checked);
+                              if (checked) {
+                                setUpdateOutroAnimation(true);
+                              }
+                            }}
+                          />
+                          Add outro focus area
+                        </label>
+                        {updateOutroFocusArea && (
+                          <TextAreaField
+                            label="Outro focus area JSON"
+                            value={updateOutroFocusAreaJson}
+                            onChange={setUpdateOutroFocusAreaJson}
+                            full
+                          />
+                        )}
+                      </>
                     )}
-                  </>
-                )}
-                <div className="button-row">
-                  {selectedPaymentToken && settlementToken && (
                     <INFTActionPayControl
                       icon={<ImagePlus size={16} />}
-                      label={`Update outro ${formatActionPrice(customer, "update_outro")}`}
+                      label="Update Outro"
+                      price={formatActionPrice(customer, "update_outro", settlementToken.symbol)}
                       tokens={selectablePaymentTokens}
                       selectedSymbol={paymentCurrency}
                       settlementToken={settlementToken}
@@ -828,13 +847,19 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                       }}
                       onPay={updateOutro}
                     />
-                  )}
-                  <button className="btn" onClick={() => setShowUpdateOutro(false)} disabled={videoActionDisabled}>
-                    Close
-                  </button>
-                </div>
+                  </div>
+                )}
               </div>
             )}
+            <details className="advanced-section inft-peer-actions">
+              <summary>AXL peer message</summary>
+              <div className="form-grid">
+                <TextField label="AXL peer id" value={peerId} onChange={setPeerId} />
+                <button className="btn" onClick={() => runAction("message_peer", { peerId, message: "Can we compose a cross-referrer outro trade?" })} disabled={busy === "message_peer"}>
+                  <Send size={16} /> Send message
+                </button>
+              </div>
+            </details>
             {actionPoll && (
               <div className="item">
                 <div className="item-title">
@@ -1015,6 +1040,7 @@ function SelectField({
 function INFTActionPayControl({
   icon,
   label,
+  price,
   tokens,
   selectedSymbol,
   settlementToken,
@@ -1026,6 +1052,7 @@ function INFTActionPayControl({
 }: {
   icon: ReactNode;
   label: string;
+  price: string;
   tokens: PaymentToken[];
   selectedSymbol: PaymentCurrencySymbol;
   settlementToken: PaymentToken;
@@ -1043,7 +1070,7 @@ function INFTActionPayControl({
   return (
     <div className="payment-action-control" title={currencyTooltip}>
       <button className={`btn payment-action-main ${primary ? "primary" : ""}`} disabled={disabled} onClick={onPay} type="button">
-        {icon} {busy ? "Working..." : `Pay ${selectedSymbol} & ${label}`}
+        {icon} {busy ? "Working..." : `${label} ${price}`}
       </button>
       <span className="payment-action-currency">
         <select
@@ -1060,6 +1087,7 @@ function INFTActionPayControl({
             </option>
           ))}
         </select>
+        <span className="payment-action-currency-label">{selectedSymbol}</span>
         <ChevronDown className="payment-action-currency-icon" size={18} aria-hidden="true" />
       </span>
     </div>
@@ -1117,10 +1145,10 @@ function resolveUserPaymentRail(paymentToken: PaymentToken, settlementToken: Pay
   return paymentToken.address.toLowerCase() === settlementToken.address.toLowerCase() ? "direct" : "keeperhub";
 }
 
-function formatActionPrice(customer: Customer | null, action: INFTPaidAction) {
+function formatActionPrice(customer: Customer | null, action: INFTPaidAction, currency = "USDC") {
   const basePrice = customer?.pricing.inftActionPricesUsd?.[action] ?? defaultINFTActionPricesUsd[action];
   const platformFee = (basePrice * Number(customer?.pricing.platformFeeBps || 0)) / 10_000;
-  return `${(Math.round((basePrice + platformFee) * 100) / 100).toFixed(2)} USD`;
+  return `${(Math.round((basePrice + platformFee) * 100) / 100).toFixed(2)} ${currency}`;
 }
 
 function formatActionLabel(action: string) {

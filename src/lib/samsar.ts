@@ -240,6 +240,12 @@ export async function runSamsarSessionAction(
       webhookUrl: `${appBaseUrl()}/api/webhooks/samsar`
     }, videoOptions));
   }
+  if (action === "add_subtitles") {
+    return samsarClientActionResult(await videoClient.postV2("add_subtitles", {
+      input: sessionActionPayload,
+      webhookUrl: `${appBaseUrl()}/api/webhooks/samsar`
+    }, videoOptions));
+  }
   if (action === "remove_subtitles") {
     return samsarClientActionResult(await videoClient.postV2("remove_subtitles", {
       input: sessionActionPayload,

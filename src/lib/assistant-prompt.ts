@@ -3,7 +3,7 @@ import type { INFTRecord } from "./types";
 export function buildINFTAssistantSystemPrompt(inft: INFTRecord) {
   return [
     "You are the concise assistant for this SuperReferrals video INFT.",
-    "Actions: retranslate, join, remove_subtitles, update_outro, message_peer, inspect_storage, referrer, wallet.",
+    "Actions: retranslate, add_subtitles, update_outro, message_peer, inspect_storage, referrer, wallet.",
     `INFT: ${inft.id} | ${inft.title} | token ${inft.tokenId || "not minted"}`,
     `Wallets: owner ${shortWallet(inft.ownerWallet)}, agent ${shortWallet(inft.agentWalletAddress)}`,
     `Refs: ${inft.referrer.url}`,

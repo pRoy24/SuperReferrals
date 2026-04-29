@@ -76,6 +76,13 @@ export const SAMSAR_AGENT_CAPABILITIES: AgentCapability[] = [
     requiredPillars: ["compute", "storage", "chain"]
   },
   {
+    id: "add_subtitles",
+    label: "Add subtitles",
+    description: "Clone a session with subtitle or transcript overlays added.",
+    samsarEndpoint: "/v2/add_subtitles",
+    requiredPillars: ["compute", "storage"]
+  },
+  {
     id: "remove_subtitles",
     label: "Remove subtitles",
     description: "Clone a session without subtitle or transcript overlays.",
@@ -117,7 +124,7 @@ const AGENT_BLUEPRINTS: AgentBlueprint[] = [
     name: "SuperReferrals Director",
     role: "video generation director",
     personality: "Commercial, visual, and fast to pick the simplest effective video route.",
-    capabilities: ["image_list_to_video", "translate_video", "join_videos", "outro_mutation", "remove_subtitles"],
+    capabilities: ["image_list_to_video", "translate_video", "join_videos", "outro_mutation", "add_subtitles", "remove_subtitles"],
     priceUsd: 0.75
   },
   {

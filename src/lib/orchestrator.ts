@@ -1620,6 +1620,24 @@ export async function runINFTAction(id: string, action: string, payload: Record<
     });
   }
 
+  if (action === "add_subtitles") {
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation);
+    if (!videoSessionId) {
+      throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
+    }
+    const subtitleLanguage = firstString(payload, ["language", "subtitleLanguage", "subtitle_language"]);
+    return runPaidINFTSamsarAction({
+      inft,
+      customer,
+      action: "add_subtitles",
+      actionInput: {
+        videoSessionId,
+        ...(subtitleLanguage ? { language: subtitleLanguage } : {})
+      },
+      paymentPayload: paymentPayloadFromINFTAction(payload)
+    });
+  }
+
   if (action === "remove_subtitles") {
     const videoSessionId = resolveGenerationVideoActionSessionId(generation);
     if (!videoSessionId) {
