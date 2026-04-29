@@ -4,8 +4,8 @@ import { Cable, ChevronDown, Clapperboard, Copy, Download, ExternalLink, ImagePl
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
 import {
+  detectBrowserWalletProviders,
   requestWalletAccounts,
-  subscribeToBrowserWalletProviders,
   type BrowserWalletProvider,
   type EthereumProvider
 } from "@/lib/browser-wallets";
@@ -87,8 +87,6 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       message: error instanceof Error ? error.message : "Unable to load storefront payment settings."
     }));
   }, []);
-
-  useEffect(() => subscribeToBrowserWalletProviders(setWalletProviders), []);
 
   const customer = useMemo(
     () => store?.customers.find((item) => item.id === activeInft.customerId) || null,
@@ -255,8 +253,8 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     window.open(shareUrl.toString(), "_blank", "noopener,noreferrer");
   }
 
-  function selectedEthereumProvider(walletProvider?: BrowserWalletProvider) {
-    const selected = walletProvider || activeWalletProvider || walletProviders[0] || null;
+  function selectedEthereumProvider(walletProvider?: BrowserWalletProvider, detectedProviders = walletProviders) {
+    const selected = walletProvider || activeWalletProvider || detectedProviders[0] || null;
     return {
       walletProvider: selected,
       provider: selected?.provider || window.ethereum
@@ -267,7 +265,14 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     setBusy("wallet");
     setActionPaymentFlow({ status: "idle", message: "" });
     try {
-      const selected = selectedEthereumProvider(walletProvider);
+      const shouldDetectProviders = !walletProvider && walletProviders.length === 0;
+      const detectedProviders = shouldDetectProviders
+        ? await detectBrowserWalletProviders()
+        : walletProviders;
+      if (shouldDetectProviders && detectedProviders.length > 0) {
+        setWalletProviders(detectedProviders);
+      }
+      const selected = selectedEthereumProvider(walletProvider, detectedProviders);
       if (!selected.provider) {
         throw new Error("No injected wallet detected. Open this page in a wallet-enabled browser or enter a wallet address.");
       }

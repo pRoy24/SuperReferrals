@@ -82,6 +82,23 @@ export function subscribeToBrowserWalletProviders(onProviders: (providers: Brows
   };
 }
 
+export function detectBrowserWalletProviders(timeoutMs = 250) {
+  if (typeof window === "undefined") {
+    return Promise.resolve([] as BrowserWalletProvider[]);
+  }
+
+  return new Promise<BrowserWalletProvider[]>((resolve) => {
+    let latestProviders: BrowserWalletProvider[] = [];
+    const unsubscribe = subscribeToBrowserWalletProviders((providers) => {
+      latestProviders = providers;
+    });
+    window.setTimeout(() => {
+      unsubscribe();
+      resolve(latestProviders);
+    }, timeoutMs);
+  });
+}
+
 export async function requestWalletAccounts(
   provider: EthereumProvider,
   options: { forceAccountSelection?: boolean } = {}
