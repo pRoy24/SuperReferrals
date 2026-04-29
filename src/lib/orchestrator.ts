@@ -94,8 +94,8 @@ const sampleImageUrlBases = new Set([
   "https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77"
 ]);
 
-export async function bootstrap() {
-  await getAgentConsoleSnapshot();
+export async function bootstrap(customerId?: string) {
+  await getAgentConsoleSnapshot(customerId);
   return publicStore(await readStore());
 }
 
@@ -192,13 +192,18 @@ export async function restoreProcessorAuthTokenSession(authToken?: string) {
   });
 }
 
-export async function createOrUpdateCustomer(input: Partial<Customer> & { createNewStorefront?: boolean }) {
+export async function createOrUpdateCustomer(input: Partial<Customer> & {
+  createNewStorefront?: boolean;
+  accountCustomerId?: string;
+}) {
   const existingStore = await readStore();
   const existingCustomer = input.id
     ? existingStore.customers.find((item) => item.id === input.id)
-    : existingStore.customers[0];
+    : input.accountCustomerId
+    ? existingStore.customers.find((item) => item.id === input.accountCustomerId)
+    : undefined;
   if (!existingCustomer) {
-    throw new Error("Create a SuperReferrals account through Stripe checkout or sign in to an existing credited account before setting up a storefront.");
+    throw new Error("Sign in to a SuperReferrals account before setting up a storefront.");
   }
   assertCustomerProcessorReady(existingCustomer);
   if (input.storefront) {
@@ -229,7 +234,7 @@ export async function createOrUpdateCustomer(input: Partial<Customer> & { create
 
 function findProcessorSessionCustomer(customers: Customer[], session: ProcessorAccountCookieSession) {
   const exact = customers.find((customer) => customer.id === session.customerId);
-  if (exact) {
+  if (exact && customerMatchesProcessorSession(exact, session)) {
     return exact;
   }
   const userIdMatches = session.userId
@@ -242,6 +247,53 @@ function findProcessorSessionCustomer(customers: Customer[], session: ProcessorA
     ? customers.filter((customer) => customer.samsarAccount?.email?.toLowerCase() === session.email.toLowerCase())
     : [];
   return emailMatches.length ? oldestCustomer(emailMatches) : undefined;
+}
+
+export function customerMatchesProcessorSession(
+  customer: Customer | undefined,
+  session: Pick<ProcessorAccountCookieSession, "email" | "userId"> | undefined
+) {
+  if (!customer || !session) {
+    return false;
+  }
+  const sessionUserId = cleanAccountKey(session.userId);
+  const customerUserIds = [
+    customer.samsarAccount?.userId,
+    customer.samsarAccount?.externalUserId
+  ].map(cleanAccountKey).filter(Boolean);
+  if (sessionUserId && customerUserIds.includes(sessionUserId)) {
+    return true;
+  }
+  const sessionEmail = cleanAccountEmail(session.email);
+  return Boolean(sessionEmail && cleanAccountEmail(customer.samsarAccount?.email) === sessionEmail);
+}
+
+export function customersShareProcessorAccount(left: Customer | undefined, right: Customer | undefined) {
+  if (!left || !right) {
+    return false;
+  }
+  const leftUserIds = [
+    left.samsarAccount?.userId,
+    left.samsarAccount?.externalUserId
+  ].map(cleanAccountKey).filter(Boolean);
+  const rightUserIds = [
+    right.samsarAccount?.userId,
+    right.samsarAccount?.externalUserId
+  ].map(cleanAccountKey).filter(Boolean);
+  if (leftUserIds.some((userId) => rightUserIds.includes(userId))) {
+    return true;
+  }
+  const leftEmail = cleanAccountEmail(left.samsarAccount?.email);
+  const rightEmail = cleanAccountEmail(right.samsarAccount?.email);
+  return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
+}
+
+function cleanAccountKey(value?: string) {
+  return value?.trim() || "";
+}
+
+function cleanAccountEmail(value?: string) {
+  return value?.trim().toLowerCase() || "";
 }
 
 function oldestCustomer(customers: Customer[]) {
