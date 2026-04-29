@@ -15,8 +15,11 @@ type MosaicTileLayout = {
 type MosaicLayout = {
   height: number;
   rows: number;
+  signature: string;
   tiles: Record<string, MosaicTileLayout>;
 };
+
+type MosaicAspectRatio = "16:9" | "9:16";
 
 type VideoMosaicProps = {
   items: PublicFeedItem[];
@@ -51,6 +54,14 @@ export default function VideoMosaic({
     () => typeof limit === "number" ? items.slice(0, limit) : items,
     [items, limit]
   );
+  const aspectReadyItems = useMemo(
+    () => visibleItems.filter((item) => Boolean(normalizeMosaicAspectRatio(item.aspectRatio))),
+    [visibleItems]
+  );
+  const mosaicLayoutSignature = useMemo(
+    () => aspectReadyItems.map(mosaicItemLayoutSignature).join("|"),
+    [aspectReadyItems]
+  );
   const [activeId, setActiveId] = useState("");
   const [copiedWalletId, setCopiedWalletId] = useState("");
   const [muted, setMuted] = useState(false);
@@ -59,9 +70,12 @@ export default function VideoMosaic({
   const [mosaicLayout, setMosaicLayout] = useState<MosaicLayout | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
+  const isMosaicLayoutReady = mosaicLayout?.signature === mosaicLayoutSignature;
   const displayedItems = useMemo(
-    () => mosaicLayout ? visibleItems.filter((item) => mosaicLayout.tiles[item.id]) : visibleItems,
-    [mosaicLayout, visibleItems]
+    () => isMosaicLayoutReady && mosaicLayout
+      ? aspectReadyItems.filter((item) => mosaicLayout.tiles[item.id])
+      : [],
+    [aspectReadyItems, isMosaicLayoutReady, mosaicLayout]
   );
   const hiddenCount = Math.max(0, items.length - displayedItems.length);
 
@@ -94,7 +108,7 @@ export default function VideoMosaic({
   }, [muted, volume]);
 
   useEffect(() => {
-    const visibleIds = new Set(visibleItems.map((item) => item.id));
+    const visibleIds = new Set(aspectReadyItems.map((item) => item.id));
     for (const [id, video] of Object.entries(videoRefs.current)) {
       if (!visibleIds.has(id) && video) {
         video.pause();
@@ -103,18 +117,18 @@ export default function VideoMosaic({
     if (activeId && !visibleIds.has(activeId)) {
       setActiveId("");
     }
-  }, [activeId, visibleItems]);
+  }, [activeId, aspectReadyItems]);
 
   useEffect(() => {
-    const visibleIds = new Set(visibleItems.map((item) => item.id));
+    const visibleIds = new Set(aspectReadyItems.map((item) => item.id));
     setVideoReadyById((current) => Object.fromEntries(
       Object.entries(current).filter(([id]) => visibleIds.has(id))
     ));
-  }, [visibleItems]);
+  }, [aspectReadyItems]);
 
   useEffect(() => {
     const node = gridRef.current;
-    if (!node || visibleItems.length === 0) {
+    if (!node || aspectReadyItems.length === 0) {
       setMosaicLayout(null);
       return;
     }
@@ -130,12 +144,13 @@ export default function VideoMosaic({
       }
       const styles = window.getComputedStyle(gridNode);
       const minColumnWidth = cssNumber(styles.getPropertyValue("--mosaic-min-column"), 170);
-      const nextLayout = buildMosaicLayout(visibleItems, {
+      const nextLayout = buildMosaicLayout(aspectReadyItems, {
         containerWidth: nodeWidth,
         gap: cssNumber(styles.getPropertyValue("--mosaic-gap"), 12),
         maxColumns: cssInteger(styles.getPropertyValue("--mosaic-max-columns"), 6),
         maxRows,
         minColumnWidth,
+        signature: mosaicLayoutSignature,
         targetRowHeight: cssNumber(
           styles.getPropertyValue("--mosaic-target-row-height"),
           defaultMosaicRowHeight(nodeWidth, minColumnWidth)
@@ -160,7 +175,7 @@ export default function VideoMosaic({
         window.cancelAnimationFrame(frame);
       }
     };
-  }, [maxRows, visibleItems]);
+  }, [aspectReadyItems, maxRows, mosaicLayoutSignature]);
 
   function markVideoReady(item: PublicFeedItem) {
     setVideoReadyById((current) => current[item.id] ? current : { ...current, [item.id]: true });
@@ -231,23 +246,29 @@ export default function VideoMosaic({
     return <div className={`video-mosaic-empty ${className}`.trim()}>{emptyText}</div>;
   }
 
+  if (aspectReadyItems.length === 0) {
+    return <div className={`video-mosaic-empty ${className}`.trim()}>Preparing video layout...</div>;
+  }
+
   return (
     <div className={`video-mosaic ${className}`.trim()}>
       <div
-        className={`video-mosaic-grid ${maxRows ? `rows-${maxRows}` : ""} ${mosaicLayout ? "is-laid-out" : ""}`.trim()}
+        className={`video-mosaic-grid ${maxRows ? `rows-${maxRows}` : ""} ${isMosaicLayoutReady ? "is-laid-out" : ""}`.trim()}
         ref={gridRef}
-        style={mosaicLayout ? { "--mosaic-height": `${mosaicLayout.height}px` } as CSSProperties : undefined}
+        style={isMosaicLayoutReady && mosaicLayout ? { "--mosaic-height": `${mosaicLayout.height}px` } as CSSProperties : undefined}
       >
         {displayedItems.map((item) => {
+          const aspectRatio = normalizeMosaicAspectRatio(item.aspectRatio) as MosaicAspectRatio;
+          const isPortrait = aspectRatio === "9:16";
           const isActive = activeId === item.id;
           const creatorWallet = showCreatorWallet ? getCreatorWallet?.(item) : "";
           const shouldShowFeedLink = typeof showFeedLink === "function" ? showFeedLink(item) : showFeedLink;
           const shouldShowInftLink = showInftLink && Boolean(item.inftId);
-          const layout = mosaicLayout?.tiles[item.id];
+          const layout = isMosaicLayoutReady ? mosaicLayout?.tiles[item.id] : undefined;
           const posterUrl = layout ? item.posterUrl : undefined;
           const tileStyle = {
             "--tile-height": layout ? `${layout.height}px` : undefined,
-            "--tile-ratio": item.aspectRatio === "9:16" ? "9 / 16" : "16 / 9",
+            "--tile-ratio": isPortrait ? "9 / 16" : "16 / 9",
             "--tile-width": layout ? `${layout.width}px` : undefined,
             "--tile-x": layout ? `${layout.x}px` : undefined,
             "--tile-y": layout ? `${layout.y}px` : undefined
@@ -255,7 +276,7 @@ export default function VideoMosaic({
 
           return (
             <article
-              className={`video-mosaic-card ${item.aspectRatio === "9:16" ? "portrait" : "landscape"}`}
+              className={`video-mosaic-card ${isPortrait ? "portrait" : "landscape"}`}
               key={item.id}
               style={tileStyle}
             >
@@ -271,7 +292,7 @@ export default function VideoMosaic({
                   />
                 )}
                 <video
-                  height={item.aspectRatio === "9:16" ? 16 : 9}
+                  height={isPortrait ? 16 : 9}
                   ref={(node) => {
                     videoRefs.current[item.id] = node;
                   }}
@@ -280,7 +301,7 @@ export default function VideoMosaic({
                   muted={muted || volume === 0}
                   playsInline
                   preload="metadata"
-                  width={item.aspectRatio === "9:16" ? 9 : 16}
+                  width={isPortrait ? 9 : 16}
                   onEnded={() => setActiveId((current) => current === item.id ? "" : current)}
                   onLoadedData={() => markVideoReady(item)}
                   onPlay={() => setActiveId(item.id)}
@@ -372,7 +393,7 @@ function shortWallet(value = "") {
 }
 
 function feedHrefForItem(item: PublicFeedItem) {
-  const mode = item.aspectRatio === "9:16" ? "mobile" : "desktop";
+  const mode = normalizeMosaicAspectRatio(item.aspectRatio) === "9:16" ? "mobile" : "desktop";
   return `/feed/${encodeURIComponent(item.generationId || item.id)}/${mode}`;
 }
 
@@ -394,6 +415,7 @@ function buildMosaicLayout(
     maxColumns: number;
     maxRows?: number;
     minColumnWidth: number;
+    signature: string;
     targetRowHeight: number;
   }
 ): MosaicLayout {
@@ -444,6 +466,7 @@ function buildMosaicLayout(
   return {
     height: roundCssNumber(height),
     rows: rows.length,
+    signature: options.signature,
     tiles
   };
 }
@@ -511,7 +534,42 @@ function rebalanceFinalSingleRow(rows: PublicFeedItem[][]) {
 }
 
 function mosaicItemAspect(item: PublicFeedItem) {
-  return item.aspectRatio === "9:16" ? 9 / 16 : 16 / 9;
+  return normalizeMosaicAspectRatio(item.aspectRatio) === "9:16" ? 9 / 16 : 16 / 9;
+}
+
+function mosaicItemLayoutSignature(item: PublicFeedItem) {
+  return `${item.id}:${normalizeMosaicAspectRatio(item.aspectRatio)}`;
+}
+
+function normalizeMosaicAspectRatio(value: unknown): MosaicAspectRatio | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, "");
+  if (normalized === "9:16" || normalized === "9/16" || normalized === "portrait") {
+    return "9:16";
+  }
+  if (normalized === "16:9" || normalized === "16/9" || normalized === "landscape") {
+    return "16:9";
+  }
+
+  const match = normalized.match(/^(\d+(?:\.\d+)?)[/:x](\d+(?:\.\d+)?)$/);
+  if (!match) {
+    return null;
+  }
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  const ratio = width / height;
+  if (Math.abs(ratio - 9 / 16) <= 0.03) {
+    return "9:16";
+  }
+  if (Math.abs(ratio - 16 / 9) <= 0.03) {
+    return "16:9";
+  }
+  return null;
 }
 
 function defaultMosaicRowHeight(containerWidth: number, minColumnWidth: number) {
@@ -539,7 +597,7 @@ function roundCssNumber(value: number) {
 }
 
 function mosaicLayoutsEqual(left: MosaicLayout | null, right: MosaicLayout) {
-  if (!left || left.rows !== right.rows || left.height !== right.height) {
+  if (!left || left.signature !== right.signature || left.rows !== right.rows || left.height !== right.height) {
     return false;
   }
   const leftIds = Object.keys(left.tiles);

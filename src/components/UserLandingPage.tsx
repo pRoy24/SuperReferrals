@@ -1174,11 +1174,11 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   }
 
   if (!customer) {
-    return <main className="public-main"><div className="notice">Customer store was not found.</div></main>;
+    return <main className="public-main storefront-user-main"><div className="notice">Customer store was not found.</div></main>;
   }
 
   return (
-    <main className="public-main">
+    <main className="public-main storefront-user-main">
       <section className="hero-band public-hero">
         <div>
           <div className="eyebrow">{customer.name}</div>

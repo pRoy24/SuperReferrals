@@ -173,7 +173,7 @@ export function CustomerStoreCreatorSkeleton() {
 
 export function UserStoreCreatorSkeleton() {
   return (
-    <main className="public-main skeleton-shell" aria-busy="true" aria-label="Loading customer store">
+    <main className="public-main storefront-user-main skeleton-shell" aria-busy="true" aria-label="Loading customer store">
       <span className="sr-only">Loading customer store</span>
       <section className="hero-band public-hero">
         <div className="skeleton-heading-group">
