@@ -75,6 +75,8 @@ const sortOptions: Array<{ value: FeedSortOption; label: string }> = [
 const ASSISTANT_USER_STORAGE_KEY = "superreferrals:page-assistant-user";
 const WHEEL_SEEK_PIXELS_PER_SECOND = 42;
 const MAX_WHEEL_SEEK_SECONDS = 12;
+const DESKTOP_SWIPE_NAV_THRESHOLD = 82;
+const DESKTOP_SWIPE_NAV_LOCK_MS = 620;
 
 export default function FeedPage({ initialGenerationId = "", initialViewMode }: FeedPageProps = {}) {
   const [items, setItems] = useState<PublicFeedItem[]>([]);
@@ -104,6 +106,9 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
   const mobileScrollTarget = useRef<number | null>(null);
   const mobileScrollTargetTimer = useRef<number | null>(null);
   const desktopDrag = useRef<DesktopDragState | null>(null);
+  const desktopWheelSwipeDelta = useRef(0);
+  const desktopWheelSwipeLockUntil = useRef(0);
+  const desktopWheelSwipeResetTimer = useRef<number | null>(null);
   const initialSelectionApplied = useRef(false);
 
   const visibleItems = useMemo(
@@ -232,6 +237,9 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
       }
       if (mobileScrollTargetTimer.current !== null) {
         window.clearTimeout(mobileScrollTargetTimer.current);
+      }
+      if (desktopWheelSwipeResetTimer.current !== null) {
+        window.clearTimeout(desktopWheelSwipeResetTimer.current);
       }
     };
   }, []);
@@ -447,7 +455,16 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
   }
 
   function handleDesktopWheel(event: WheelEvent<HTMLElement>) {
-    handleFeedItemWheel(event, activeItem);
+    const target = event.target as HTMLElement;
+    if (!activeItem || visibleItems.length < 2 || shouldIgnoreDesktopNavigationTarget(target)) {
+      return;
+    }
+    const horizontalDelta = normalizedHorizontalWheelDelta(event);
+    if (Math.abs(horizontalDelta) < 4) {
+      return;
+    }
+    event.preventDefault();
+    queueDesktopWheelSwipe(horizontalDelta);
   }
 
   function handleFeedItemWheel(event: WheelEvent<HTMLElement>, item?: PublicFeedItem) {
@@ -518,6 +535,60 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
   }
+
+  function queueDesktopWheelSwipe(deltaX: number) {
+    const now = Date.now();
+    if (now < desktopWheelSwipeLockUntil.current) {
+      return;
+    }
+    if (desktopWheelSwipeResetTimer.current !== null) {
+      window.clearTimeout(desktopWheelSwipeResetTimer.current);
+    }
+    const currentDelta = desktopWheelSwipeDelta.current;
+    desktopWheelSwipeDelta.current = Math.sign(currentDelta) === Math.sign(deltaX)
+      ? currentDelta + deltaX
+      : deltaX;
+    desktopWheelSwipeResetTimer.current = window.setTimeout(() => {
+      desktopWheelSwipeDelta.current = 0;
+      desktopWheelSwipeResetTimer.current = null;
+    }, 180);
+    if (Math.abs(desktopWheelSwipeDelta.current) < DESKTOP_SWIPE_NAV_THRESHOLD) {
+      return;
+    }
+    const direction = desktopWheelSwipeDelta.current > 0 ? 1 : -1;
+    desktopWheelSwipeDelta.current = 0;
+    desktopWheelSwipeLockUntil.current = now + DESKTOP_SWIPE_NAV_LOCK_MS;
+    setVolumePanelItemId(null);
+    selectItem(activeIndex + direction);
+  }
+
+  useEffect(() => {
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (
+        viewMode !== "desktop" ||
+        visibleItems.length < 2 ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        shouldIgnoreNavigationKeyTarget(event.target)
+      ) {
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setVolumePanelItemId(null);
+        selectItem(activeIndex - 1);
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setVolumePanelItemId(null);
+        selectItem(activeIndex + 1);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeIndex, viewMode, visibleItems]);
 
   function changeVolume(nextValue: number) {
     const normalized = persistFeedVideoVolume(nextValue);
@@ -1479,6 +1550,22 @@ function shouldIgnoreSeekWheelTarget(target: HTMLElement) {
   return Boolean(target.closest(
     "a, button, input, textarea, select, .feed-minimal-ui, .mobile-action-rail, .feed-comment-drawer, .feed-assistant-popdown, .feed-volume-popover"
   ));
+}
+
+function shouldIgnoreDesktopNavigationTarget(target: HTMLElement) {
+  return Boolean(target.closest(
+    "a, button, input, textarea, select, .feed-minimal-ui, .feed-comment-drawer, .feed-assistant-popdown, .feed-volume-popover"
+  ));
+}
+
+function shouldIgnoreNavigationKeyTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return Boolean(
+    target.isContentEditable ||
+    target.closest("input, textarea, select, [contenteditable='true'], .feed-comment-drawer, .feed-assistant-popdown")
+  );
 }
 
 function normalizedHorizontalWheelDelta(event: WheelEvent<HTMLElement>) {

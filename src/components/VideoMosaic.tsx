@@ -13,6 +13,11 @@ type MosaicLayout = {
   width: number;
 };
 
+type VideoMosaicProgress = {
+  currentTime: number;
+  duration: number;
+};
+
 const MOSAIC_COLUMNS = 12;
 const MOSAIC_GAP_PX = 12;
 const MOSAIC_ROW_HEIGHT_PX = 4;
@@ -58,6 +63,8 @@ export default function VideoMosaic({
   const [copiedWalletId, setCopiedWalletId] = useState("");
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(DEFAULT_FEED_VIDEO_VOLUME);
+  const [volumePanelItemId, setVolumePanelItemId] = useState("");
+  const [videoProgressById, setVideoProgressById] = useState<Record<string, VideoMosaicProgress>>({});
   const [videoReadyById, setVideoReadyById] = useState<Record<string, boolean>>({});
   const [mosaicLayout, setMosaicLayout] = useState<MosaicLayout>({
     columns: 1,
@@ -86,6 +93,7 @@ export default function VideoMosaic({
         video.pause();
       }
     }
+    setVolumePanelItemId((current) => current && current !== activeId ? "" : current);
   }, [activeId]);
 
   useEffect(() => {
@@ -113,6 +121,9 @@ export default function VideoMosaic({
   useEffect(() => {
     const visibleIds = new Set(aspectReadyItems.map((item) => item.id));
     setVideoReadyById((current) => Object.fromEntries(
+      Object.entries(current).filter(([id]) => visibleIds.has(id))
+    ));
+    setVideoProgressById((current) => Object.fromEntries(
       Object.entries(current).filter(([id]) => visibleIds.has(id))
     ));
   }, [aspectReadyItems]);
@@ -172,14 +183,11 @@ export default function VideoMosaic({
     await video.play().catch(() => setActiveId(""));
   }
 
-  function toggleMuted() {
-    const nextMuted = !muted;
-    setMuted(nextMuted);
-    for (const video of Object.values(videoRefs.current)) {
-      if (video) {
-        video.muted = nextMuted || volume === 0;
-      }
+  function toggleVolumePanel(item: PublicFeedItem) {
+    if (volumePanelItemId !== item.id && muted && volume > 0) {
+      setMuted(false);
     }
+    setVolumePanelItemId((current) => current === item.id ? "" : item.id);
   }
 
   function changeVolume(item: PublicFeedItem, value: number) {
@@ -191,6 +199,47 @@ export default function VideoMosaic({
       video.volume = normalized;
       video.muted = normalized === 0;
     }
+  }
+
+  function updateVideoProgress(id: string, video: HTMLVideoElement) {
+    const nextCurrentTime = Number.isFinite(video.currentTime) ? Math.max(0, video.currentTime) : 0;
+    const nextDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+    setVideoProgressById((current) => {
+      const previous = current[id];
+      if (
+        previous &&
+        Math.abs(previous.currentTime - nextCurrentTime) < 0.12 &&
+        Math.abs(previous.duration - nextDuration) < 0.12
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        [id]: {
+          currentTime: nextCurrentTime,
+          duration: nextDuration
+        }
+      };
+    });
+  }
+
+  function seekVideo(item: PublicFeedItem, nextTime: number) {
+    const video = videoRefs.current[item.id];
+    const duration = video?.duration || videoProgressById[item.id]?.duration || 0;
+    if (!Number.isFinite(duration) || duration <= 0) {
+      return;
+    }
+    const normalizedTime = Math.max(0, Math.min(duration, nextTime));
+    if (video) {
+      video.currentTime = normalizedTime;
+    }
+    setVideoProgressById((current) => ({
+      ...current,
+      [item.id]: {
+        currentTime: normalizedTime,
+        duration
+      }
+    }));
   }
 
   function openFullscreen(item: PublicFeedItem) {
@@ -270,8 +319,12 @@ export default function VideoMosaic({
                   playsInline
                   preload="metadata"
                   onEnded={() => setActiveId((current) => current === item.id ? "" : current)}
+                  onDurationChange={(event) => updateVideoProgress(item.id, event.currentTarget)}
+                  onLoadedMetadata={(event) => updateVideoProgress(item.id, event.currentTarget)}
                   onPlay={() => setActiveId(item.id)}
                   onPlaying={() => markVideoReady(item)}
+                  onSeeked={(event) => updateVideoProgress(item.id, event.currentTarget)}
+                  onTimeUpdate={(event) => updateVideoProgress(item.id, event.currentTarget)}
                 />
                 <button
                   className="video-mosaic-play"
@@ -301,22 +354,21 @@ export default function VideoMosaic({
                   <button className="video-mosaic-icon" onClick={() => togglePlayback(item)} title={isActive ? "Pause" : "Play"} type="button">
                     {isActive ? <Pause size={16} /> : <Play size={16} />}
                   </button>
-                  <button className="video-mosaic-icon" onClick={toggleMuted} title={muted || volume === 0 ? "Unmute" : "Mute"} type="button">
-                    {muted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
-                  </button>
+                  <VideoMosaicVolumeControl
+                    muted={muted}
+                    open={volumePanelItemId === item.id}
+                    onToggle={() => toggleVolumePanel(item)}
+                    onVolume={(value) => changeVolume(item, value)}
+                    value={volume}
+                  />
                   <button className="video-mosaic-icon" onClick={() => openFullscreen(item)} title="Full screen" type="button">
                     <Maximize2 size={16} />
                   </button>
-                  <label className="video-mosaic-volume" title="Volume">
-                    <input
-                      aria-label={`Volume for ${item.title}`}
-                      max="100"
-                      min="0"
-                      onChange={(event) => changeVolume(item, Number(event.target.value) / 100)}
-                      type="range"
-                      value={muted || volume === 0 ? 0 : Math.round(volume * 100)}
-                    />
-                  </label>
+                  <VideoMosaicScrubber
+                    item={item}
+                    progress={videoProgressById[item.id]}
+                    onSeek={(time) => seekVideo(item, time)}
+                  />
                   {actions && <div className="video-mosaic-actions">{actions(item)}</div>}
                   {(shouldShowInftLink || shouldShowFeedLink) && (
                     <div className="video-mosaic-link-row">
@@ -346,6 +398,83 @@ export default function VideoMosaic({
           </a>
         </div>
       )}
+    </div>
+  );
+}
+
+function VideoMosaicVolumeControl({
+  muted,
+  open,
+  onToggle,
+  onVolume,
+  value
+}: {
+  muted: boolean;
+  open: boolean;
+  onToggle: () => void;
+  onVolume: (value: number) => void;
+  value: number;
+}) {
+  const displayValue = muted ? 0 : Math.round(value * 100);
+
+  return (
+    <div className={`video-mosaic-volume-control ${open ? "open" : ""}`}>
+      <button
+        aria-expanded={open}
+        aria-label="Volume"
+        className="video-mosaic-icon"
+        onClick={onToggle}
+        title="Volume"
+        type="button"
+      >
+        {muted || value === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
+      </button>
+      {open && (
+        <label className="video-mosaic-volume-popover" title="Volume">
+          <input
+            aria-label="Volume"
+            aria-orientation="vertical"
+            className="video-mosaic-volume-slider"
+            max="100"
+            min="0"
+            onChange={(event) => onVolume(Number(event.target.value) / 100)}
+            type="range"
+            value={displayValue}
+          />
+        </label>
+      )}
+    </div>
+  );
+}
+
+function VideoMosaicScrubber({
+  item,
+  progress,
+  onSeek
+}: {
+  item: PublicFeedItem;
+  progress?: VideoMosaicProgress;
+  onSeek: (time: number) => void;
+}) {
+  const duration = progress?.duration || 0;
+  const currentTime = duration > 0 ? Math.min(progress?.currentTime || 0, duration) : 0;
+  const percent = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const scrubberStyle = { "--mosaic-scrubber-progress": `${percent}%` } as CSSProperties;
+
+  return (
+    <div className="video-mosaic-scrubber" onClick={(event) => event.stopPropagation()}>
+      <input
+        aria-label={`Seek ${item.title}`}
+        disabled={duration <= 0}
+        max={duration || 0}
+        min="0"
+        onChange={(event) => onSeek(Number(event.target.value))}
+        step="0.05"
+        style={scrubberStyle}
+        type="range"
+        value={currentTime}
+      />
+      <span>{formatVideoTime(currentTime)} / {formatVideoTime(duration)}</span>
     </div>
   );
 }
@@ -380,6 +509,16 @@ function shortWallet(value = "") {
     return trimmed || "wallet";
   }
   return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`;
+}
+
+function formatVideoTime(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0:00";
+  }
+  const totalSeconds = Math.floor(value);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 function feedHrefForItem(item: PublicFeedItem) {
