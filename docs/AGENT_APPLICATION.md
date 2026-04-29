@@ -85,4 +85,4 @@ OG_DA_URL=
 OG_SERVICE_MARKETPLACE_URL=
 ```
 
-The app remains mock-first when `SUPERREFERRALS_MOCKS` is unset or true. In live mode, 0G Compute uses the 0G serving broker and the deployed platform signer from `OG_PRIVATE_KEY` by default to discover inference providers. Set `OG_COMPUTE_PRIVATE_KEY` only when assistant compute should use a separate platform-funded wallet, and set `OG_COMPUTE_PROVIDER_ADDRESS` when that wallet is funded with a specific provider for the current environment/model.
+The app remains mock-first when `SUPERREFERRALS_MOCKS` is unset or true. In live mode, 0G Compute uses the 0G serving broker and the deployed platform signer from `OG_PRIVATE_KEY` by default to discover inference providers. Set `OG_COMPUTE_PRIVATE_KEY` only when assistant compute should use a separate platform-funded wallet, and set `OG_COMPUTE_PROVIDER_ADDRESS` when that wallet is funded with a specific provider for the current environment/model. Testnet assistant compute can automatically initialize the platform wallet's 0G Compute ledger and provider sub-account with `OG_COMPUTE_AUTO_FUND=true`.

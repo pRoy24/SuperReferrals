@@ -46,11 +46,17 @@ type ZeroGComputeService = {
 };
 
 type ZeroGComputeBroker = {
+  ledger: {
+    getLedger(): Promise<{ availableBalance: bigint; totalBalance: bigint }>;
+    depositFund(amount: number, gasPrice?: number): Promise<void>;
+    transferFund(providerAddress: string, serviceType: "inference" | "fine-tuning", amount: bigint, gasPrice?: number): Promise<void>;
+  };
   inference: {
     listService(offset?: number, limit?: number, includeUnacknowledged?: boolean): Promise<ZeroGComputeService[]>;
     getServiceMetadata(providerAddress: string): Promise<{ endpoint: string; model: string }>;
     getRequestHeaders(providerAddress: string, content?: string): Promise<Record<string, string>>;
     processResponse(providerAddress: string, chatID?: string, content?: string): Promise<boolean | null>;
+    acknowledgeProviderSigner(providerAddress: string, gasPrice?: number): Promise<void>;
   };
 };
 
@@ -60,6 +66,7 @@ const { createZGComputeNetworkBroker } = require("@0glabs/0g-serving-broker") as
 };
 
 const computeBrokers = new Map<string, Promise<ZeroGComputeBroker>>();
+const NEURON_PER_OG = 10n ** 18n;
 
 export async function askZeroGCompute(systemPrompt: string, question: string): Promise<ZeroGComputeChatResponse> {
   return askZeroGComputeChat(systemPrompt, [{ role: "user", content: question }]);
@@ -93,8 +100,15 @@ export async function askZeroGComputeChat(systemPrompt: string, messages: ZeroGC
       return await requestZeroGComputeService(broker, config, service, systemPrompt, cleanMessages);
     } catch (error) {
       lastProviderError = error;
-      if (providerPreference || !shouldTryNextZeroGComputeProvider(error)) {
-        throw decorateZeroGComputeProviderError(error, config, service, signer.source, providerPreference);
+      if (await initializeZeroGComputeProviderAccountIfNeeded(broker, config, service, error)) {
+        try {
+          return await requestZeroGComputeService(broker, config, service, systemPrompt, cleanMessages);
+        } catch (retryError) {
+          lastProviderError = retryError;
+        }
+      }
+      if (providerPreference || !shouldTryNextZeroGComputeProvider(lastProviderError)) {
+        throw decorateZeroGComputeProviderError(lastProviderError, config, service, signer.source, providerPreference);
       }
     }
   }
@@ -243,6 +257,101 @@ function resolveZeroGComputeProviderAddress(config: ZeroGComputeConfig): ZeroGCo
     throw new Error(`${match.name} must be a 0x-prefixed EVM provider address.`);
   }
   return { providerAddress: match.value, source: match.name };
+}
+
+async function initializeZeroGComputeProviderAccountIfNeeded(
+  broker: ZeroGComputeBroker,
+  config: ZeroGComputeConfig,
+  service: ZeroGComputeService,
+  error: unknown
+) {
+  if (!service.provider || !isZeroGComputeSubAccountError(error) || !isZeroGComputeAutoFundingEnabled(config)) {
+    return false;
+  }
+
+  const transferAmount = zeroGComputeAutoFundTransferAmount();
+  await ensureZeroGComputeLedgerBalance(broker, transferAmount);
+  await broker.ledger.transferFund(service.provider, "inference", transferAmount);
+  await broker.inference.acknowledgeProviderSigner(service.provider);
+  return true;
+}
+
+async function ensureZeroGComputeLedgerBalance(broker: ZeroGComputeBroker, transferAmount: bigint) {
+  const minimumNewLedgerDeposit = Math.max(zeroGComputeAutoFundNewLedgerDepositAmount(), neuronToOgNumber(transferAmount));
+  try {
+    const ledger = await broker.ledger.getLedger();
+    const availableBalance = BigInt(ledger.availableBalance || 0);
+    if (availableBalance >= transferAmount) {
+      return;
+    }
+    const deficit = transferAmount - availableBalance;
+    await broker.ledger.depositFund(Math.max(zeroGComputeAutoFundTopUpAmount(), neuronToOgNumber(deficit)));
+  } catch (error) {
+    if (!isZeroGComputeLedgerMissingError(error)) {
+      throw error;
+    }
+    await broker.ledger.depositFund(minimumNewLedgerDeposit);
+  }
+}
+
+function isZeroGComputeAutoFundingEnabled(config: ZeroGComputeConfig) {
+  const configured = env("OG_COMPUTE_AUTO_FUND");
+  if (configured) {
+    return parseBoolean(configured, false);
+  }
+  return config.network === "testnet";
+}
+
+function zeroGComputeAutoFundTransferAmount() {
+  const amount = ogToNeuron(env("OG_COMPUTE_AUTO_FUND_AMOUNT", "0.1"));
+  if (amount <= 0n) {
+    throw new Error("OG_COMPUTE_AUTO_FUND_AMOUNT must be greater than 0.");
+  }
+  return amount;
+}
+
+function zeroGComputeAutoFundTopUpAmount() {
+  return Math.max(0.000001, Number(env("OG_COMPUTE_AUTO_TOP_UP_AMOUNT", "0.1")) || 0.1);
+}
+
+function zeroGComputeAutoFundNewLedgerDepositAmount() {
+  return Math.max(3, Number(env("OG_COMPUTE_AUTO_DEPOSIT_AMOUNT", "3")) || 3);
+}
+
+function ogToNeuron(value: string) {
+  const trimmed = value.trim();
+  if (!/^\d+(\.\d{1,18})?$/.test(trimmed)) {
+    throw new Error(`Invalid 0G amount: ${value}`);
+  }
+  const [whole, fraction = ""] = trimmed.split(".");
+  return BigInt(whole) * NEURON_PER_OG + BigInt(fraction.padEnd(18, "0"));
+}
+
+function neuronToOgNumber(value: bigint) {
+  const whole = value / NEURON_PER_OG;
+  const remainder = value % NEURON_PER_OG;
+  return Number(whole) + Number(remainder) / Number(NEURON_PER_OG);
+}
+
+function isZeroGComputeSubAccountError(error: unknown) {
+  const message = errorMessage(error).toLowerCase();
+  return message.includes("sub-account not found") || message.includes("accountnotexists");
+}
+
+function isZeroGComputeLedgerMissingError(error: unknown) {
+  const message = errorMessage(error).toLowerCase();
+  return message.includes("account does not exist") || message.includes("ledgernotexists");
+}
+
+function parseBoolean(value: string, fallback: boolean) {
+  const normalized = value.trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["false", "0", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return fallback;
 }
 
 function resolveScopedEnvValue(prefix: string, config: ZeroGComputeConfig) {

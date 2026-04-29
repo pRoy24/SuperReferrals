@@ -115,7 +115,7 @@ Use private RPC providers for production reliability.
 
 Vercel KV/Upstash env vars are normally injected by the deploy setup. Only put `KV_REST_API_URL` and `KV_REST_API_TOKEN` in a local env file when deliberately running against local or manually managed Redis.
 
-0G Compute does not require endpoint, model, or API-key env vars. The server uses the 0G serving broker with the deployed platform signer from `OG_PRIVATE_KEY` by default, discovers live inference providers, and selects the top documented chatbot model for the current 0G environment: `qwen-2.5-7b-instruct` on Galileo/testnet and `GLM-5-FP8` on mainnet. Set `OG_COMPUTE_PRIVATE_KEY` only when assistant compute should use a separate platform-funded wallet. If the platform wallet is funded with a specific provider, set `OG_COMPUTE_PROVIDER_ADDRESS`.
+0G Compute does not require endpoint, model, or API-key env vars. The server uses the 0G serving broker with the deployed platform signer from `OG_PRIVATE_KEY` by default, discovers live inference providers, and selects the top documented chatbot model for the current 0G environment: `qwen-2.5-7b-instruct` on Galileo/testnet and `GLM-5-FP8` on mainnet. Set `OG_COMPUTE_PRIVATE_KEY` only when assistant compute should use a separate platform-funded wallet. If the platform wallet is funded with a specific provider, set `OG_COMPUTE_PROVIDER_ADDRESS`. On testnet, `OG_COMPUTE_AUTO_FUND` defaults on and will initialize the 0G Compute ledger and provider sub-account from the platform wallet when the selected provider has no sub-account yet. The default provider sub-account transfer is `0.1` 0G.
 
 ```bash
 cp .env.production.example .env.local
@@ -199,6 +199,7 @@ For staging previews, Vercel needs a Git event it can deploy. Push a new commit 
 - `UNISWAP_API_KEY`: live Uniswap quote and swap transaction data.
 - `OG_NETWORK`, `OG_CHAIN_ID`, `OG_RPC_URL`, `OG_STORAGE_INDEXER_RPC`, `OG_PRIVATE_KEY`: 0G Chain, Storage, registry, INFT signer, and default platform 0G Compute signer.
 - `OG_COMPUTE_PRIVATE_KEY`, `OG_COMPUTE_PROVIDER_ADDRESS`: optional platform 0G Compute signer override and optional funded provider address for the embedded assistant. Runtime also accepts scoped variants such as `OG_COMPUTE_PRIVATE_KEY_STAGING_QWEN_2_5_7B_INSTRUCT` or `OG_COMPUTE_PRIVATE_KEY_MAINNET_GLM_5_FP8`.
+- `OG_COMPUTE_AUTO_FUND`, `OG_COMPUTE_AUTO_FUND_AMOUNT`, `OG_COMPUTE_AUTO_DEPOSIT_AMOUNT`: optional automatic 0G Compute ledger and provider sub-account initialization. Defaults to enabled on testnet and disabled on mainnet.
 - `OG_DA_URL`, `OG_SERVICE_MARKETPLACE_URL`: live 0G DA and service marketplace endpoints.
 - `USER_REGISTRY_CONTRACT_ADDRESS`: deployed `SuperReferralsUserRegistry` address.
 - `INFT_CONTRACT_ADDRESS`: deployed INFT collection. Minting uses `OG_PRIVATE_KEY`.
