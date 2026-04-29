@@ -30,7 +30,7 @@
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "samsar-js": "^0.48.24",
+    "samsar-js": "0.48.25",
     "viem": "latest"
   },
   "devDependencies": {

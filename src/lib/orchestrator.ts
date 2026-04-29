@@ -1743,7 +1743,10 @@ export async function runINFTAction(id: string, action: string, payload: Record<
       action: "translate",
       actionInput: {
         videoSessionId,
-        language: resolveRenditionLanguageCode(payload.languageCode, payload.language_code, payload.language, "ES")
+        language: resolveRenditionLanguageCode(payload.languageCode, payload.language_code, payload.language, "ES"),
+        ...optionalBooleanField("enable_subtitles", payload.enableSubtitles, payload.enable_subtitles, payload.addSubtitles, payload.add_subtitles),
+        ...optionalBooleanField("translate_outro", payload.translateOutro, payload.translate_outro),
+        ...optionalBooleanField("translate_footer", payload.translateFooter, payload.translate_footer)
       },
       paymentPayload: paymentPayloadFromINFTAction(payload)
     });
@@ -2130,6 +2133,17 @@ function expectedVideoMetadataForINFTAction(
   }
   if (normalizedAction === "remove_subtitles") {
     metadata.has_subtitles = false;
+  }
+  if (normalizedAction === "translate") {
+    const hasSubtitles = firstBooleanLike(
+      input?.enable_subtitles,
+      input?.enableSubtitles,
+      input?.add_subtitles,
+      input?.addSubtitles
+    );
+    if (typeof hasSubtitles === "boolean") {
+      metadata.has_subtitles = hasSubtitles;
+    }
   }
   if (normalizedAction === "add_outro" || normalizedAction === "update_outro") {
     metadata.has_outro = true;

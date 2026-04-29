@@ -30,6 +30,7 @@ type SamsarSessionActionOptions = {
 
 type SamsarVideoActionClient = {
   createV2VideoFromImageList(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
+  translateV2Video(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
   updateV2VideoOutroImage(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
   updateV2VideoFooterImage(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
   addV2VideoOutroImage(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
@@ -230,10 +231,10 @@ export async function runSamsarSessionAction(
   const videoClient = await samsarVideoActionClient(normalizedOptions);
   const videoOptions = samsarVideoActionRequestOptions(normalizedOptions);
   if (action === "translate") {
-    return samsarClientActionResult(await videoClient.postV2("translate_video", {
-      input: sessionActionPayload,
-      webhookUrl: `${appBaseUrl()}/api/webhooks/samsar`
-    }, videoOptions));
+    return samsarClientActionResult(await videoClient.translateV2Video(
+      sessionActionPayload,
+      videoOptions
+    ));
   }
   if (action === "join") {
     return samsarClientActionResult(await videoClient.postV2("join_videos", {

@@ -51,6 +51,9 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [busy, setBusy] = useState("");
   const [peerId, setPeerId] = useState("mock-peer-video-a");
   const [language, setLanguage] = useState(supportedSamsarProcessorLanguageOptions[1]?.value || "ES");
+  const [translateEnableSubtitles, setTranslateEnableSubtitles] = useState(false);
+  const [translateOutroText, setTranslateOutroText] = useState(true);
+  const [translateFooterText, setTranslateFooterText] = useState(true);
   const [subtitleLanguage, setSubtitleLanguage] = useState("en");
   const [expandedVideoAction, setExpandedVideoAction] = useState<VideoEditAction | "">("");
   const [updateOutroMode, setUpdateOutroMode] = useState<"cta" | "image">("cta");
@@ -944,6 +947,30 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                       options={supportedSamsarProcessorLanguageOptions}
                       onChange={setLanguage}
                     />
+                    <label className="toggle-row">
+                      <input
+                        type="checkbox"
+                        checked={translateEnableSubtitles}
+                        onChange={(event) => setTranslateEnableSubtitles(event.target.checked)}
+                      />
+                      Enable subtitles
+                    </label>
+                    <label className="toggle-row">
+                      <input
+                        type="checkbox"
+                        checked={translateOutroText}
+                        onChange={(event) => setTranslateOutroText(event.target.checked)}
+                      />
+                      Translate outro text
+                    </label>
+                    <label className="toggle-row">
+                      <input
+                        type="checkbox"
+                        checked={translateFooterText}
+                        onChange={(event) => setTranslateFooterText(event.target.checked)}
+                      />
+                      Translate footer text
+                    </label>
                     <INFTActionPayControl
                       icon={<Languages size={16} />}
                       label="Retranslate"
@@ -958,7 +985,12 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                         setPaymentCurrency(symbol);
                         setActionQuote(null);
                       }}
-                      onPay={() => runPaidAction("translate", { languageCode: language })}
+                      onPay={() => runPaidAction("translate", {
+                        languageCode: language,
+                        enable_subtitles: translateEnableSubtitles,
+                        translate_outro: translateOutroText,
+                        translate_footer: translateFooterText
+                      })}
                     />
                   </div>
                 )}
@@ -1957,6 +1989,17 @@ function expectedVideoMetadataForAction(action: string, payload: Record<string, 
   }
   if (action === "remove_subtitles") {
     metadata.has_subtitles = false;
+  }
+  if (action === "translate") {
+    const hasSubtitles = booleanFromUnknown(
+      payload.enable_subtitles ??
+      payload.enableSubtitles ??
+      payload.add_subtitles ??
+      payload.addSubtitles
+    );
+    if (typeof hasSubtitles === "boolean") {
+      metadata.has_subtitles = hasSubtitles;
+    }
   }
   if (action === "add_outro" || action === "update_outro") {
     metadata.has_outro = true;
