@@ -111,7 +111,7 @@ export default function Dashboard() {
   });
 
   async function load() {
-    const response = await fetchWithSamsarAuth("/api/bootstrap", { cache: "no-store" });
+    const response = await fetchWithSamsarAuth("/api/bootstrap?scope=account", { cache: "no-store" });
     const data = await response.json();
     setStore(data);
   }
@@ -742,7 +742,7 @@ export default function Dashboard() {
                   <Wallet size={16} /> Connect wallet
                 </button>
               </div>
-              <details className="advanced-section processor-login-dropdown">
+              <details className="advanced-section processor-login-dropdown" open={!hasProcessorAccountSession}>
                 <summary>Login with samsar-js credentials</summary>
                 <div className="form-grid processor-login">
                   <TextField

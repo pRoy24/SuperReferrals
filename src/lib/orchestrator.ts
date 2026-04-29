@@ -106,6 +106,9 @@ export async function restoreProcessorAccountSession(session?: ProcessorAccountC
   let creditsRemaining = Number(session.creditsRemaining || 0);
   const store = await readStore();
   const existing = findProcessorSessionCustomer(store.customers, session);
+  const sessionCustomerIdBelongsToAnotherAccount = store.customers.some((customer) =>
+    customer.id === session.customerId && !customerMatchesProcessorSession(customer, session)
+  );
   let existingCredential: string | ReturnType<typeof samsarAppClientCredentials> | undefined = session.authToken;
   if (existing && hasStoredSamsarAppKey(existing)) {
     try {
@@ -124,7 +127,7 @@ export async function restoreProcessorAccountSession(session?: ProcessorAccountC
   }
   const existingOwnerWallet = isUsableEvmAddress(existing?.ownerWallet) ? existing?.ownerWallet : undefined;
   const restored = await mutateStore((mutableStore) => upsertCustomer(mutableStore, {
-    id: existing?.id || session.customerId,
+    id: existing?.id || (sessionCustomerIdBelongsToAnotherAccount ? createId("cus") : session.customerId),
     name: existing?.name || session.customerName || session.username || session.email.split("@")[0] || "SuperReferrals Account",
     ownerWallet: existingOwnerWallet || session.ownerWallet || session.walletAddress,
     samsarApiKeyAlias: existing?.samsarApiKeyAlias || (session.appKeyHash ? "samsar-user-app-key" : session.apiKey ? "samsar-user-api-key" : undefined),

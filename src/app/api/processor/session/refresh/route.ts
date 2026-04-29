@@ -5,6 +5,7 @@ import {
   setProcessorAccountSessionCookie
 } from "@/lib/account-session";
 import { nowIso } from "@/lib/ids";
+import { customerMatchesProcessorSession } from "@/lib/orchestrator";
 import { provisionSamsarProcessorAppKeyIfMissing, refreshSamsarProcessorAuthToken } from "@/lib/samsar-processor";
 import { mutateStore, publicCustomer, readStore, upsertCustomer } from "@/lib/store";
 
@@ -22,8 +23,15 @@ export async function POST(request: Request) {
     const requestedCustomer = body.customerId
       ? store.customers.find((item) => item.id === String(body.customerId))
       : undefined;
-    const existingCustomer = requestedCustomer ||
-      store.customers.find((item) => item.id === cookieSession?.customerId) ||
+    const cookieCustomer = store.customers.find((item) => item.id === cookieSession?.customerId);
+    const requestedAccountCustomer = customerMatchesProcessorSession(requestedCustomer, session)
+      ? requestedCustomer
+      : undefined;
+    const cookieAccountCustomer = customerMatchesProcessorSession(cookieCustomer, session)
+      ? cookieCustomer
+      : undefined;
+    const existingCustomer = requestedAccountCustomer ||
+      cookieAccountCustomer ||
       oldestCustomer(store.customers.filter((item) =>
         item.samsarAccount?.userId === session.userId ||
         item.samsarAccount?.email?.toLowerCase() === session.email.toLowerCase()

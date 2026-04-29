@@ -41,7 +41,7 @@ export default function PaymentSuccessPage() {
           }).catch(() => undefined);
           removeAuthCredentialsFromCurrentUrl();
         }
-        const response = await fetchWithSamsarAuth("/api/bootstrap", {
+        const response = await fetchWithSamsarAuth("/api/bootstrap?scope=account", {
           cache: "no-store",
           credentials: "same-origin"
         });

@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
-import { pendingCheckoutCookie, processorAuthTokenFromRequest, setPendingCreditCheckoutCookie } from "@/lib/account-session";
+import { pendingCheckoutCookie, setPendingCreditCheckoutCookie } from "@/lib/account-session";
+import { restoreConsoleCustomer } from "@/lib/console-auth";
 import { nowIso } from "@/lib/ids";
 import { appBaseUrl } from "@/lib/env";
-import { restoreProcessorAuthTokenSession } from "@/lib/orchestrator";
+import {
+  customersShareProcessorAccount
+} from "@/lib/orchestrator";
 import { createSamsarProcessorCreditCheckout } from "@/lib/samsar-processor";
 import { mutateStore, readStore, upsertCustomer } from "@/lib/store";
 
@@ -13,14 +16,18 @@ export async function POST(request: Request) {
     if (!checkoutEmail) {
       throw new Error("Email is required to purchase SuperReferrals credits.");
     }
-    const requestAuthToken = processorAuthTokenFromRequest(request);
-    const sessionCustomer = requestAuthToken
-      ? await restoreProcessorAuthTokenSession(requestAuthToken).catch(() => undefined)
-      : undefined;
+    const sessionCustomer = await restoreConsoleCustomer(request);
     const store = await readStore();
-    const customer = body.customerId
-      ? store.customers.find((item) => item.id === body.customerId)
-      : sessionCustomer || store.customers[0];
+    const requestedCustomer = body.customerId
+      ? store.customers.find((item) => item.id === String(body.customerId))
+      : undefined;
+    if (body.customerId && (!sessionCustomer || !customersShareProcessorAccount(requestedCustomer, sessionCustomer))) {
+      return NextResponse.json(
+        { message: "That storefront does not belong to the signed-in Samsar account." },
+        { status: 403 }
+      );
+    }
+    const customer = requestedCustomer || sessionCustomer;
     const requestOrigin = requestOriginFromRequest(request);
     const checkout = await createSamsarProcessorCreditCheckout({
       amountCents: body.amountCents ?? body.amount_cents,

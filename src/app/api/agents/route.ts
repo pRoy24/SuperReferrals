@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { getAgentConsoleSnapshot, runAgentTownSimulation } from "@/lib/agent-framework";
+import { restoreConsoleCustomer } from "@/lib/console-auth";
+import {
+  customersShareProcessorAccount
+} from "@/lib/orchestrator";
+import { readStore } from "@/lib/store";
 
 export async function GET(request: Request) {
   try {
@@ -17,7 +22,22 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const result = await runAgentTownSimulation(body);
+    const sessionCustomer = await restoreConsoleCustomer(request);
+    if (!sessionCustomer) {
+      throw new Error("Sign in with your Samsar account before running Agent Town.");
+    }
+    const store = await readStore();
+    const customer = store.customers.find((item) => item.id === String(body.customerId || ""));
+    if (!customer || !customersShareProcessorAccount(customer, sessionCustomer)) {
+      return NextResponse.json(
+        { message: "That storefront does not belong to the signed-in Samsar account." },
+        { status: 403 }
+      );
+    }
+    const result = await runAgentTownSimulation({
+      ...body,
+      customerId: customer.id
+    });
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(

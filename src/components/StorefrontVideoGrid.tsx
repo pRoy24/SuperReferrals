@@ -34,22 +34,7 @@ type INFTBurnRequest = {
   mock?: boolean;
   chain?: INFTBurnChain;
 };
-type INFTBurnAuthorization = {
-  action?: string;
-  generationId?: string;
-  inftId?: string;
-  tokenId?: string;
-  contractAddress?: string;
-  chainId?: number;
-  tokenOwner?: string;
-  requestedWallet?: string;
-  nonce?: string;
-  issuedAt?: string;
-  expiresAt?: string;
-  message?: string;
-  signature?: string;
-  signer?: string;
-};
+type INFTBurnFunctionName = "burnAgent" | "burn";
 type INFTBurnDiagnostics = {
   tokenId: string;
   contractAddress: string;
@@ -84,11 +69,13 @@ type StorefrontVideoGridProps = {
 
 const inftBurnAbi = parseAbi([
   "function burnAgent(uint256 tokenId)",
+  "function burn(uint256 tokenId)",
   "function owner() view returns (address)",
   "function ownerOf(uint256 tokenId) view returns (address)",
   "function getApproved(uint256 tokenId) view returns (address)",
   "function isApprovedForAll(address owner, address operator) view returns (bool)"
 ]);
+const walletBurnFunctionNames: INFTBurnFunctionName[] = ["burnAgent", "burn"];
 
 export default function StorefrontVideoGrid({
   actor,
@@ -105,19 +92,26 @@ export default function StorefrontVideoGrid({
   wallet
 }: StorefrontVideoGridProps) {
   const [busyAction, setBusyAction] = useState("");
+  const [localStore, setLocalStore] = useState(store);
+  const [listVersion, setListVersion] = useState(0);
   const [mode, setMode] = useState<StorefrontVideoMode>("published");
   const [message, setMessage] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(initialPageSize);
   const items = useMemo(
     () => mode === "infts"
-      ? buildStorefrontINFTItems(store, { customerId, subAccountId })
-      : buildStorefrontVideoItems(store, { customerId, publishedOnly: true, subAccountId }),
-    [customerId, mode, store, subAccountId]
+      ? buildStorefrontINFTItems(localStore, { customerId, subAccountId })
+      : buildStorefrontVideoItems(localStore, { customerId, publishedOnly: true, subAccountId }),
+    [customerId, mode, localStore, subAccountId]
   );
   const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
   const normalizedPage = Math.min(page, pageCount);
   const pageItems = items.slice((normalizedPage - 1) * pageSize, normalizedPage * pageSize);
+
+  useEffect(() => {
+    setLocalStore(store);
+    setListVersion((current) => current + 1);
+  }, [store]);
 
   useEffect(() => {
     setPage(1);
@@ -139,7 +133,7 @@ export default function StorefrontVideoGrid({
     setMessage("");
     try {
       const result = await sendGenerationAction(item, action);
-      await onRefresh?.();
+      await refreshVideoLists(item, action, result);
       setMessage(actionMessage(action, result));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Video update failed.");
@@ -154,24 +148,37 @@ export default function StorefrontVideoGrid({
     try {
       const prepared = await sendGenerationAction(item, "prepare_burn");
       const burnRequest = readBurnRequest(prepared);
-      const burnAuthorization = readBurnAuthorization(prepared);
-      if (!burnRequest.mock) {
-        setMessage("Sign the INFT burn authorization in your wallet.");
-        await requestWalletBurnAuthorization({
-          provider: ethereumProvider,
-          ownerWallet: wallet,
-          burnRequest,
-          burnAuthorization
-        });
-      }
-      const result = await sendGenerationAction(item, action, { burnAuthorization });
-      await onRefresh?.();
+      const burnTxHash = burnRequest.mock
+        ? "mock_wallet_burn"
+        : await (async () => {
+          setMessage("Confirm the INFT burn transaction in your wallet.");
+          const txHash = await requestWalletBurnTransaction({
+            provider: ethereumProvider,
+            ownerWallet: wallet,
+            burnRequest
+          });
+          setMessage("Waiting for the burn transaction to confirm.");
+          return txHash;
+        })();
+      const result = await sendGenerationAction(item, action, { burnTxHash });
+      await refreshVideoLists(item, action, result);
       setMessage(actionMessage(action, result));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Video update failed.");
     } finally {
       setBusyAction("");
     }
+  }
+
+  async function refreshVideoLists(
+    item: StorefrontVideoItem,
+    action: StorefrontVideoAction,
+    result?: Record<string, unknown>
+  ) {
+    setLocalStore((current) => applyStorefrontVideoMutation(current, item, action, result));
+    setListVersion((current) => current + 1);
+    await onRefresh?.();
+    setListVersion((current) => current + 1);
   }
 
   async function sendGenerationAction(
@@ -239,7 +246,7 @@ export default function StorefrontVideoGrid({
         emptyText={mode === "infts" ? "No INFT videos for this storefront yet." : emptyText}
         getCreatorWallet={(item) => (item as StorefrontVideoItem).creatorWallet}
         items={pageItems}
-        key={mode}
+        key={`${mode}:${listVersion}`}
         moreHref=""
         showCreatorWallet={showCreatorWallet}
         showFeedLink={(item) => (item as StorefrontVideoItem).published}
@@ -321,12 +328,6 @@ function VideoActions({
 }
 
 function actionMessage(action: StorefrontVideoAction, result?: Record<string, unknown>) {
-  const burn = result?.burn && typeof result.burn === "object" && !Array.isArray(result.burn)
-    ? result.burn as Record<string, unknown>
-    : {};
-  if (burn.cleanupOnly) {
-    return "This legacy INFT contract cannot burn on-chain, so the video, feed, and INFT records were removed locally.";
-  }
   if (action === "publish") {
     return "INFT published to the video feed.";
   }
@@ -341,6 +342,84 @@ function actionMessage(action: StorefrontVideoAction, result?: Record<string, un
 
 function isBurnAction(action: StorefrontVideoAction) {
   return action === "burn" || action === "unpublish_and_burn";
+}
+
+function applyStorefrontVideoMutation(
+  store: SuperReferralsStore,
+  item: StorefrontVideoItem,
+  action: StorefrontVideoAction,
+  result?: Record<string, unknown>
+): SuperReferralsStore {
+  if (action === "publish" || action === "unpublish") {
+    const resultGeneration = readResultGeneration(result);
+    return {
+      ...store,
+      generations: store.generations.map((generation) => {
+        if (generation.id !== item.generationId) {
+          return generation;
+        }
+        if (resultGeneration) {
+          return resultGeneration;
+        }
+        return {
+          ...generation,
+          feed: {
+            ...(generation.feed || { tags: [] }),
+            published: action === "publish",
+            publishedAt: action === "publish"
+              ? generation.feed?.publishedAt || new Date().toISOString()
+              : generation.feed?.publishedAt
+          }
+        };
+      })
+    };
+  }
+  if (!isBurnAction(action)) {
+    return store;
+  }
+  const generationIds = new Set<string>([item.generationId]);
+  const inftIds = new Set<string>();
+  if (item.inftId) {
+    inftIds.add(item.inftId);
+  }
+  for (const generation of store.generations) {
+    if (generationIds.has(generation.id) && generation.inftId) {
+      inftIds.add(generation.inftId);
+    }
+  }
+  for (const inft of store.infts) {
+    if (generationIds.has(inft.generationId)) {
+      inftIds.add(inft.id);
+    }
+  }
+  return {
+    ...store,
+    generations: store.generations.filter((generation) =>
+      !generationIds.has(generation.id) &&
+      !inftIds.has(generation.inftId || "")
+    ),
+    infts: store.infts.filter((inft) =>
+      !inftIds.has(inft.id) &&
+      !generationIds.has(inft.generationId)
+    ),
+    feedLikes: store.feedLikes.filter((like) => !generationIds.has(like.generationId)),
+    feedComments: store.feedComments.filter((comment) => !generationIds.has(comment.generationId)),
+    feedViews: store.feedViews.filter((view) => !generationIds.has(view.generationId)),
+    storefrontRatings: store.storefrontRatings.filter((rating) =>
+      !generationIds.has(rating.generationId || "") &&
+      !inftIds.has(rating.inftId || "")
+    )
+  };
+}
+
+function readResultGeneration(result?: Record<string, unknown>) {
+  const generation = result?.generation;
+  if (!generation || typeof generation !== "object" || Array.isArray(generation)) {
+    return undefined;
+  }
+  return typeof (generation as Generation).id === "string"
+    ? generation as Generation
+    : undefined;
 }
 
 function buildStorefrontVideoItems(
@@ -563,26 +642,14 @@ function readBurnRequest(data: Record<string, unknown>): INFTBurnRequest {
   return burnRequest;
 }
 
-function readBurnAuthorization(data: Record<string, unknown>): INFTBurnAuthorization {
-  const authorization = data.burnAuthorization && typeof data.burnAuthorization === "object"
-    ? data.burnAuthorization as INFTBurnAuthorization
-    : {};
-  if (!authorization.message || !authorization.nonce || !authorization.expiresAt) {
-    throw new Error("Burn authorization details are missing.");
-  }
-  return authorization;
-}
-
-async function requestWalletBurnAuthorization({
+async function requestWalletBurnTransaction({
   provider,
   ownerWallet,
-  burnRequest,
-  burnAuthorization
+  burnRequest
 }: {
   provider?: EthereumProvider | null;
   ownerWallet?: string;
   burnRequest: INFTBurnRequest;
-  burnAuthorization: INFTBurnAuthorization;
 }) {
   if (!provider) {
     throw new Error("Connect this wallet in a wallet-enabled browser before burning the INFT.");
@@ -609,19 +676,89 @@ async function requestWalletBurnAuthorization({
     tokenId
   });
   assertINFTBurnAuthorized(diagnostics);
-  if (!burnAuthorization.message) {
-    throw new Error("Burn authorization message is missing.");
-  }
-  const signature = String(await provider.request({
-    method: "personal_sign",
-    params: [burnAuthorization.message, from]
+  const burnFunction = await resolveWalletBurnFunction(provider, {
+    contractAddress,
+    from,
+    tokenId
+  });
+  const txHash = String(await provider.request({
+    method: "eth_sendTransaction",
+    params: [{
+      from,
+      to: contractAddress,
+      data: burnFunction.data
+    }]
   }));
-  burnAuthorization.signature = signature;
-  burnAuthorization.signer = from;
-  if (!signature || !signature.startsWith("0x")) {
-    throw new Error("Wallet did not return a valid burn authorization signature.");
+  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
+    throw new Error("Wallet did not return a valid burn transaction hash.");
   }
-  return burnAuthorization;
+  return txHash;
+}
+
+async function resolveWalletBurnFunction(
+  provider: EthereumProvider,
+  input: { contractAddress: string; from: string; tokenId: string }
+) {
+  const candidates = await getWalletBurnFunctionCandidates(provider, input);
+  const errors: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      await provider.request({
+        method: "eth_call",
+        params: [{
+          from: input.from,
+          to: input.contractAddress,
+          data: candidate.data
+        }, "latest"]
+      });
+      return candidate;
+    } catch (error) {
+      errors.push(`${candidate.label}: ${formatErrorMessage(error, "call reverted")}`);
+    }
+  }
+  throw new Error(
+    `Connected wallet cannot burn this INFT. Tried ${candidates.map((candidate) => candidate.label).join(" and ")} from ${shortWallet(input.from)}, but the contract rejected the burn call. ${errors.join(" ")}`
+  );
+}
+
+async function getWalletBurnFunctionCandidates(
+  provider: EthereumProvider,
+  input: { contractAddress: string; tokenId: string }
+) {
+  const candidates = walletBurnFunctionNames.map((functionName) => {
+    const data = encodeBurnFunctionData(functionName, input.tokenId);
+    return {
+      functionName,
+      data,
+      selector: data.slice(0, 10).toLowerCase(),
+      label: `${functionName}(uint256)`,
+      supportedByBytecode: false
+    };
+  });
+  const bytecode = await provider.request({
+    method: "eth_getCode",
+    params: [input.contractAddress, "latest"]
+  }).catch(() => "");
+  const normalizedBytecode = typeof bytecode === "string" ? bytecode.toLowerCase() : "";
+  for (const candidate of candidates) {
+    candidate.supportedByBytecode = Boolean(
+      normalizedBytecode &&
+      normalizedBytecode !== "0x" &&
+      normalizedBytecode.includes(candidate.selector.slice(2))
+    );
+  }
+  return [
+    ...candidates.filter((candidate) => candidate.supportedByBytecode),
+    ...candidates.filter((candidate) => !candidate.supportedByBytecode)
+  ];
+}
+
+function encodeBurnFunctionData(functionName: INFTBurnFunctionName, tokenId: string) {
+  return encodeFunctionData({
+    abi: inftBurnAbi,
+    functionName,
+    args: [BigInt(tokenId)]
+  });
 }
 
 async function readINFTBurnDiagnostics(

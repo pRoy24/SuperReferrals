@@ -63,7 +63,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (!current) {
         throw new Error("generation not found");
       }
-      if (burnResult?.burned || burnResult?.cleanupOnly) {
+      if (burnResult?.burned) {
         if (burnResult.audit) {
           addAgentTownEvent(store, {
             id: createId("evt"),
@@ -81,29 +81,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
             createdAt: nowIso()
           });
         }
-        if (burnResult.cleanupOnly) {
-          addAgentTownEvent(store, {
-            id: createId("evt"),
-            fromAgentId: "superreferrals-platform",
-            channel: "system",
-            eventType: "receipt",
-            content: `INFT ${burnResult.inftId || current.inftId || id} uses a legacy contract without burnAgent(uint256). Local video, feed, and INFT records were removed and tombstoned.`,
-            payload: {
-              generationId: id,
-              inftId: burnResult.inftId || current.inftId,
-              tokenId: burnResult.tokenId,
-              contractAddress: burnResult.contractAddress,
-              warning: burnResult.warning
-            },
-            createdAt: nowIso()
-          });
-        }
         const cleanup = removeGenerationVideoReferences(store, {
           generationId: id,
           inftId: burnResult.inftId || current.inftId,
           tokenId: burnResult.tokenId,
           contractAddress: burnResult.contractAddress,
-          reason: burnResult.burned ? "burned" : "deleted",
+          reason: "burned",
           txHash: burnResult.txHash
         });
         return {
@@ -199,28 +182,19 @@ async function burnGenerationINFT(generation: Generation, body: Record<string, u
       recorded: true
     };
   }
-  try {
-    await preflightINFTBurn({ tokenId: inft.tokenId, contractAddress: inft.contractAddress });
-  } catch (error) {
-    if (isLegacyNonBurnableContractError(error)) {
-      return {
-        burned: false,
-        cleanupOnly: true,
-        inftId: inft.id,
-        tokenId: inft.tokenId,
-        contractAddress: inft.contractAddress,
-        warning: error instanceof Error ? error.message : String(error)
-      };
-    }
-    throw error;
-  }
+  const preflight = await preflightINFTBurn({ tokenId: inft.tokenId, contractAddress: inft.contractAddress });
   const authorization = await verifyBurnAuthorization(body.burnAuthorization, generation, inft);
   const audit = await persistBurnAuditToZeroG({
     generation,
     inft,
     authorization
   });
-  const result = await burnINFT({ tokenId: inft.tokenId, contractAddress: inft.contractAddress, skipPreflight: true });
+  const result = await burnINFT({
+    tokenId: inft.tokenId,
+    contractAddress: inft.contractAddress,
+    burnFunctionName: preflight.burnFunctionName,
+    skipPreflight: true
+  });
   return {
     burned: true,
     inftId: inft.id,
@@ -231,12 +205,6 @@ async function burnGenerationINFT(generation: Generation, body: Record<string, u
     authorizedBy: authorization.signer,
     audit
   };
-}
-
-function isLegacyNonBurnableContractError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error || "");
-  return message.includes("does not expose burnAgent(uint256)") ||
-    message.includes("This deployed contract cannot burn existing tokens on-chain");
 }
 
 function buildBurnAuthorization({
@@ -289,7 +257,7 @@ function burnAuthorizationMessage(payload: {
     "SuperReferrals INFT Burn Authorization",
     "",
     "You authorize SuperReferrals to use the platform contract-owner key to burn the INFT listed below.",
-    "The platform will first verify that this signature belongs to the current token owner, preflight burnAgent with the platform key, write this authorization to 0G Storage, then execute burnAgent.",
+    "The platform will first verify that this signature belongs to the current token owner, preflight an on-chain burn call with the platform key, write this authorization to 0G Storage, then execute the burn.",
     "",
     `Action: ${payload.action}`,
     `Generation ID: ${payload.generationId}`,

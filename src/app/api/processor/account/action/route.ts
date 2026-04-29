@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { processorAuthTokenFromRequest, processorSessionFromCustomer, setProcessorAccountSessionCookie } from "@/lib/account-session";
+import { restoreConsoleCustomer } from "@/lib/console-auth";
 import { normalizeWallet, nowIso } from "@/lib/ids";
-import { restoreProcessorAuthTokenSession } from "@/lib/orchestrator";
+import {
+  customersShareProcessorAccount
+} from "@/lib/orchestrator";
 import { hasStoredSamsarAppKey, samsarAppClientCredentials } from "@/lib/samsar-app-credentials";
 import { fetchSamsarProcessorCredits } from "@/lib/samsar-processor";
 import { mutateStore, publicCustomer, readStore, upsertCustomer } from "@/lib/store";
@@ -10,13 +13,21 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const requestAuthToken = processorAuthTokenFromRequest(request);
-    const sessionCustomer = requestAuthToken
-      ? await restoreProcessorAuthTokenSession(requestAuthToken).catch(() => undefined)
-      : undefined;
+    const sessionCustomer = await restoreConsoleCustomer(request);
     const store = await readStore();
-    const customer = body.customerId
-      ? store.customers.find((item) => item.id === body.customerId)
-      : sessionCustomer || store.customers[0];
+    const requestedCustomer = body.customerId
+      ? store.customers.find((item) => item.id === String(body.customerId))
+      : undefined;
+    if (!sessionCustomer) {
+      throw new Error("Sign in with your Samsar account before changing account settings.");
+    }
+    if (body.customerId && (!requestedCustomer || !customersShareProcessorAccount(requestedCustomer, sessionCustomer))) {
+      return NextResponse.json(
+        { message: "That storefront does not belong to the signed-in Samsar account." },
+        { status: 403 }
+      );
+    }
+    const customer = requestedCustomer || sessionCustomer;
     if (!customer) {
       throw new Error("Customer account was not found");
     }

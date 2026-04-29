@@ -20,6 +20,7 @@ const inftAbi = parseAbi([
   "function mintAgent(address to, string encryptedURI, bytes32 metadataHash, address agentWallet, string referrerCode) returns (uint256)",
   "function updateAgentMetadata(uint256 tokenId, string encryptedURI, bytes32 metadataHash)",
   "function burnAgent(uint256 tokenId)",
+  "function burn(uint256 tokenId)",
   "function tokenURI(uint256 tokenId) view returns (string)",
   "function ownerOf(uint256 tokenId) view returns (address)",
   "function owner() view returns (address)",
@@ -28,6 +29,17 @@ const inftAbi = parseAbi([
 const transferEventAbi = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)");
 const INFT_TRANSACTION_RETRY_COUNT = 3;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+type INFTBurnFunctionName = "burnAgent" | "burn";
+const INFT_BURN_FUNCTION_NAMES: INFTBurnFunctionName[] = ["burnAgent", "burn"];
+type INFTBurnPreflight = {
+  mock: boolean;
+  burnFunctionName: INFTBurnFunctionName;
+  tokenId?: string;
+  contractAddress?: `0x${string}`;
+  sender?: `0x${string}`;
+  tokenOwner?: string;
+  contractOwner?: string;
+};
 
 function getINFTChain() {
   const chain = getINFTChainConfig();
@@ -259,10 +271,12 @@ export async function updateINFTMetadata({
 export async function burnINFT({
   tokenId,
   contractAddress: inputContractAddress,
+  burnFunctionName: inputBurnFunctionName,
   skipPreflight = false
 }: {
   tokenId?: string;
   contractAddress?: string;
+  burnFunctionName?: INFTBurnFunctionName;
   skipPreflight?: boolean;
 }) {
   const contractAddress = (inputContractAddress || env("INFT_CONTRACT_ADDRESS")) as `0x${string}`;
@@ -295,17 +309,20 @@ export async function burnINFT({
     chain,
     transport: http(rpcUrl)
   });
+  let burnFunctionName = inputBurnFunctionName || "burnAgent";
   if (!skipPreflight) {
-    await preflightINFTBurnCall({
+    const preflight = await preflightINFTBurnCall({
       accountAddress: account.address,
       contractAddress,
       publicClient,
       tokenId: parsedTokenId
     });
+    burnFunctionName = preflight.burnFunctionName;
   }
   const txHash = await withSerializedZeroGTransaction(`0g-inft:${account.address.toLowerCase()}:${rpcUrl}`, () =>
     writeBurnWithRetry({
       accountAddress: account.address,
+      burnFunctionName,
       contractAddress,
       publicClient,
       tokenId: parsedTokenId,
@@ -342,14 +359,14 @@ export async function preflightINFTBurn({
 }: {
   tokenId?: string;
   contractAddress?: string;
-}) {
+}): Promise<INFTBurnPreflight> {
   const contractAddress = (inputContractAddress || env("INFT_CONTRACT_ADDRESS")) as `0x${string}`;
   const privateKey = (env("INFT_MINTER_PRIVATE_KEY") || env("OG_PRIVATE_KEY")) as `0x${string}`;
   const chain = getINFTChain();
   const rpcUrl = chain.rpcUrls.default.http[0];
 
   if (isProviderMock("INFT")) {
-    return { mock: true };
+    return { mock: true, burnFunctionName: "burnAgent" as const };
   }
   if (!contractAddress || !privateKey) {
     throw new Error("INFT_CONTRACT_ADDRESS and either INFT_MINTER_PRIVATE_KEY or OG_PRIVATE_KEY are required for live INFT burn preflight.");
@@ -381,70 +398,90 @@ async function preflightINFTBurnCall({
   contractAddress: `0x${string}`;
   publicClient: any;
   tokenId: bigint;
-}) {
+}): Promise<INFTBurnPreflight> {
   const chainConfig = getINFTChainConfig();
-  const [tokenOwner, contractOwner] = await Promise.all([
-    publicClient.readContract({
-      address: contractAddress,
-      abi: inftAbi,
-      functionName: "ownerOf",
-      args: [tokenId]
-    }) as Promise<string>,
-    publicClient.readContract({
-      address: contractAddress,
-      abi: inftAbi,
-      functionName: "owner"
-    }) as Promise<string>
-  ]);
-
-  const callData = encodeFunctionData({
+  const tokenOwner = await publicClient.readContract({
+    address: contractAddress,
     abi: inftAbi,
-    functionName: "burnAgent",
+    functionName: "ownerOf",
     args: [tokenId]
-  });
-  const selector = callData.slice(0, 10).toLowerCase();
+  }) as string;
+  const contractOwner = await publicClient.readContract({
+    address: contractAddress,
+    abi: inftAbi,
+    functionName: "owner"
+  }).catch(() => undefined) as string | undefined;
   const bytecode = await publicClient.getCode({ address: contractAddress }).catch(() => undefined) as string | undefined;
-  if (bytecode && !bytecode.toLowerCase().includes(selector.slice(2))) {
-    throw new Error(
-      `INFT contract on ${chainConfig.name} does not expose burnAgent(uint256) selector ${selector}; ${formatINFTBurnContext({
+  const candidates = getINFTBurnFunctionCandidates(tokenId, bytecode);
+  const errors: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      await publicClient.call({
+        account: accountAddress,
+        to: contractAddress,
+        data: candidate.callData,
+        gas: parsePositiveBigIntEnv(
+          "INFT_BURN_PREFLIGHT_GAS_LIMIT",
+          parsePositiveBigIntEnv("INFT_BURN_GAS_LIMIT", 1_500_000n)
+        )
+      });
+      return {
+        mock: false,
         tokenId: tokenId.toString(),
         contractAddress,
         sender: accountAddress,
         tokenOwner,
-        contractOwner
-      })}; contract ${buildINFTExplorerUrl(chainConfig, "address", contractAddress)}. This deployed contract cannot burn existing tokens on-chain. Deploy the current SuperReferralsINFT contract and update INFT_CONTRACT_ADDRESS before minting burnable INFTs.`
-    );
-  }
-  try {
-    await publicClient.call({
-      account: accountAddress,
-      to: contractAddress,
-      data: callData,
-      gas: parsePositiveBigIntEnv(
-        "INFT_BURN_PREFLIGHT_GAS_LIMIT",
-        parsePositiveBigIntEnv("INFT_BURN_GAS_LIMIT", 1_500_000n)
-      )
-    });
-  } catch (error) {
-    throw new Error(
-      `INFT burn preflight reverted on ${chainConfig.name}; ${formatINFTBurnContext({
-        tokenId: tokenId.toString(),
-        contractAddress,
-        sender: accountAddress,
-        tokenOwner,
-        contractOwner
-      })}; contract ${buildINFTExplorerUrl(chainConfig, "address", contractAddress)}. RPC error: ${formatINFTError(error)}. No burn transaction was submitted.`
-    );
+        contractOwner,
+        burnFunctionName: candidate.functionName
+      };
+    } catch (error) {
+      errors.push(`${candidate.label}: ${formatINFTError(error)}`);
+    }
   }
 
-  return {
-    mock: false,
+  const context = formatINFTBurnContext({
     tokenId: tokenId.toString(),
     contractAddress,
     sender: accountAddress,
     tokenOwner,
     contractOwner
-  };
+  });
+  const supportedCandidates = candidates.filter((candidate) => candidate.supportedByBytecode);
+  if (bytecode && bytecode !== "0x" && supportedCandidates.length === 0) {
+    throw new Error(
+      `INFT contract on ${chainConfig.name} does not expose burnAgent(uint256) or burn(uint256) selectors; ${context}; contract ${buildINFTExplorerUrl(chainConfig, "address", contractAddress)}. No burn transaction was submitted.`
+    );
+  }
+  throw new Error(
+    `INFT burn preflight reverted on ${chainConfig.name}; ${context}; contract ${buildINFTExplorerUrl(chainConfig, "address", contractAddress)}. Tried ${candidates.map((candidate) => candidate.label).join(" and ")}. RPC errors: ${errors.join(" | ")}. No burn transaction was submitted.`
+  );
+}
+
+function getINFTBurnFunctionCandidates(tokenId: bigint, bytecode?: string) {
+  const normalizedBytecode = bytecode?.toLowerCase() || "";
+  const candidates = INFT_BURN_FUNCTION_NAMES.map((functionName) => {
+    const callData = encodeFunctionData({
+      abi: inftAbi,
+      functionName,
+      args: [tokenId]
+    });
+    const selector = callData.slice(0, 10).toLowerCase();
+    return {
+      functionName,
+      callData,
+      selector,
+      label: `${functionName}(uint256)`,
+      supportedByBytecode: Boolean(
+        normalizedBytecode &&
+        normalizedBytecode !== "0x" &&
+        normalizedBytecode.includes(selector.slice(2))
+      )
+    };
+  });
+  return [
+    ...candidates.filter((candidate) => candidate.supportedByBytecode),
+    ...candidates.filter((candidate) => !candidate.supportedByBytecode)
+  ];
 }
 
 export async function getINFTTokenOwner({
@@ -1071,12 +1108,14 @@ async function writeMetadataUpdateWithRetry({
 
 async function writeBurnWithRetry({
   accountAddress,
+  burnFunctionName,
   contractAddress,
   publicClient,
   tokenId,
   walletClient
 }: {
   accountAddress: `0x${string}`;
+  burnFunctionName: INFTBurnFunctionName;
   contractAddress: `0x${string}`;
   publicClient: any;
   tokenId: bigint;
@@ -1093,7 +1132,7 @@ async function writeBurnWithRetry({
       return await walletClient.writeContract({
         address: contractAddress,
         abi: inftAbi,
-        functionName: "burnAgent",
+        functionName: burnFunctionName,
         args: [tokenId],
         gas: parsePositiveBigIntEnv("INFT_BURN_GAS_LIMIT", 1_500_000n),
         ...(nonce === undefined ? {} : { nonce }),
