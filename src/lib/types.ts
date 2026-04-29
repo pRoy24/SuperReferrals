@@ -423,6 +423,16 @@ export interface INFTRecord {
   updatedAt: string;
 }
 
+export interface DeletedVideoReference {
+  generationId?: string;
+  inftId?: string;
+  tokenId?: string;
+  contractAddress?: string;
+  reason: "burned" | "deleted";
+  txHash?: string;
+  deletedAt: string;
+}
+
 export interface StorefrontRating {
   id: string;
   customerId: string;
@@ -561,6 +571,7 @@ export interface SuperReferralsStore {
   quotes: PaymentQuote[];
   generations: Generation[];
   infts: INFTRecord[];
+  deletedVideoReferences: DeletedVideoReference[];
   storefrontRatings: StorefrontRating[];
   feedLikes: FeedLike[];
   feedComments: FeedComment[];

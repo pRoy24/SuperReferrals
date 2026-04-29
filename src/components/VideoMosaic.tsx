@@ -217,7 +217,6 @@ export default function VideoMosaic({
                   playsInline
                   preload="metadata"
                   onEnded={() => setActiveId((current) => current === item.id ? "" : current)}
-                  onLoadedData={() => markVideoReady(item)}
                   onPlay={() => setActiveId(item.id)}
                   onPlaying={() => markVideoReady(item)}
                 />

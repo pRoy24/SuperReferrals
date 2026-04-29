@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { appBaseUrl, env } from "./env";
 import { createId, makeReferrerCode, nowIso, normalizeWallet } from "./ids";
-import { recoverINFTFromChain } from "./inft";
+import { isINFTTokenMissing, recoverINFTFromChain } from "./inft";
 import { findPaymentToken, getTransactionChainId, settlementTokenForCurrency } from "./payment-tokens";
 import { defaultINFTActionPricesUsd, defaultModelPricingConfigurations, defaultPricing } from "./pricing";
 import { normalizeWalletList } from "./storefront-access";
@@ -14,6 +14,7 @@ import type {
   AgentTownEvent,
   Customer,
   CustomerStorefrontConditions,
+  DeletedVideoReference,
   Generation,
   INFTRecord,
   PaymentQuote,
@@ -197,6 +198,7 @@ export function emptyStore(): SuperReferralsStore {
     quotes: [],
     generations: [],
     infts: [],
+    deletedVideoReferences: [],
     storefrontRatings: [],
     feedLikes: [],
     feedComments: [],
@@ -296,6 +298,10 @@ function parseStoreDocument(raw: unknown, source: string): SuperReferralsStore {
 function normalizeStoreForRuntime(store: SuperReferralsStore) {
   const runtimeChainId = getTransactionChainId();
   let changed = false;
+  if (!Array.isArray(store.deletedVideoReferences)) {
+    store.deletedVideoReferences = [];
+    changed = true;
+  }
   changed = removeLegacyDemoStorefront(store) || changed;
   for (const customer of store.customers) {
     const pricing = customer.pricing || defaultPricing;
@@ -715,16 +721,47 @@ export async function getGeneration(id: string) {
 
 export async function getINFT(id: string) {
   const store = await readStore();
+  if (isDeletedVideoReference(store, id)) {
+    return undefined;
+  }
   const existing = store.infts.find((inft) => inft.id === id || inft.generationId === id || inft.tokenId === id);
   if (existing) {
+    if (await isStoredINFTMissingOnChain(existing)) {
+      await mutateStore((mutableStore) => removeGenerationVideoReferences(mutableStore, {
+        generationId: existing.generationId,
+        inftId: existing.id,
+        tokenId: existing.tokenId,
+        contractAddress: existing.contractAddress,
+        reason: "burned"
+      })).catch(() => undefined);
+      return undefined;
+    }
     return existing;
   }
   const recovered = await recoverINFTFromChain(id).catch(() => undefined);
   if (!recovered) {
     return undefined;
   }
-  await mutateStore((mutableStore) => addINFT(mutableStore, recovered)).catch(() => undefined);
+  if (isDeletedVideoReference(store, recovered.id) || isDeletedVideoReference(store, recovered.generationId) || isDeletedVideoReference(store, recovered.tokenId || "")) {
+    return undefined;
+  }
+  await mutateStore((mutableStore) => {
+    if (isDeletedVideoReference(mutableStore, recovered.id) || isDeletedVideoReference(mutableStore, recovered.generationId) || isDeletedVideoReference(mutableStore, recovered.tokenId || "")) {
+      return undefined;
+    }
+    return addINFT(mutableStore, recovered);
+  }).catch(() => undefined);
   return recovered;
+}
+
+async function isStoredINFTMissingOnChain(inft: INFTRecord) {
+  if (!inft.tokenId || !inft.contractAddress) {
+    return false;
+  }
+  return isINFTTokenMissing({
+    tokenId: inft.tokenId,
+    contractAddress: inft.contractAddress
+  }).catch(() => false);
 }
 
 export function publicStore(store: SuperReferralsStore): SuperReferralsStore {
@@ -931,19 +968,36 @@ export function removeINFT(store: SuperReferralsStore, id: string) {
 export function removeGenerationVideoReferences(store: SuperReferralsStore, input: {
   generationId: string;
   inftId?: string;
+  tokenId?: string;
+  contractAddress?: string;
+  reason?: DeletedVideoReference["reason"];
+  txHash?: string;
 }) {
   const generationIds = new Set([input.generationId].filter(Boolean));
   const inftIds = new Set([input.inftId].filter(Boolean));
+  const tokenIds = new Set([input.tokenId].filter(Boolean));
+  const contractAddresses = new Set([normalizeStoreKey(input.contractAddress)].filter(Boolean));
+  const quoteIds = new Set<string>();
 
   for (const inft of store.infts) {
     if (generationIds.has(inft.generationId) || inftIds.has(inft.id)) {
       inftIds.add(inft.id);
       generationIds.add(inft.generationId);
+      if (inft.tokenId) {
+        tokenIds.add(inft.tokenId);
+      }
+      const contractAddress = normalizeStoreKey(inft.contractAddress);
+      if (contractAddress) {
+        contractAddresses.add(contractAddress);
+      }
     }
   }
   for (const generation of store.generations) {
     if (generationIds.has(generation.id) || (generation.inftId && inftIds.has(generation.inftId))) {
       generationIds.add(generation.id);
+      if (generation.payment.quoteId) {
+        quoteIds.add(generation.payment.quoteId);
+      }
       if (generation.inftId) {
         inftIds.add(generation.inftId);
       }
@@ -955,6 +1009,16 @@ export function removeGenerationVideoReferences(store: SuperReferralsStore, inpu
   const removedInftCount = store.infts.length;
   store.infts = store.infts.filter((inft) => !inftIds.has(inft.id) && !generationIds.has(inft.generationId));
 
+  addDeletedVideoReference(store, {
+    generationId: [...generationIds][0],
+    inftId: [...inftIds][0],
+    tokenId: [...tokenIds][0],
+    contractAddress: [...contractAddresses][0],
+    reason: input.reason || "deleted",
+    txHash: input.txHash,
+    deletedAt: nowIso()
+  });
+
   store.feedLikes = store.feedLikes.filter((like) => !generationIds.has(like.generationId));
   store.feedComments = store.feedComments.filter((comment) => !generationIds.has(comment.generationId));
   store.feedViews = store.feedViews.filter((view) => !generationIds.has(view.generationId));
@@ -962,7 +1026,7 @@ export function removeGenerationVideoReferences(store: SuperReferralsStore, inpu
     !generationIds.has(rating.generationId || "") &&
     !inftIds.has(rating.inftId || "")
   );
-  store.quotes = store.quotes.filter((quote) => !inftIds.has(quote.inftId || ""));
+  store.quotes = store.quotes.filter((quote) => !inftIds.has(quote.inftId || "") && !quoteIds.has(quote.id));
 
   const removedJobIds = new Set(
     store.agentJobs
@@ -978,9 +1042,45 @@ export function removeGenerationVideoReferences(store: SuperReferralsStore, inpu
   return {
     generationIds: [...generationIds],
     inftIds: [...inftIds],
+    tokenIds: [...tokenIds],
     removedGenerations: removedGenerationCount - store.generations.length,
     removedInfts: removedInftCount - store.infts.length
   };
+}
+
+export function isDeletedVideoReference(store: SuperReferralsStore, id?: string) {
+  const normalized = normalizeStoreKey(id);
+  if (!normalized) {
+    return false;
+  }
+  return store.deletedVideoReferences.some((reference) =>
+    normalizeStoreKey(reference.generationId) === normalized ||
+    normalizeStoreKey(reference.inftId) === normalized ||
+    normalizeStoreKey(reference.tokenId) === normalized
+  );
+}
+
+function addDeletedVideoReference(store: SuperReferralsStore, reference: DeletedVideoReference) {
+  const nextReference = {
+    ...reference,
+    generationId: reference.generationId || undefined,
+    inftId: reference.inftId || undefined,
+    tokenId: reference.tokenId || undefined,
+    contractAddress: reference.contractAddress || undefined,
+    txHash: reference.txHash || undefined
+  };
+  const matchesReference = (item: DeletedVideoReference) =>
+    Boolean(nextReference.generationId && item.generationId === nextReference.generationId) ||
+    Boolean(nextReference.inftId && item.inftId === nextReference.inftId) ||
+    Boolean(nextReference.tokenId && item.tokenId === nextReference.tokenId);
+  store.deletedVideoReferences = [
+    nextReference,
+    ...store.deletedVideoReferences.filter((item) => !matchesReference(item))
+  ];
+}
+
+function normalizeStoreKey(value?: string) {
+  return String(value || "").trim().toLowerCase();
 }
 
 export function upsertStorefrontRating(store: SuperReferralsStore, input: {

@@ -949,7 +949,6 @@ function FeedVideo({
         onCanPlay={(event) => onProgress(item.id, event.currentTarget)}
         onDurationChange={(event) => onProgress(item.id, event.currentTarget)}
         onEnded={onEnded}
-        onLoadedData={revealVideoFrame}
         onLoadedMetadata={(event) => onProgress(item.id, event.currentTarget)}
         onPlaying={revealVideoFrame}
         onSeeked={(event) => onProgress(item.id, event.currentTarget)}

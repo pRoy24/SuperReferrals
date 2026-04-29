@@ -83,7 +83,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         }
         const cleanup = removeGenerationVideoReferences(store, {
           generationId: id,
-          inftId: burnResult.inftId || current.inftId
+          inftId: burnResult.inftId || current.inftId,
+          tokenId: burnResult.tokenId,
+          contractAddress: burnResult.contractAddress,
+          reason: "burned",
+          txHash: burnResult.txHash
         });
         return {
           generation: null,
@@ -173,6 +177,7 @@ async function burnGenerationINFT(generation: Generation, body: Record<string, u
       burned: true,
       inftId: inft.id,
       tokenId: inft.tokenId,
+      contractAddress: inft.contractAddress,
       txHash: burnTxHash,
       recorded: true
     };
@@ -189,6 +194,7 @@ async function burnGenerationINFT(generation: Generation, body: Record<string, u
     burned: true,
     inftId: inft.id,
     tokenId: inft.tokenId,
+    contractAddress: inft.contractAddress,
     txHash: result.txHash,
     mock: result.mock,
     authorizedBy: authorization.signer,

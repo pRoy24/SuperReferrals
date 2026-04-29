@@ -476,6 +476,30 @@ export async function getINFTTokenOwner({
   }));
 }
 
+export async function isINFTTokenMissing({
+  tokenId,
+  contractAddress
+}: {
+  tokenId?: string;
+  contractAddress?: string;
+}) {
+  try {
+    await getINFTTokenOwner({ tokenId, contractAddress });
+    return false;
+  } catch (error) {
+    return isINFTNonexistentTokenError(error);
+  }
+}
+
+function isINFTNonexistentTokenError(error: unknown) {
+  const text = errorToSearchText(error).toLowerCase();
+  return text.includes("erc721nonexistenttoken") ||
+    text.includes("nonexistent token") ||
+    text.includes("invalid token id") ||
+    text.includes("owner query for nonexistent token") ||
+    text.includes("0x7e273289");
+}
+
 export async function verifyINFTBurnTransaction({
   txHash,
   tokenId,
