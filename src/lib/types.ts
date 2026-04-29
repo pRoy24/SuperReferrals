@@ -248,6 +248,7 @@ export interface SamsarPublicationRecord {
 
 export interface SamsarVideoRenderMetadata {
   has_subtitles?: boolean | null;
+  has_outro?: boolean | null;
   has_footer?: boolean | null;
   result_language?: string;
   languageCode?: string;

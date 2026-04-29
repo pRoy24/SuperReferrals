@@ -11,6 +11,17 @@ export const supportedSamsarProcessorLanguageOptions = [
   { label: "Hindi", value: "HI" }
 ];
 
+export const renditionLanguageNameByCode: Record<string, string> = {
+  EN: "English",
+  ES: "Spanish",
+  FR: "French",
+  JA: "Japanese",
+  TH: "Thai",
+  ZH: "Chinese",
+  BN: "Bengali",
+  HI: "Hindi"
+};
+
 const RENDITION_LANGUAGE_KEYS = [
   "languageCode",
   "language_code",
@@ -64,6 +75,14 @@ export function resolveRenditionLanguageCode(...values: unknown[]): string {
   }
 
   return "";
+}
+
+export function renditionLanguageName(value: unknown): string {
+  const code = resolveRenditionLanguageCode(value);
+  if (!code) {
+    return "";
+  }
+  return renditionLanguageNameByCode[code] || renditionLanguageNameByCode[code.split("-")[0] || ""] || code;
 }
 
 export function languageCodeMetadata(languageCode: string) {

@@ -20,9 +20,9 @@ import {
   type TransactionChainConfig
 } from "@/lib/payment-tokens";
 import { defaultINFTActionPricesUsd } from "@/lib/pricing";
-import { resolveRenditionLanguageCode, supportedSamsarProcessorLanguageOptions } from "@/lib/rendition-language";
+import { renditionLanguageName, resolveRenditionLanguageCode, supportedSamsarProcessorLanguageOptions } from "@/lib/rendition-language";
 import { isUsableEvmAddress } from "@/lib/wallet-address";
-import type { Customer, INFTPaidAction, INFTRecord, PaymentCurrencySymbol, PaymentQuote, PaymentRail, SuperReferralsStore } from "@/lib/types";
+import type { Customer, INFTPaidAction, INFTRecord, PaymentCurrencySymbol, PaymentQuote, PaymentRail, SamsarVideoRenderMetadata, SuperReferralsStore } from "@/lib/types";
 
 type ActionPollState = {
   action: string;
@@ -31,6 +31,7 @@ type ActionPollState = {
   resultUrl?: string;
   errorMessage?: string;
   languageCode?: string;
+  expectedVideoMetadata?: SamsarVideoRenderMetadata;
 };
 
 type ActionPaymentFlow = {
@@ -127,6 +128,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const videoOperationPending = actionRenderPending || actionFlowPending;
   const videoActionDisabled = Boolean(busy) || videoOperationPending;
   const walletActionLabel = walletConnectedOnTransactionChain ? "Switch wallet" : "Connect wallet";
+  const metadataItems = useMemo(() => buildINFTMetadataItems(activeInft), [activeInft]);
 
   useEffect(() => {
     const firstToken = selectablePaymentTokens[0];
@@ -143,6 +145,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     const pollRequestId = actionPoll.requestId;
     const pollAction = actionPoll.action;
     const pollLanguageCode = actionPoll.languageCode;
+    const pollExpectedVideoMetadata = actionPoll.expectedVideoMetadata;
     let cancelled = false;
 
     async function pollActionStatus() {
@@ -155,7 +158,8 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
             payload: {
               requestId: pollRequestId,
               sourceAction: pollAction,
-              ...(pollLanguageCode ? { languageCode: pollLanguageCode } : {})
+              ...(pollLanguageCode ? { languageCode: pollLanguageCode } : {}),
+              ...(pollExpectedVideoMetadata ? { expectedVideoMetadata: pollExpectedVideoMetadata } : {})
             }
           })
         });
@@ -223,7 +227,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [actionPoll?.action, actionPoll?.languageCode, actionPoll?.requestId, actionPoll?.status, activeInft.id]);
+  }, [actionPoll?.action, actionPoll?.expectedVideoMetadata, actionPoll?.languageCode, actionPoll?.requestId, actionPoll?.status, activeInft.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -403,13 +407,15 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
         setLastVideoOperation(action);
         const requestId = extractActionRequestId(data.result);
         if (requestId) {
+          const expectedVideoMetadata = extractExpectedVideoMetadata(data.result) || expectedVideoMetadataForAction(action, payload);
           setActionPoll({
             action,
             requestId,
             status: extractActionStatus(data.result) || "QUEUED",
             resultUrl: extractActionResultUrl(data.result),
             errorMessage: extractActionError(data.result),
-            languageCode
+            languageCode,
+            expectedVideoMetadata
           });
         }
       }
@@ -626,13 +632,15 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       setLastVideoOperation(action);
       const requestId = extractActionRequestId(data.result);
       if (requestId) {
+        const expectedVideoMetadata = extractExpectedVideoMetadata(data.result) || expectedVideoMetadataForAction(action, payload);
         setActionPoll({
           action,
           requestId,
           status: extractActionStatus(data.result) || "QUEUED",
           resultUrl: extractActionResultUrl(data.result),
           errorMessage: extractActionError(data.result),
-          languageCode
+          languageCode,
+          expectedVideoMetadata
         });
       }
       setActionPaymentFlow({
@@ -1126,16 +1134,16 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
 
           <div className="panel">
             <div className="panel-header">
-              <h2>Referrer Metadata</h2>
+              <h2>Metadata</h2>
               <Link2 size={18} />
             </div>
             <p className="mono">{activeInft.referrer.url}</p>
             <div className="list">
-              {activeInft.attributes.map((attribute) => (
-                <div className="item" key={attribute.trait_type}>
+              {metadataItems.map((item, index) => (
+                <div className="item" key={`${item.label}:${index}`}>
                   <div className="item-title">
-                    <span className="subtle">{attribute.trait_type}</span>
-                    <strong>{String(attribute.value)}</strong>
+                    <span className="subtle">{item.label}</span>
+                    <strong>{item.value}</strong>
                   </div>
                 </div>
               ))}
@@ -1145,6 +1153,90 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       </div>
     </main>
   );
+}
+
+type INFTMetadataItem = {
+  label: string;
+  value: string;
+};
+
+const hiddenINFTMetadataTraits = new Set([
+  "payment_amount_usd",
+  "samsar_request_id",
+  "samsar_session_id",
+  "has_subtitles",
+  "has_outro",
+  "has_footer",
+  "result_language",
+  "language_code",
+  "languagecode",
+  "languages"
+]);
+
+function buildINFTMetadataItems(inft: INFTRecord): INFTMetadataItem[] {
+  const metadata = isRecord(inft.samsarVideoMetadata) ? inft.samsarVideoMetadata : {};
+  const attributeMap = new Map(
+    inft.attributes.map((attribute) => [normalizeMetadataTrait(attribute.trait_type), attribute.value])
+  );
+  const languageCode = resolveRenditionLanguageCode(inft.languageCode, metadata, attributeMap.get("language_code"), attributeMap.get("result_language"));
+  const featuredItems: INFTMetadataItem[] = [
+    { label: "Language", value: renditionLanguageName(languageCode) || "Unknown" },
+    { label: "Has subtitles", value: formatBooleanMetadata(resolveVideoMetadataBoolean(metadata, attributeMap, "has_subtitles", "hasSubtitles")) },
+    { label: "Has outro", value: formatBooleanMetadata(resolveVideoMetadataBoolean(metadata, attributeMap, "has_outro", "hasOutro")) },
+    { label: "Has footer", value: formatBooleanMetadata(resolveVideoMetadataBoolean(metadata, attributeMap, "has_footer", "hasFooter")) }
+  ];
+  const attributeItems = inft.attributes
+    .filter((attribute) => !hiddenINFTMetadataTraits.has(normalizeMetadataTrait(attribute.trait_type)))
+    .map((attribute) => ({
+      label: attribute.trait_type,
+      value: formatMetadataValue(attribute.value)
+    }));
+  return [...featuredItems, ...attributeItems];
+}
+
+function normalizeMetadataTrait(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function resolveVideoMetadataBoolean(
+  metadata: Record<string, unknown>,
+  attributeMap: Map<string, unknown>,
+  ...keys: string[]
+) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(metadata, key)) {
+      const value = booleanFromUnknown(metadata[key]);
+      if (value !== undefined) {
+        return value;
+      }
+    }
+    const attributeValue = attributeMap.get(normalizeMetadataTrait(key));
+    const value = booleanFromUnknown(attributeValue);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function formatBooleanMetadata(value: boolean | null | undefined) {
+  if (value === true) {
+    return "Yes";
+  }
+  if (value === false) {
+    return "No";
+  }
+  return "Unknown";
+}
+
+function formatMetadataValue(value: unknown) {
+  if (typeof value === "boolean" || value === null) {
+    return formatBooleanMetadata(value);
+  }
+  if (value === null || value === undefined || value === "") {
+    return "Unknown";
+  }
+  return String(value);
 }
 
 async function findConnectedWalletOnChain(walletProviders: BrowserWalletProvider[], chain: TransactionChainConfig) {
@@ -1683,6 +1775,72 @@ function parseOutroFocusArea(raw: string) {
   return focusArea;
 }
 
+function expectedVideoMetadataForAction(action: string, payload: Record<string, unknown>): SamsarVideoRenderMetadata | undefined {
+  const metadata: SamsarVideoRenderMetadata = {};
+  const languageCode = actionLanguageCode(action, payload);
+  if (languageCode) {
+    metadata.result_language = languageCode;
+    metadata.languageCode = languageCode;
+    metadata.language_code = languageCode;
+    metadata.languages = [languageCode];
+  }
+
+  if (action === "add_subtitles") {
+    metadata.has_subtitles = true;
+  }
+  if (action === "remove_subtitles") {
+    metadata.has_subtitles = false;
+  }
+  if (action === "add_outro" || action === "update_outro") {
+    metadata.has_outro = true;
+  }
+  if (action === "update_footer") {
+    if (payload.remove_footer === true || payload.removeFooter === true || payload.mode === "remove") {
+      metadata.has_footer = false;
+    } else if (
+      firstStringValue(payload, "cta_url", "ctaUrl", "footerUrl", "footer_url", "url", "cta_text", "ctaText", "cta_logo", "ctaLogo") ||
+      (Array.isArray(payload.footer_metadata) && payload.footer_metadata.length > 0) ||
+      (Array.isArray(payload.footerMetadata) && payload.footerMetadata.length > 0)
+    ) {
+      metadata.has_footer = true;
+    }
+  }
+
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+function extractExpectedVideoMetadata(value: unknown): SamsarVideoRenderMetadata | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const rawMetadata = [
+    value.expectedVideoMetadata,
+    value.expected_video_metadata,
+    value.samsarVideoMetadata,
+    value.samsar_video_metadata,
+    value.metadataPatch,
+    value.metadata_patch
+  ].find(isRecord);
+  if (!rawMetadata) {
+    return undefined;
+  }
+  const metadata: SamsarVideoRenderMetadata = {};
+  const languageCode = resolveRenditionLanguageCode(rawMetadata);
+  if (languageCode) {
+    metadata.result_language = languageCode;
+    metadata.languageCode = languageCode;
+    metadata.language_code = languageCode;
+    metadata.languages = [languageCode];
+  }
+  for (const key of ["has_subtitles", "has_outro", "has_footer"] as const) {
+    const value = booleanFromUnknown(rawMetadata[key]);
+    if (value !== undefined) {
+      metadata[key] = value;
+    }
+  }
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
 function extractActionRequestId(value: unknown) {
   return firstStringValue(
     value,
@@ -1720,6 +1878,29 @@ function actionLanguageCode(action: string, payload: Record<string, unknown>) {
     payload.subtitleLanguage,
     payload.subtitle_language
   ) || undefined;
+}
+
+function booleanFromUnknown(value: unknown): boolean | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes"].includes(normalized)) {
+      return true;
+    }
+    if (["false", "0", "no"].includes(normalized)) {
+      return false;
+    }
+  }
+  return undefined;
 }
 
 function extractActionResultUrl(value: unknown): string | undefined {

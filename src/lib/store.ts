@@ -22,6 +22,7 @@ import type {
   Generation,
   INFTRecord,
   PaymentQuote,
+  SamsarVideoRenderMetadata,
   StorefrontRating,
   SubAccount,
   SubAccountPreferences,
@@ -307,7 +308,7 @@ function normalizeStoreForRuntime(store: SuperReferralsStore) {
     changed = true;
   }
   changed = removeLegacyDemoStorefront(store) || changed;
-  changed = backfillVideoLanguageCodes(store) || changed;
+  changed = backfillVideoMetadata(store) || changed;
   for (const customer of store.customers) {
     const pricing = customer.pricing || defaultPricing;
     const previousChainId = pricing.chainId;
@@ -346,34 +347,29 @@ function normalizeStoreForRuntime(store: SuperReferralsStore) {
   return { store, changed };
 }
 
-function backfillVideoLanguageCodes(store: SuperReferralsStore) {
+function backfillVideoMetadata(store: SuperReferralsStore) {
   let changed = false;
-  const generationLanguageCodes = new Map<string, string>();
+  const generationMetadata = new Map<string, SamsarVideoRenderMetadata>();
+  const generationsById = new Map(store.generations.map((generation) => [generation.id, generation]));
 
   for (const generation of store.generations) {
     if (!isVideoGeneration(generation)) {
       continue;
     }
 
-    const languageCode = resolveRenditionLanguageCode(
-      generation.languageCode,
-      generation.samsarVideoMetadata,
-      generation.input?.language,
-      DEFAULT_RENDITION_LANGUAGE_CODE
-    );
-    generationLanguageCodes.set(generation.id, languageCode);
-    changed = applyVideoLanguageCode(generation, languageCode) || changed;
+    const metadata = resolveBackfilledVideoMetadata(generation);
+    generationMetadata.set(generation.id, metadata);
+    changed = applyVideoMetadata(generation, metadata) || changed;
   }
 
   for (const inft of store.infts) {
-    const languageCode = resolveRenditionLanguageCode(
-      inft.languageCode,
-      inft.samsarVideoMetadata,
-      generationLanguageCodes.get(inft.generationId),
-      generationLanguageCodes.get(inft.id),
-      DEFAULT_RENDITION_LANGUAGE_CODE
+    const generation = generationsById.get(inft.generationId) || generationsById.get(inft.id);
+    const metadata = resolveBackfilledVideoMetadata(
+      generation,
+      inft,
+      generationMetadata.get(inft.generationId) || generationMetadata.get(inft.id)
     );
-    changed = applyVideoLanguageCode(inft, languageCode) || changed;
+    changed = applyVideoMetadata(inft, metadata) || changed;
   }
 
   return changed;
@@ -388,10 +384,95 @@ function isVideoGeneration(generation: Generation) {
   );
 }
 
-function applyVideoLanguageCode(
+function resolveBackfilledVideoMetadata(
+  generation?: Generation,
+  inft?: INFTRecord,
+  generationMetadata?: SamsarVideoRenderMetadata
+): SamsarVideoRenderMetadata {
+  const existing = {
+    ...(isPlainObject(generation?.samsarVideoMetadata) ? generation?.samsarVideoMetadata : {}),
+    ...(generationMetadata || {}),
+    ...(isPlainObject(inft?.samsarVideoMetadata) ? inft?.samsarVideoMetadata : {})
+  } as SamsarVideoRenderMetadata;
+  const attributes = inftAttributeMap(inft);
+  const metadata: SamsarVideoRenderMetadata = { ...existing };
+  const languageCode = resolveRenditionLanguageCode(
+    inft?.languageCode,
+    inft?.samsarVideoMetadata,
+    generationMetadata,
+    generation?.languageCode,
+    generation?.samsarVideoMetadata,
+    generation?.input?.language,
+    attributes.get("language_code"),
+    attributes.get("result_language"),
+    attributes.get("languages"),
+    DEFAULT_RENDITION_LANGUAGE_CODE
+  );
+
+  if (languageCode) {
+    metadata.result_language = languageCode;
+    metadata.languageCode = languageCode;
+    metadata.language_code = languageCode;
+    metadata.languages = mergeLanguageCodes(metadata.languages, languageCode);
+  }
+
+  const hasSubtitles = firstBooleanLike(
+    derivedActionBoolean(generation?.input?.metadata, {
+      trueActions: ["add_subtitles"],
+      falseActions: ["remove_subtitles"]
+    }),
+    generation?.input?.enable_subtitles,
+    firstKnownMetadataValue(existing, "has_subtitles", "hasSubtitles", "enable_subtitles", "enableSubtitles"),
+    attributes.get("has_subtitles")
+  );
+  if (hasSubtitles !== undefined) {
+    metadata.has_subtitles = hasSubtitles;
+  }
+
+  const hasOutro = firstBooleanLike(
+    derivedActionBoolean(generation?.input?.metadata, {
+      trueActions: ["add_outro", "update_outro"]
+    }),
+    generation?.input?.generate_outro_image,
+    presentStringAsTrue(generation?.input?.outro_image_url),
+    presentStringAsTrue(generation?.input?.cta_url),
+    generation?.input?.add_outro_animation === true ? true : undefined,
+    firstKnownMetadataValue(
+      existing,
+      "has_outro",
+      "hasOutro",
+      "has_outro_image",
+      "hasOutroImage",
+      "generate_outro_image",
+      "generateOutroImage"
+    ),
+    attributes.get("has_outro")
+  );
+  if (hasOutro !== undefined) {
+    metadata.has_outro = hasOutro;
+  }
+
+  const hasFooter = firstBooleanLike(
+    derivedActionBoolean(generation?.input?.metadata, {
+      falseActions: ["remove_footer"]
+    }),
+    generation?.input?.add_footer_animation,
+    arrayHasItems(generation?.input?.footer_metadata),
+    firstKnownMetadataValue(existing, "has_footer", "hasFooter", "add_footer_animation", "addFooterAnimation"),
+    attributes.get("has_footer")
+  );
+  if (hasFooter !== undefined) {
+    metadata.has_footer = hasFooter;
+  }
+
+  return metadata;
+}
+
+function applyVideoMetadata(
   record: Pick<Generation | INFTRecord, "languageCode" | "samsarVideoMetadata">,
-  languageCode: string
+  metadataPatch: SamsarVideoRenderMetadata
 ) {
+  const languageCode = resolveRenditionLanguageCode(metadataPatch);
   if (!languageCode) {
     return false;
   }
@@ -428,7 +509,96 @@ function applyVideoLanguageCode(
     changed = true;
   }
 
+  for (const key of ["has_subtitles", "has_outro", "has_footer"] as const) {
+    if (metadataPatch[key] !== undefined && metadata[key] !== metadataPatch[key]) {
+      metadata[key] = metadataPatch[key];
+      changed = true;
+    }
+  }
+
   return changed;
+}
+
+function firstKnownMetadataValue(record: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) {
+      return record[key];
+    }
+  }
+  return undefined;
+}
+
+function firstBooleanLike(...values: unknown[]): boolean | null | undefined {
+  for (const value of values) {
+    if (value === null) {
+      return null;
+    }
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      if (value === 1) return true;
+      if (value === 0) return false;
+    }
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (["true", "1", "yes"].includes(normalized)) {
+        return true;
+      }
+      if (["false", "0", "no"].includes(normalized)) {
+        return false;
+      }
+    }
+  }
+  return undefined;
+}
+
+function mergeLanguageCodes(existing: unknown, languageCode: string) {
+  const languages = Array.isArray(existing)
+    ? existing
+      .map((value) => resolveRenditionLanguageCode(value))
+      .filter(Boolean)
+    : [];
+  if (!languages.includes(languageCode)) {
+    languages.push(languageCode);
+  }
+  return languages;
+}
+
+function inftAttributeMap(inft?: INFTRecord) {
+  const attributes = new Map<string, unknown>();
+  for (const attribute of inft?.attributes || []) {
+    attributes.set(attribute.trait_type.trim().toLowerCase(), attribute.value);
+  }
+  return attributes;
+}
+
+function presentStringAsTrue(value: unknown) {
+  return typeof value === "string" && value.trim() ? true : undefined;
+}
+
+function arrayHasItems(value: unknown) {
+  return Array.isArray(value) ? value.length > 0 : undefined;
+}
+
+function derivedActionBoolean(
+  metadata: unknown,
+  options: { trueActions?: string[]; falseActions?: string[] }
+) {
+  if (!isPlainObject(metadata)) {
+    return undefined;
+  }
+  const action = String(metadata.derivedFromAction || metadata.action || "").trim().toLowerCase();
+  if (!action) {
+    return undefined;
+  }
+  if (options.trueActions?.includes(action)) {
+    return true;
+  }
+  if (options.falseActions?.includes(action)) {
+    return false;
+  }
+  return undefined;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

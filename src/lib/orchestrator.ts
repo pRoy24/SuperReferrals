@@ -1511,6 +1511,8 @@ export async function runINFTAction(id: string, action: string, payload: Record<
     if (!requestId) {
       throw new Error("requestId is required");
     }
+    const sourceAction = firstString(payload, ["sourceAction", "source_action", "operation", "action"]);
+    const expectedVideoMetadata = expectedVideoMetadataFromActionStatusPayload(sourceAction, payload);
     const statusContext = await ensureCustomerSamsarActionSession(customer);
     const status = await getSamsarStatus(
       requestId,
@@ -1528,8 +1530,9 @@ export async function runINFTAction(id: string, action: string, payload: Record<
     }
     const finalized = normalizedStatus === "COMPLETED" && resultUrl
       ? await finalizeINFTActionResult({
-        action: firstString(payload, ["sourceAction", "source_action", "operation", "action"]),
+        action: sourceAction,
         customer,
+        expectedVideoMetadata,
         generation,
         inft,
         languageCode: resolveRenditionLanguageCode(payload),
@@ -1752,6 +1755,7 @@ export async function runINFTAction(id: string, action: string, payload: Record<
 async function finalizeINFTActionResult({
   action,
   customer,
+  expectedVideoMetadata,
   generation,
   inft,
   languageCode: requestedLanguageCode,
@@ -1762,6 +1766,7 @@ async function finalizeINFTActionResult({
 }: {
   action: string;
   customer: Customer;
+  expectedVideoMetadata?: SamsarVideoRenderMetadata;
   generation: Generation;
   inft: INFTRecord;
   languageCode?: string;
@@ -1802,10 +1807,18 @@ async function finalizeINFTActionResult({
     const derivativeGenerationId = createId("gen");
     const actionName = action || "video_session_edit";
     const metadataTitle = buildDerivativeINFTTitle(latestInft, actionName);
+    const sourceVideoMetadata = {
+      ...sanitizeSamsarVideoMetadata(latestGeneration.samsarVideoMetadata),
+      ...sanitizeSamsarVideoMetadata(latestInft.samsarVideoMetadata),
+      ...(expectedVideoMetadata || {})
+    };
     const languageContext: Generation = requestedLanguageCode
-      ? { ...latestGeneration, languageCode: requestedLanguageCode }
-      : latestGeneration;
-    const samsarVideoMetadata = buildSamsarVideoRenderMetadata(status, languageContext);
+      ? { ...latestGeneration, samsarVideoMetadata: sourceVideoMetadata, languageCode: requestedLanguageCode }
+      : { ...latestGeneration, samsarVideoMetadata: sourceVideoMetadata };
+    const statusForMetadata = expectedVideoMetadata
+      ? { ...status, ...expectedVideoMetadata }
+      : status;
+    const samsarVideoMetadata = buildSamsarVideoRenderMetadata(statusForMetadata, languageContext);
     const languageCode = resolveCompletedGenerationLanguageCode(languageContext, samsarVideoMetadata, latestInft);
     const sourceMetadata = isRecord(latestGeneration.input.metadata) ? latestGeneration.input.metadata : {};
     const derivativeInput: GenerationInput = {
@@ -1987,6 +2000,81 @@ function paymentPayloadFromINFTAction(payload: Record<string, unknown>) {
   return isRecord(payload.payment) ? payload.payment : payload;
 }
 
+function expectedVideoMetadataFromActionStatusPayload(
+  action: string,
+  payload: Record<string, unknown>
+): SamsarVideoRenderMetadata | undefined {
+  const provided = firstRecordValue(
+    payload,
+    "expectedVideoMetadata",
+    "expected_video_metadata",
+    "samsarVideoMetadata",
+    "samsar_video_metadata",
+    "metadataPatch",
+    "metadata_patch"
+  );
+  return compactSamsarVideoMetadata({
+    ...(expectedVideoMetadataForINFTAction(action, payload) || {}),
+    ...sanitizeSamsarVideoMetadata(provided)
+  });
+}
+
+function expectedVideoMetadataForINFTAction(
+  action: string,
+  input?: Record<string, unknown>
+): SamsarVideoRenderMetadata | undefined {
+  const normalizedAction = action.trim().toLowerCase();
+  const metadata: SamsarVideoRenderMetadata = {};
+  const languageCode = resolveRenditionLanguageCode(input);
+  if (languageCode) {
+    metadata.result_language = languageCode;
+    metadata.languageCode = languageCode;
+    metadata.language_code = languageCode;
+    metadata.languages = [languageCode];
+  }
+
+  if (normalizedAction === "add_subtitles") {
+    metadata.has_subtitles = true;
+  }
+  if (normalizedAction === "remove_subtitles") {
+    metadata.has_subtitles = false;
+  }
+  if (normalizedAction === "add_outro" || normalizedAction === "update_outro") {
+    metadata.has_outro = true;
+  }
+  if (normalizedAction === "update_footer") {
+    if (input?.remove_footer === true || input?.removeFooter === true) {
+      metadata.has_footer = false;
+    } else {
+      const footerMetadata = input?.footer_metadata;
+      const footerMetadataCamel = input?.footerMetadata;
+      if (
+        firstString(input, ["cta_url", "ctaUrl", "footerUrl", "footer_url", "url", "cta_text", "ctaText", "cta_logo", "ctaLogo"]) ||
+        (Array.isArray(footerMetadata) && footerMetadata.length > 0) ||
+        (Array.isArray(footerMetadataCamel) && footerMetadataCamel.length > 0)
+      ) {
+        metadata.has_footer = true;
+      }
+    }
+  }
+
+  return compactSamsarVideoMetadata(metadata);
+}
+
+function compactSamsarVideoMetadata(metadata: SamsarVideoRenderMetadata): SamsarVideoRenderMetadata | undefined {
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+function firstRecordValue(record: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (isRecord(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 async function runPaidINFTSamsarAction({
   inft,
   customer,
@@ -2026,10 +2114,12 @@ async function runPaidINFTSamsarAction({
     await updateCustomerSamsarCreditBalance(customer.id, remainingCredits);
   }
   const languageCode = resolveRenditionLanguageCode(actionInput);
+  const expectedVideoMetadata = expectedVideoMetadataForINFTAction(action, actionInput);
   return {
     ...result,
     action,
     ...(languageCode ? { languageCode } : {}),
+    ...(expectedVideoMetadata ? { expectedVideoMetadata } : {}),
     payment
   };
 }
@@ -2590,6 +2680,16 @@ const SAMSAR_VIDEO_METADATA_KEYS = [
   "hasSubtitles",
   "enable_subtitles",
   "enableSubtitles",
+  "has_outro",
+  "hasOutro",
+  "has_outro_image",
+  "hasOutroImage",
+  "generate_outro_image",
+  "generateOutroImage",
+  "outro_image_url",
+  "outroImageUrl",
+  "add_outro_animation",
+  "addOutroAnimation",
   "has_footer",
   "hasFooter",
   "add_footer_animation",
@@ -2652,6 +2752,20 @@ function buildSamsarVideoRenderMetadata(
   );
   if (hasSubtitles !== undefined) {
     metadata.has_subtitles = hasSubtitles;
+  }
+
+  const hasOutro = firstBooleanLike(
+    firstKnownValue(status, ["has_outro", "hasOutro", "has_outro_image", "hasOutroImage", "generate_outro_image", "generateOutroImage"]),
+    firstKnownValue(existing, ["has_outro", "hasOutro", "has_outro_image", "hasOutroImage", "generate_outro_image", "generateOutroImage"]),
+    presentStringAsTrue(firstKnownValue(status, ["outro_image_url", "outroImageUrl"])),
+    presentStringAsTrue(firstKnownValue(existing, ["outro_image_url", "outroImageUrl"])),
+    generation?.input.generate_outro_image,
+    presentStringAsTrue(generation?.input.outro_image_url),
+    presentStringAsTrue(generation?.input.cta_url),
+    generation?.input.add_outro_animation === true ? true : undefined
+  );
+  if (hasOutro !== undefined) {
+    metadata.has_outro = hasOutro;
   }
 
   const hasFooter = firstBooleanLike(
@@ -2744,6 +2858,10 @@ function firstBooleanLike(...values: unknown[]): boolean | null | undefined {
     if (typeof value === "boolean") {
       return value;
     }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      if (value === 1) return true;
+      if (value === 0) return false;
+    }
     if (typeof value === "string") {
       const normalized = value.trim().toLowerCase();
       if (["true", "1", "yes"].includes(normalized)) {
@@ -2755,6 +2873,10 @@ function firstBooleanLike(...values: unknown[]): boolean | null | undefined {
     }
   }
   return undefined;
+}
+
+function presentStringAsTrue(value: unknown) {
+  return typeof value === "string" && value.trim() ? true : undefined;
 }
 
 function firstSamsarLanguage(...values: unknown[]) {
@@ -2819,6 +2941,9 @@ function buildINFTAttributes(
   if (samsarVideoMetadata) {
     if (samsarVideoMetadata.has_subtitles !== undefined) {
       attributes.push({ trait_type: "has_subtitles", value: samsarVideoMetadata.has_subtitles ?? "" });
+    }
+    if (samsarVideoMetadata.has_outro !== undefined) {
+      attributes.push({ trait_type: "has_outro", value: samsarVideoMetadata.has_outro ?? "" });
     }
     if (samsarVideoMetadata.has_footer !== undefined) {
       attributes.push({ trait_type: "has_footer", value: samsarVideoMetadata.has_footer ?? "" });

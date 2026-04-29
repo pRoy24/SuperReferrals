@@ -73,6 +73,8 @@ const sortOptions: Array<{ value: FeedSortOption; label: string }> = [
   { value: "most_viewed", label: "Most viewed" }
 ];
 const ASSISTANT_USER_STORAGE_KEY = "superreferrals:page-assistant-user";
+const WHEEL_SEEK_PIXELS_PER_SECOND = 42;
+const MAX_WHEEL_SEEK_SECONDS = 12;
 
 export default function FeedPage({ initialGenerationId = "", initialViewMode }: FeedPageProps = {}) {
   const [items, setItems] = useState<PublicFeedItem[]>([]);
@@ -89,6 +91,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
   const [volume, setVolume] = useState(DEFAULT_FEED_VIDEO_VOLUME);
   const [playing, setPlaying] = useState(true);
   const [controlsVisible, setControlsVisible] = useState(false);
+  const [volumePanelItemId, setVolumePanelItemId] = useState<string | null>(null);
   const [commentItemId, setCommentItemId] = useState<string | null>(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [videoProgress, setVideoProgress] = useState<Record<string, VideoProgress>>({});
@@ -101,7 +104,6 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
   const mobileScrollTarget = useRef<number | null>(null);
   const mobileScrollTargetTimer = useRef<number | null>(null);
   const desktopDrag = useRef<DesktopDragState | null>(null);
-  const desktopWheelLock = useRef<number | null>(null);
   const initialSelectionApplied = useRef(false);
 
   const visibleItems = useMemo(
@@ -151,7 +153,12 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
   useEffect(() => {
     setActiveIndex(0);
     setCommentItemId(null);
+    setVolumePanelItemId(null);
   }, [viewMode]);
+
+  useEffect(() => {
+    setVolumePanelItemId(null);
+  }, [activeItem?.id]);
 
   useEffect(() => {
     if (commentItemId && !visibleItems.some((item) => item.id === commentItemId)) {
@@ -225,9 +232,6 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
       }
       if (mobileScrollTargetTimer.current !== null) {
         window.clearTimeout(mobileScrollTargetTimer.current);
-      }
-      if (desktopWheelLock.current !== null) {
-        window.clearTimeout(desktopWheelLock.current);
       }
     };
   }, []);
@@ -347,6 +351,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
     const nextIndex = (index + visibleItems.length) % visibleItems.length;
     setActiveIndex(nextIndex);
     setPlaying(true);
+    setVolumePanelItemId(null);
     const nextItem = visibleItems[nextIndex];
     if (viewMode === "mobile" && nextItem) {
       mobileScrollTarget.current = nextIndex;
@@ -436,27 +441,40 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
       if (nextIndex >= 0 && nextIndex < visibleItems.length && nextIndex !== activeIndex) {
         setActiveIndex(nextIndex);
         setPlaying(true);
+        setVolumePanelItemId(null);
       }
     });
   }
 
   function handleDesktopWheel(event: WheelEvent<HTMLElement>) {
+    handleFeedItemWheel(event, activeItem);
+  }
+
+  function handleFeedItemWheel(event: WheelEvent<HTMLElement>, item?: PublicFeedItem) {
     const target = event.target as HTMLElement;
     if (
-      target.closest(".feed-minimal-ui, .feed-comment-drawer, .feed-assistant-popdown") ||
-      desktopWheelLock.current !== null
+      !item ||
+      shouldIgnoreSeekWheelTarget(target)
     ) {
       return;
     }
-    const horizontalDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : 0;
-    if (Math.abs(horizontalDelta) < 24) {
+    const horizontalDelta = normalizedHorizontalWheelDelta(event);
+    if (Math.abs(horizontalDelta) < 4) {
+      return;
+    }
+    const video = videoRefs.current[item.id];
+    const duration = video?.duration || videoProgress[item.id]?.duration || 0;
+    if (!Number.isFinite(duration) || duration <= 0) {
+      return;
+    }
+    const currentTime = video?.currentTime ?? videoProgress[item.id]?.currentTime ?? 0;
+    const seekOffset = clampNumber(horizontalDelta / WHEEL_SEEK_PIXELS_PER_SECOND, -MAX_WHEEL_SEEK_SECONDS, MAX_WHEEL_SEEK_SECONDS);
+    if (Math.abs(seekOffset) < 0.04) {
       return;
     }
     event.preventDefault();
-    selectItem(activeIndex + (horizontalDelta > 0 ? 1 : -1));
-    desktopWheelLock.current = window.setTimeout(() => {
-      desktopWheelLock.current = null;
-    }, 520);
+    setVolumePanelItemId(null);
+    seekVideo(item, currentTime + seekOffset);
   }
 
   function handleDesktopPointerDown(event: PointerEvent<HTMLElement>) {
@@ -507,6 +525,18 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
     setMuted(normalized === 0);
   }
 
+  function toggleVolumePanel(item: PublicFeedItem) {
+    setControlsVisible(true);
+    if (controlsHideTimer.current !== null) {
+      window.clearTimeout(controlsHideTimer.current);
+      controlsHideTimer.current = null;
+    }
+    if (volumePanelItemId !== item.id && muted && volume > 0) {
+      setMuted(false);
+    }
+    setVolumePanelItemId((current) => current === item.id ? null : item.id);
+  }
+
   function openFullscreen(item: PublicFeedItem) {
     const video = videoRefs.current[item.id];
     if (!video) {
@@ -523,6 +553,10 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
     setControlsVisible(true);
     if (controlsHideTimer.current !== null) {
       window.clearTimeout(controlsHideTimer.current);
+    }
+    if (volumePanelItemId) {
+      controlsHideTimer.current = null;
+      return;
     }
     controlsHideTimer.current = window.setTimeout(() => {
       setControlsVisible(false);
@@ -565,7 +599,10 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
           <button className={`icon-toggle ${viewMode === "desktop" ? "active" : ""}`} onClick={() => setViewMode("desktop")} title="Desktop feed">
             <Monitor size={18} />
           </button>
-          <button className="icon-toggle" onClick={() => setMuted((value) => !value)} title={muted ? "Unmute" : "Mute"}>
+          <button className="icon-toggle" onClick={() => {
+            setVolumePanelItemId(null);
+            setMuted((value) => !value);
+          }} title={muted ? "Unmute" : "Mute"}>
             {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
           </button>
           <button className="icon-toggle" onClick={() => setPlaying((value) => !value)} title={playing ? "Pause" : "Play"}>
@@ -622,6 +659,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
               className={`mobile-feed-card ${index === activeIndex ? "active" : ""}`}
               data-feed-id={item.id}
               key={item.id}
+              onWheel={(event) => handleFeedItemWheel(event, item)}
               ref={(node) => {
                 mobileCardRefs.current[item.id] = node;
               }}
@@ -633,10 +671,11 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
                 playing={playing}
                 progress={videoProgress[item.id]}
                 volume={volume}
+                volumeOpen={volumePanelItemId === item.id}
                 controlsVisible={controlsVisible && index === activeIndex}
                 onSeek={(time) => seekVideo(item, time)}
-                onToggleMute={() => setMuted((value) => !value)}
                 onTogglePlay={() => setPlaying((value) => !value)}
+                onToggleVolumePanel={() => toggleVolumePanel(item)}
                 onVolume={changeVolume}
                 onFullscreen={() => openFullscreen(item)}
                 onComments={() => openComments(item)}
@@ -684,9 +723,10 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
               playing={playing}
               progress={activeItem ? videoProgress[activeItem.id] : undefined}
               volume={volume}
+              volumeOpen={Boolean(activeItem && volumePanelItemId === activeItem.id)}
               onSeek={(time) => activeItem && seekVideo(activeItem, time)}
-              onToggleMute={() => setMuted((value) => !value)}
               onTogglePlay={() => setPlaying((value) => !value)}
+              onToggleVolumePanel={() => activeItem && toggleVolumePanel(activeItem)}
               onVolume={changeVolume}
               onFullscreen={() => activeItem && openFullscreen(activeItem)}
               onComments={() => openComments(activeItem)}
@@ -1009,10 +1049,11 @@ function MobileOverlay({
   playing,
   progress,
   volume,
+  volumeOpen,
   controlsVisible,
   onSeek,
-  onToggleMute,
   onTogglePlay,
+  onToggleVolumePanel,
   onVolume,
   onFullscreen,
   onComments,
@@ -1023,10 +1064,11 @@ function MobileOverlay({
   playing: boolean;
   progress?: VideoProgress;
   volume: number;
+  volumeOpen: boolean;
   controlsVisible: boolean;
   onSeek: (time: number) => void;
-  onToggleMute: () => void;
   onTogglePlay: () => void;
+  onToggleVolumePanel: () => void;
   onVolume: (value: number) => void;
   onFullscreen: () => void;
   onComments: () => void;
@@ -1041,22 +1083,17 @@ function MobileOverlay({
         <button className="round-action" onClick={onTogglePlay} title={playing ? "Pause" : "Play"}>
           {playing ? <Pause size={20} /> : <Play size={20} />}
         </button>
-        <button className="round-action" onClick={onToggleMute} title={muted ? "Unmute" : "Mute"}>
-          {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-        </button>
+        <VolumeControl
+          muted={muted}
+          open={volumeOpen}
+          onToggle={onToggleVolumePanel}
+          onVolume={onVolume}
+          value={volume}
+          variant="mobile"
+        />
         <button className="round-action" onClick={onFullscreen} title="Full screen">
           <Maximize2 size={20} />
         </button>
-        <label className="mobile-volume" title="Volume">
-          <input
-            aria-label="Volume"
-            max="100"
-            min="0"
-            onChange={(event) => onVolume(Number(event.target.value) / 100)}
-            type="range"
-            value={muted ? 0 : Math.round(volume * 100)}
-          />
-        </label>
         <button className={`round-action ${item.likedByViewer ? "active" : ""}`} onClick={onLike} title={item.likedByViewer ? "Unlike" : "Like"}>
           <Heart size={20} fill={item.likedByViewer ? "currentColor" : "none"} />
         </button>
@@ -1104,9 +1141,10 @@ function DesktopMinimalControls({
   playing,
   progress,
   volume,
+  volumeOpen,
   onSeek,
-  onToggleMute,
   onTogglePlay,
+  onToggleVolumePanel,
   onVolume,
   onFullscreen,
   onComments,
@@ -1117,9 +1155,10 @@ function DesktopMinimalControls({
   playing: boolean;
   progress?: VideoProgress;
   volume: number;
+  volumeOpen: boolean;
   onSeek: (time: number) => void;
-  onToggleMute: () => void;
   onTogglePlay: () => void;
+  onToggleVolumePanel: () => void;
   onVolume: (value: number) => void;
   onFullscreen: () => void;
   onComments: () => void;
@@ -1132,22 +1171,17 @@ function DesktopMinimalControls({
         <button className="glass-icon" onClick={onTogglePlay} title={playing ? "Pause" : "Play"}>
           {playing ? <Pause size={18} /> : <Play size={18} />}
         </button>
-        <button className="glass-icon" onClick={onToggleMute} title={muted ? "Unmute" : "Mute"}>
-          {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-        </button>
+        <VolumeControl
+          muted={muted}
+          open={volumeOpen}
+          onToggle={onToggleVolumePanel}
+          onVolume={onVolume}
+          value={volume}
+          variant="desktop"
+        />
         <button className="glass-icon" onClick={onFullscreen} title="Full screen">
           <Maximize2 size={18} />
         </button>
-        <label className="desktop-volume" title="Volume">
-          <input
-            aria-label="Volume"
-            max="100"
-            min="0"
-            onChange={(event) => onVolume(Number(event.target.value) / 100)}
-            type="range"
-            value={muted ? 0 : Math.round(volume * 100)}
-          />
-        </label>
         <button className={`glass-icon ${item.likedByViewer ? "active" : ""}`} onClick={onLike} title={item.likedByViewer ? "Unlike" : "Like"}>
           <Heart size={18} fill={item.likedByViewer ? "currentColor" : "none"} />
         </button>
@@ -1161,6 +1195,55 @@ function DesktopMinimalControls({
         )}
       </div>
       <VideoScrubber item={item} progress={progress} onSeek={onSeek} />
+    </div>
+  );
+}
+
+function VolumeControl({
+  muted,
+  open,
+  onToggle,
+  onVolume,
+  value,
+  variant
+}: {
+  muted: boolean;
+  open: boolean;
+  onToggle: () => void;
+  onVolume: (value: number) => void;
+  value: number;
+  variant: "mobile" | "desktop";
+}) {
+  const iconSize = variant === "mobile" ? 20 : 18;
+  const displayValue = muted ? 0 : Math.round(value * 100);
+  const buttonClass = variant === "mobile" ? "round-action" : "glass-icon";
+
+  return (
+    <div className={`feed-volume-control ${variant} ${open ? "open" : ""}`} onPointerDown={(event) => event.stopPropagation()}>
+      <button
+        aria-expanded={open}
+        aria-label="Volume"
+        className={buttonClass}
+        onClick={onToggle}
+        title="Volume"
+        type="button"
+      >
+        {muted || value === 0 ? <VolumeX size={iconSize} /> : <Volume2 size={iconSize} />}
+      </button>
+      {open && (
+        <label className="feed-volume-popover" title="Volume">
+          <input
+            aria-label="Volume"
+            aria-orientation="vertical"
+            className="feed-volume-slider"
+            max="100"
+            min="0"
+            onChange={(event) => onVolume(Number(event.target.value) / 100)}
+            type="range"
+            value={displayValue}
+          />
+        </label>
+      )}
     </div>
   );
 }
@@ -1187,6 +1270,7 @@ function VideoScrubber({
   const currentTime = duration > 0 ? Math.min(progress?.currentTime || 0, duration) : 0;
   const percent = duration > 0 ? (currentTime / duration) * 100 : 0;
   const scrubberStyle = { "--scrubber-progress": `${percent}%` } as CSSProperties;
+  const timeLabel = `${formatVideoTime(currentTime)} / ${formatVideoTime(duration)}`;
 
   return (
     <div
@@ -1194,7 +1278,6 @@ function VideoScrubber({
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <span className="video-time">{formatVideoTime(currentTime)}</span>
       <input
         aria-label={`Seek ${item.title}`}
         disabled={duration <= 0}
@@ -1206,7 +1289,7 @@ function VideoScrubber({
         type="range"
         value={currentTime}
       />
-      <span className="video-time">{formatVideoTime(duration)}</span>
+      <span className="video-time" title="Elapsed / total duration">{timeLabel}</span>
     </div>
   );
 }
@@ -1390,6 +1473,31 @@ function formatVideoTime(value: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function shouldIgnoreSeekWheelTarget(target: HTMLElement) {
+  return Boolean(target.closest(
+    "a, button, input, textarea, select, .feed-minimal-ui, .mobile-action-rail, .feed-comment-drawer, .feed-assistant-popdown, .feed-volume-popover"
+  ));
+}
+
+function normalizedHorizontalWheelDelta(event: WheelEvent<HTMLElement>) {
+  const rawDelta = event.shiftKey && Math.abs(event.deltaY) > Math.abs(event.deltaX)
+    ? event.deltaY
+    : event.deltaX;
+  if (!event.shiftKey && Math.abs(rawDelta) <= Math.abs(event.deltaY)) {
+    return 0;
+  }
+  const deltaModeMultiplier = event.deltaMode === 1
+    ? 16
+    : event.deltaMode === 2
+      ? 280
+      : 1;
+  return rawDelta * deltaModeMultiplier;
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function requestVideoFullscreen(video: HTMLVideoElement) {
