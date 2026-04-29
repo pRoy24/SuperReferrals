@@ -782,7 +782,7 @@ a:hover {
 
 .video-mosaic-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   grid-auto-flow: dense;
   gap: 12px;
   min-width: 0;
@@ -790,9 +790,9 @@ a:hover {
 
 .video-mosaic-card {
   position: relative;
-  display: grid;
-  grid-template-rows: auto minmax(116px, auto);
+  display: block;
   overflow: hidden;
+  aspect-ratio: var(--tile-ratio);
   border: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: 8px;
   background:
@@ -802,20 +802,16 @@ a:hover {
   box-shadow: 0 18px 42px rgba(15, 23, 42, 0.16);
 }
 
-.video-mosaic-card.feature {
+.video-mosaic-card.landscape {
   grid-column: span 2;
 }
 
-.video-mosaic-card.portrait.feature {
-  grid-row: span 2;
-}
-
 .video-mosaic-media {
-  position: relative;
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
   overflow: hidden;
-  aspect-ratio: var(--tile-ratio);
   min-height: 0;
   background:
     linear-gradient(135deg, rgba(61, 214, 198, 0.12), rgba(249, 115, 22, 0.08)),
@@ -856,11 +852,17 @@ a:hover {
 }
 
 .video-mosaic-body {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
   display: grid;
   gap: 12px;
   align-content: space-between;
   padding: 12px;
   min-width: 0;
+  background: linear-gradient(180deg, transparent, rgba(2, 8, 10, 0.82) 24%, rgba(2, 8, 10, 0.94));
 }
 
 .video-mosaic-meta {
@@ -878,10 +880,14 @@ a:hover {
 }
 
 .video-mosaic-meta strong {
+  display: -webkit-box;
   color: #f7fdff;
   font-size: 15px;
   line-height: 1.24;
+  overflow: hidden;
   overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .video-mosaic-controls {
@@ -890,6 +896,14 @@ a:hover {
   gap: 8px;
   align-items: center;
   min-width: 0;
+}
+
+.video-mosaic-card.portrait .video-mosaic-controls {
+  grid-template-columns: 36px 36px minmax(66px, 1fr);
+}
+
+.video-mosaic-card.portrait .video-mosaic-feed-link {
+  grid-column: 1 / -1;
 }
 
 .video-mosaic-icon,
@@ -3582,9 +3596,8 @@ button.item {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .video-mosaic-card.feature {
+  .video-mosaic-card.landscape {
     grid-column: span 1;
-    grid-row: span 1;
   }
 
   .showcase-flow {
@@ -3703,6 +3716,15 @@ button.item {
 
   .video-mosaic-grid {
     grid-template-columns: 1fr;
+  }
+
+  .video-mosaic-card.landscape {
+    grid-column: span 1;
+  }
+
+  .video-mosaic-card.portrait {
+    width: min(100%, 360px);
+    justify-self: center;
   }
 
   .video-mosaic-controls {

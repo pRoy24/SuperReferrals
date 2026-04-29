@@ -107,7 +107,7 @@ export default function VideoMosaic({
 
           return (
             <article
-              className={`video-mosaic-card ${item.aspectRatio === "9:16" ? "portrait" : "landscape"} ${index % 7 === 0 ? "feature" : ""}`}
+              className={`video-mosaic-card ${item.aspectRatio === "9:16" ? "portrait" : "landscape"}`}
               key={item.id}
               style={tileStyle}
             >
