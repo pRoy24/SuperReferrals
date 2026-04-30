@@ -3052,7 +3052,6 @@ button.item {
 }
 
 .render-status {
-  margin-top: 12px;
   border: 1px solid rgba(37, 99, 235, 0.16);
   background: rgba(239, 246, 255, 0.74);
   border-radius: 14px;
@@ -3066,6 +3065,109 @@ button.item {
 
 .render-status .subtle {
   margin: 6px 0 8px;
+}
+
+.render-status-top {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.render-status-top strong,
+.render-status-top span {
+  display: block;
+  min-width: 0;
+}
+
+.render-status-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(37, 99, 235, 0.12);
+  border-radius: 50%;
+  background: var(--soft-blue);
+  color: #1d4ed8;
+}
+
+.render-status-icon > span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.render-status-progress {
+  height: 7px;
+  margin-top: 12px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  overflow: hidden;
+}
+
+.render-status-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #14b8a6);
+  transition: width 220ms ease;
+}
+
+.render-status-dropdown {
+  margin-top: 12px;
+  border: 1px solid rgba(31, 91, 160, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  overflow: hidden;
+}
+
+.render-status-dropdown summary {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 900;
+  padding: 9px 11px;
+}
+
+.render-status-list {
+  display: grid;
+  gap: 1px;
+  border-top: 1px solid rgba(31, 91, 160, 0.1);
+  background: rgba(31, 91, 160, 0.06);
+}
+
+.render-status-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 8px 11px;
+  min-width: 0;
+}
+
+.render-status-row span {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.render-status-row strong {
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.render-status-error {
+  color: #b91c1c;
 }
 
 .render-warning-backdrop {

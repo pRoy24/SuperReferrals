@@ -960,6 +960,7 @@ export async function createGeneration(input: {
       status: "PROCESSING",
       samsarRequestId: response.requestId,
       samsarSessionId: response.sessionId,
+      samsarVideoMetadata: buildSamsarVideoRenderMetadata(response.raw, generation),
       payment
     }));
   } catch (error) {
@@ -979,6 +980,11 @@ function assertPaidRenderProviderCanFulfill(paymentStatus: GenerationPayment["st
 }
 
 export async function syncGeneration(id: string) {
+  const result = await syncGenerationWithStatus(id);
+  return result.generation;
+}
+
+export async function syncGenerationWithStatus(id: string) {
   const store = await readStore();
   const generation = store.generations.find((item) => item.id === id);
   if (!generation) {
@@ -993,15 +999,19 @@ export async function syncGeneration(id: string) {
 
   if (shouldRetryStoredResultFinalization(generation)) {
     try {
-      return await finalizeGeneration(generation, customer, subAccount, generation.resultUrl || "");
+      return {
+        generation: requireGenerationUpdate(await finalizeGeneration(generation, customer, subAccount, generation.resultUrl || ""))
+      };
     } catch (error) {
-      return markGenerationFinalizationFailed(generation, generation.resultUrl || "", error);
+      return {
+        generation: requireGenerationUpdate(await markGenerationFinalizationFailed(generation, generation.resultUrl || "", error))
+      };
     }
   }
 
   const requestId = generation.samsarRequestId || generation.samsarSessionId;
   if (!requestId) {
-    return generation;
+    return { generation };
   }
   let status: Record<string, unknown>;
   try {
@@ -1009,15 +1019,20 @@ export async function syncGeneration(id: string) {
   } catch (error) {
     if (generation.resultUrl) {
       try {
-        return await finalizeGeneration(generation, customer, subAccount, generation.resultUrl);
+        return {
+          generation: requireGenerationUpdate(await finalizeGeneration(generation, customer, subAccount, generation.resultUrl))
+        };
       } catch (finalizationError) {
-        return markGenerationFinalizationFailed(generation, generation.resultUrl, finalizationError);
+        return {
+          generation: requireGenerationUpdate(await markGenerationFinalizationFailed(generation, generation.resultUrl, finalizationError))
+        };
       }
     }
-    return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
+    const syncedGeneration = await mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
       status: "PROCESSING",
       errorMessage: `Unable to refresh SuperReferrals render status: ${formatErrorText(error)}`
     }));
+    return { generation: requireGenerationUpdate(syncedGeneration) };
   }
   const normalizedStatus = String(status.status || "").toUpperCase();
   const statusResultUrl = extractSamsarResultUrl(status) || generation.resultUrl || "";
@@ -1027,25 +1042,31 @@ export async function syncGeneration(id: string) {
     if (!resultUrl) {
       const fallbackSessionId = firstInternalSamsarSessionId(internalSessionId, generation.samsarSessionId, requestId);
       if (!fallbackSessionId) {
-        return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
+        const syncedGeneration = await mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
           status: "PROCESSING",
+          samsarVideoMetadata: buildSamsarVideoRenderMetadata(status, generation),
           errorMessage: "SuperReferrals reported completion, but no video URL is available yet. Waiting for the final video URL."
         }));
+        return { generation: requireGenerationUpdate(syncedGeneration), statusResponse: status };
       }
       try {
         resultUrl = await fetchLatestVideoUrl(fallbackSessionId, samsarCredential);
       } catch (error) {
-        return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
+        const syncedGeneration = await mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
           status: "PROCESSING",
+          samsarVideoMetadata: buildSamsarVideoRenderMetadata(status, generation),
           errorMessage: `SuperReferrals reported completion, but the final video URL could not be fetched yet: ${formatErrorText(error)}`
         }));
+        return { generation: requireGenerationUpdate(syncedGeneration), statusResponse: status };
       }
     }
     if (!resultUrl) {
-      return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
+      const syncedGeneration = await mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
         status: "PROCESSING",
+        samsarVideoMetadata: buildSamsarVideoRenderMetadata(status, generation),
         errorMessage: "SuperReferrals reported completion, but returned an empty video URL."
       }));
+      return { generation: requireGenerationUpdate(syncedGeneration), statusResponse: status };
     }
 
     const samsarVideoMetadata = buildSamsarVideoRenderMetadata(status, generation);
@@ -1061,18 +1082,36 @@ export async function syncGeneration(id: string) {
       throw new Error("generation was not found");
     }
     try {
-      return await finalizeGeneration(generationForFinalize, customer, subAccount, resultUrl);
+      return {
+        generation: requireGenerationUpdate(await finalizeGeneration(generationForFinalize, customer, subAccount, resultUrl)),
+        statusResponse: status
+      };
     } catch (error) {
-      return markGenerationFinalizationFailed(generationForFinalize, resultUrl, error);
+      return {
+        generation: requireGenerationUpdate(await markGenerationFinalizationFailed(generationForFinalize, resultUrl, error)),
+        statusResponse: status
+      };
     }
   }
   if (normalizedStatus === "FAILED" || normalizedStatus === "CANCELLED") {
-    return failGeneration(generation, customer, normalizedStatus, String(status.message || status.error || "SuperReferrals generation failed"));
+    return {
+      generation: requireGenerationUpdate(await failGeneration(generation, customer, normalizedStatus, String(status.message || status.error || "SuperReferrals generation failed"))),
+      statusResponse: status
+    };
   }
-  return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
+  const syncedGeneration = await mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
     status: "PROCESSING",
+    samsarVideoMetadata: buildSamsarVideoRenderMetadata(status, generation),
     errorMessage: undefined
   }));
+  return { generation: requireGenerationUpdate(syncedGeneration), statusResponse: status };
+}
+
+function requireGenerationUpdate(generation: Generation | null) {
+  if (!generation) {
+    throw new Error("generation was not found");
+  }
+  return generation;
 }
 
 function shouldRetryStoredResultFinalization(generation: Generation) {
@@ -3099,6 +3138,8 @@ const SAMSAR_VIDEO_METADATA_KEYS = [
   "result_langauges",
   "language_codes",
   "languageCodes",
+  "expressGenerationStatus",
+  "express_generation_status",
   "provider",
   "type"
 ] as const;

@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowDown, ArrowUp, Bot, Check, ChevronDown, CircleDollarSign, CircleHelp, Clipboard, Code2, ExternalLink, GripVertical, ListChecks, Play, Plus, RefreshCw, Store, Trash2, Undo2, Upload, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Bot, Check, ChevronDown, CircleDollarSign, CircleHelp, Clipboard, Code2, ExternalLink, GripVertical, ListChecks, Loader2, Play, Plus, RefreshCw, Store, Trash2, Undo2, Upload, Wallet } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from "react";
 import BreadcrumbNav from "@/components/BreadcrumbNav";
 import { UserStoreCreatorSkeleton } from "@/components/FormLoadingSkeletons";
@@ -103,6 +103,15 @@ type RenderFlowState = {
   generationId?: string;
 };
 
+type RenderTaskStatusState = {
+  generationId: string;
+  requestId?: string;
+  status: string;
+  resultUrl?: string;
+  errorMessage?: string;
+  expressGenerationStatus?: Record<string, string>;
+};
+
 type GenerationPayloadPreviewState = {
   json: string;
   error: string;
@@ -124,6 +133,7 @@ const activeGenerationStatuses = new Set<GenerationStatus>([
   "QUEUED",
   "PROCESSING"
 ]);
+const terminalRenderStatuses = new Set(["COMPLETED", "FAILED", "CANCELLED", "REFUNDED"]);
 
 const sampleImageUrlBases = new Set([
   "https://images.unsplash.com/photo-1542291026-7eec264c27ff",
@@ -416,6 +426,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const [quote, setQuote] = useState<PaymentQuote | null>(null);
   const [autoPolling, setAutoPolling] = useState(false);
   const [renderFlow, setRenderFlow] = useState<RenderFlowState>({ status: "idle", message: "" });
+  const [renderTaskStatus, setRenderTaskStatus] = useState<RenderTaskStatusState | null>(null);
   const [lastValidGenerationPayloadPreview, setLastValidGenerationPayloadPreview] = useState("");
   const [renderSessionLocked, setRenderSessionLocked] = useState(false);
   const [renderOrientationWarning, setRenderOrientationWarning] = useState<RenderOrientationWarning | null>(null);
@@ -632,6 +643,13 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   }
 
   function resetGenerationForm() {
+    resetGenerationFormForNextRender();
+    setRenderFlow({ status: "idle", message: "" });
+    setRenderTaskStatus(null);
+    setMessage("Render form reset.");
+  }
+
+  function resetGenerationFormForNextRender() {
     const selection = resolveValidModelSelection(pricingOptions, generationForm);
     const nextForm = createDefaultGenerationForm(selection, appLanguage ? appLanguageToRenderFormLanguage(appLanguage) : "auto");
     setGenerationForm(nextForm);
@@ -640,8 +658,6 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     setQuote(null);
     setRenderSessionLocked(false);
     generationSubmitInFlightRef.current = false;
-    setRenderFlow({ status: "idle", message: "" });
-    setMessage("Render form reset.");
   }
 
   function commitImageWizardItems(nextImages: ImageWizardItem[]) {
@@ -949,14 +965,25 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       return;
     }
     const activeGenerationIds = pollingKey.split("|").filter(Boolean);
+    const trackedRenderId = renderFlow.generationId;
     let cancelled = false;
 
     async function pollActiveGenerations() {
       setAutoPolling(true);
       try {
-        await Promise.all(activeGenerationIds.map((id) =>
-          fetch(`/api/generations/${id}/sync`, { method: "POST" }).catch(() => null)
-        ));
+        const syncResults = await Promise.all(activeGenerationIds.map(async (id) => {
+          const response = await fetch(`/api/generations/${id}/sync`, { method: "POST" }).catch(() => null);
+          if (!response?.ok) {
+            return null;
+          }
+          return response.json().catch(() => null);
+        }));
+        const trackedResult = trackedRenderId
+          ? syncResults.find((result) => isRecord(result?.generation) && result.generation.id === trackedRenderId)
+          : null;
+        if (!cancelled && trackedResult && isRecord(trackedResult.generation)) {
+          setRenderTaskStatus(buildRenderTaskStatus(trackedResult.generation as unknown as Generation, trackedResult.statusResponse));
+        }
         if (!cancelled) {
           await load();
         }
@@ -975,16 +1002,30 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [pollingKey]);
+  }, [pollingKey, renderFlow.generationId]);
 
   useEffect(() => {
     if (!trackedGeneration || !renderFlow.generationId) {
       return;
     }
-    if (trackedGeneration.status === "COMPLETED" && renderFlow.status !== "completed") {
+    setRenderTaskStatus((current) => {
+      const next = buildRenderTaskStatus(trackedGeneration);
+      if (!current || current.generationId !== trackedGeneration.id) {
+        return next;
+      }
+      return {
+        ...next,
+        requestId: next.requestId || current.requestId,
+        resultUrl: next.resultUrl || current.resultUrl,
+        errorMessage: next.errorMessage || current.errorMessage,
+        expressGenerationStatus: next.expressGenerationStatus || current.expressGenerationStatus
+      };
+    });
+    if (trackedGeneration.status === "COMPLETED" && trackedGeneration.resultUrl && renderFlow.status !== "completed") {
+      resetGenerationFormForNextRender();
       updateRenderFlow({
         status: "completed",
-        message: `Render task ${trackedGeneration.id} finished and was persisted${trackedGeneration.storage?.video?.uri ? " to 0G storage" : ""}.`,
+        message: `Render task ${trackedGeneration.id} finished and returned a video URL${trackedGeneration.storage?.video?.uri ? " with 0G storage persistence" : ""}.`,
         txHash: trackedGeneration.payment.txHash,
         generationId: trackedGeneration.id
       });
@@ -998,8 +1039,9 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
         txHash: trackedGeneration.payment.txHash,
         generationId: trackedGeneration.id
       });
+      setRenderSessionLocked(false);
     }
-  }, [trackedGeneration?.status, trackedGeneration?.updatedAt, renderFlow.generationId, renderFlow.status]);
+  }, [trackedGeneration?.status, trackedGeneration?.updatedAt, trackedGeneration?.resultUrl, renderFlow.generationId, renderFlow.status]);
 
   function selectedEthereumProvider(walletProvider?: BrowserWalletProvider) {
     const selected = walletProvider || activeWalletProvider || walletProviders[0] || null;
@@ -1282,6 +1324,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     setBusy("generation");
     setMessage("");
     setRenderFlow({ status: "payment", message: "Preparing payment before starting the render." });
+    setRenderTaskStatus(null);
     let createdGeneration: Generation | undefined;
     try {
       if (renderConditionError) {
@@ -1336,6 +1379,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       if (!createdGeneration) {
         throw new Error("Render API did not return a render task.");
       }
+      setRenderTaskStatus(buildRenderTaskStatus(createdGeneration));
       setRenderSessionLocked(activeGenerationStatuses.has(createdGeneration.status));
       if (createdGeneration.status === "PAYMENT_PENDING") {
         updateRenderFlow({
@@ -1416,8 +1460,11 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     try {
       const response = await fetch(`/api/generations/${id}/sync`, { method: "POST" });
       const data = await assertOk(response);
-      await load();
       const syncedGeneration = data.generation as Generation | undefined;
+      if (syncedGeneration && syncedGeneration.id === renderFlow.generationId) {
+        setRenderTaskStatus(buildRenderTaskStatus(syncedGeneration, data.statusResponse));
+      }
+      await load();
       setMessage(syncedGeneration?.status === "FAILED"
         ? syncedGeneration.errorMessage || "Render task sync failed."
         : "Render task synced.");
@@ -1631,8 +1678,9 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
               <p className="notice">This render session has already been submitted. Reset the session to enable a fresh payment and start another render.</p>
             )}
             {renderGateError && imageCount > 0 && <p className="notice">{renderGateError}</p>}
-            <RenderFlowNotice state={renderFlow} />
           </div>
+
+          <RenderFlowNotice state={renderFlow} taskStatus={renderTaskStatus} />
 
           <div className="panel storefront-user-video-panel">
             <div className="panel-header">
@@ -2400,12 +2448,23 @@ function WizardSection({
   );
 }
 
-function RenderFlowNotice({ state }: { state: RenderFlowState }) {
+function RenderFlowNotice({
+  state,
+  taskStatus
+}: {
+  state: RenderFlowState;
+  taskStatus: RenderTaskStatusState | null;
+}) {
   if (state.status === "idle") {
     return null;
   }
   const failedAfterStart = state.status === "failed" && Boolean(state.generationId);
   const finalizationFailed = state.status === "failed" && state.message.includes("0G persistence");
+  const statusText = taskStatus?.status || state.status;
+  const expressEntries = expressStatusEntries(taskStatus?.expressGenerationStatus);
+  const progress = expressStatusProgress(expressEntries, statusText);
+  const currentStage = currentExpressStage(expressEntries, statusText);
+  const pending = !["completed", "failed"].includes(state.status) && !terminalRenderStatuses.has(statusText.toUpperCase());
   const statusLabel =
     state.status === "failed" ? (finalizationFailed ? "Finalization failed" : failedAfterStart ? "Render failed" : "Render not started") :
       state.status === "completed" ? "Render finished" :
@@ -2416,13 +2475,51 @@ function RenderFlowNotice({ state }: { state: RenderFlowState }) {
   const badgeClass = state.status === "failed" ? "badge fail" : state.status === "completed" || state.status === "started" ? "badge ok" : "badge";
   return (
     <div className={`render-status ${state.status === "failed" ? "fail" : ""}`}>
-      <div className="item-title">
-        <strong>{statusLabel}</strong>
-        <span className={badgeClass}>{state.status}</span>
+      <div className="render-status-top">
+        <span className="render-status-icon" aria-hidden="true">
+          {pending ? <Loader2 size={18} className="spin" /> : <span />}
+        </span>
+        <div>
+          <span className="subtle">{statusLabel}</span>
+          <strong>{currentStage.label}</strong>
+        </div>
+        <span className={badgeClass}>{currentStage.status}</span>
       </div>
+      {state.generationId && (
+        <>
+          <div className="render-status-progress" aria-label="Render progress">
+            <span style={{ width: `${progress.percent}%` }} />
+          </div>
+          <details className="render-status-dropdown">
+            <summary>
+              <span>Render status</span>
+              <strong>{progress.completed}/{progress.total}</strong>
+            </summary>
+            <div className="render-status-list">
+              {expressEntries.length > 0 ? expressEntries.map(([key, status]) => (
+                <div className="render-status-row" key={key}>
+                  <span>{formatExpressStatusLabel(key)}</span>
+                  <strong>{formatExpressStatusValue(status)}</strong>
+                </div>
+              )) : (
+                <div className="render-status-row">
+                  <span>Render</span>
+                  <strong>{formatExpressStatusValue(statusText)}</strong>
+                </div>
+              )}
+            </div>
+          </details>
+        </>
+      )}
       <p className="subtle">{state.message}</p>
       {state.txHash && <div className="mono">tx {state.txHash}</div>}
       {state.generationId && <div className="mono">task {state.generationId}</div>}
+      {taskStatus?.errorMessage && <p className="subtle render-status-error">{taskStatus.errorMessage}</p>}
+      {taskStatus?.resultUrl && state.status === "completed" && (
+        <a className="btn small" href={taskStatus.resultUrl} target="_blank" rel="noreferrer">
+          <ExternalLink size={15} /> Open video
+        </a>
+      )}
     </div>
   );
 }
@@ -3121,6 +3218,154 @@ async function assertOk(response: Response) {
     throw new Error(data.message || "Request failed");
   }
   return data;
+}
+
+function buildRenderTaskStatus(generation: Generation, statusResponse?: unknown): RenderTaskStatusState {
+  const responseRecord = isRecord(statusResponse) ? statusResponse : undefined;
+  const requestId = firstStringValue(
+    responseRecord,
+    "request_id",
+    "requestId",
+    "global_status_id",
+    "globalStatusId",
+    "session_id",
+    "sessionId",
+    "sessionID",
+    "video_session_id",
+    "videoSessionId",
+    "external_request_id",
+    "externalRequestId",
+    "id"
+  ) || generation.samsarRequestId || generation.samsarSessionId;
+  const status = firstStringValue(responseRecord, "status", "state") || generation.status;
+  const resultUrl = extractRenderStatusResultUrl(responseRecord) || generation.resultUrl;
+  const errorMessage = firstStringValue(responseRecord, "message", "error", "errorMessage") || generation.errorMessage;
+  const expressGenerationStatus = extractExpressGenerationStatus(responseRecord) || extractExpressGenerationStatus(generation.samsarVideoMetadata);
+  return {
+    generationId: generation.id,
+    ...(requestId ? { requestId } : {}),
+    status,
+    ...(resultUrl ? { resultUrl } : {}),
+    ...(errorMessage ? { errorMessage } : {}),
+    ...(expressGenerationStatus ? { expressGenerationStatus } : {})
+  };
+}
+
+function extractRenderStatusResultUrl(value: unknown): string {
+  const direct = firstStringValue(
+    value,
+    "result_url",
+    "resultUrl",
+    "remoteURL",
+    "remoteUrl",
+    "video_url",
+    "videoUrl",
+    "published_video_url",
+    "publishedVideoUrl"
+  );
+  if (direct) {
+    return direct;
+  }
+  if (!isRecord(value)) {
+    return "";
+  }
+  for (const key of ["result_urls", "resultUrls"]) {
+    const urls = value[key];
+    if (Array.isArray(urls)) {
+      const resultUrl = urls.find((url): url is string => typeof url === "string" && url.trim().length > 0);
+      if (resultUrl) {
+        return resultUrl.trim();
+      }
+    }
+  }
+  for (const key of ["output", "result", "data"]) {
+    const resultUrl = extractRenderStatusResultUrl(value[key]);
+    if (resultUrl) {
+      return resultUrl;
+    }
+  }
+  return "";
+}
+
+function extractExpressGenerationStatus(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const status = value.expressGenerationStatus || value.express_generation_status;
+  if (!isRecord(status)) {
+    return undefined;
+  }
+  const entries = Object.entries(status)
+    .filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim().length > 0);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function expressStatusEntries(status?: Record<string, string>) {
+  return Object.entries(status || {});
+}
+
+function currentExpressStage(entries: Array<[string, string]>, fallbackStatus: string) {
+  const activeEntry = entries.find(([, status]) => normalizeExpressStatus(status) !== "COMPLETED") || entries.at(-1);
+  if (!activeEntry) {
+    return {
+      label: "Render",
+      status: formatExpressStatusValue(fallbackStatus)
+    };
+  }
+  return {
+    label: formatExpressStatusLabel(activeEntry[0]),
+    status: formatExpressStatusValue(activeEntry[1])
+  };
+}
+
+function expressStatusProgress(entries: Array<[string, string]>, fallbackStatus: string) {
+  const total = entries.length || 1;
+  const completed = entries.length > 0
+    ? entries.filter(([, status]) => normalizeExpressStatus(status) === "COMPLETED").length
+    : normalizeExpressStatus(fallbackStatus) === "COMPLETED" ? 1 : 0;
+  return {
+    completed,
+    total,
+    complete: completed >= total,
+    percent: Math.max(5, Math.round((completed / total) * 100))
+  };
+}
+
+function normalizeExpressStatus(status: string) {
+  return status.trim().toUpperCase();
+}
+
+function formatExpressStatusLabel(value: string) {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatExpressStatusValue(value: string) {
+  const normalized = normalizeExpressStatus(value);
+  return normalized
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function firstStringValue(value: unknown, ...keys: string[]) {
+  if (!isRecord(value)) {
+    return "";
+  }
+  for (const key of keys) {
+    const item = value[key];
+    if (typeof item === "string" && item.trim()) {
+      return item.trim();
+    }
+    if (typeof item === "number" && Number.isFinite(item)) {
+      return String(item);
+    }
+  }
+  return "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function parseImageWizardItems(raw: string): ImageWizardItem[] {

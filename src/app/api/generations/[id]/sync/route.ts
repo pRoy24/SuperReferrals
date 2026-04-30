@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { syncGeneration } from "@/lib/orchestrator";
+import { syncGenerationWithStatus } from "@/lib/orchestrator";
 
 export async function POST(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const generation = await syncGeneration(id);
-    return NextResponse.json({ generation });
+    const result = await syncGenerationWithStatus(id);
+    return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to sync generation";
     return NextResponse.json(
