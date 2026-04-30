@@ -80,6 +80,11 @@ const howItWorksSteps = [
     copy: "Set up a samsar-js account at saamsar.one or buy in-app credits from Create storefront, then choose models, prices, accepted crypto, and render policy for your users."
   },
   {
+    icon: Link2,
+    title: "Make it your own",
+    copy: "Map your store URL to an ENS domain, choose your own branding and theme, and give customers only the storefront experience you decide to present."
+  },
+  {
     icon: Sparkles,
     title: "Video creator",
     copy: "Creators choose a storefront, pay in the store currency, and generate product videos from catalog links, listing metadata, images, prompts, CTAs, and selected formats."
