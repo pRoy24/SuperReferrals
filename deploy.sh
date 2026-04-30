@@ -450,6 +450,31 @@ remote_has_env_key() {
   grep -Fxq -- "$key" "$remote_keys_file"
 }
 
+OPTIONAL_ENV_WARNING_KEYS=""
+
+record_optional_env_warning() {
+  local key="$1"
+  case ",$OPTIONAL_ENV_WARNING_KEYS," in
+    *",$key,"*)
+      return
+      ;;
+  esac
+  if [[ -z "$OPTIONAL_ENV_WARNING_KEYS" ]]; then
+    OPTIONAL_ENV_WARNING_KEYS="$key"
+  else
+    OPTIONAL_ENV_WARNING_KEYS="${OPTIONAL_ENV_WARNING_KEYS}, $key"
+  fi
+}
+
+print_optional_env_warning() {
+  local target="$1"
+  [[ -n "$OPTIONAL_ENV_WARNING_KEYS" ]] || return 0
+  echo
+  echo "Warning: functionality may be limited in ${target} until these optional Vercel env keys are set:"
+  echo "  ${OPTIONAL_ENV_WARNING_KEYS}"
+  echo "Deploy will continue; the app will also show admin setup warnings for the affected features."
+}
+
 create_missing_env_sync_file() {
   local target="$1"
   local remote_keys_file="$2"
@@ -502,7 +527,8 @@ prompt_env_value() {
     if [[ "$required" == "required" ]]; then
       die "$key is required in $file. $details"
     fi
-    echo "$key: missing; skipped because deploy.sh is running non-interactively."
+    echo "$key: missing; deploy will continue, but functionality may be limited."
+    record_optional_env_warning "$key"
     return
   fi
 
@@ -512,7 +538,7 @@ prompt_env_value() {
   if [[ "$required" == "required" ]]; then
     echo "This value is required before deploying this environment."
   else
-    echo "Press Enter to leave it blank for now; the app will run and show an admin setup warning."
+    echo "Press Enter to leave it blank and continue; functionality may be limited until it is set."
   fi
 
   prompt="Value"
@@ -536,7 +562,8 @@ prompt_env_value() {
     if [[ "$required" == "required" ]]; then
       die "$key cannot be blank for $file."
     fi
-    echo "$key left blank."
+    echo "$key left blank; deploy will continue, but functionality may be limited."
+    record_optional_env_warning "$key"
     return
   fi
 
@@ -564,6 +591,7 @@ prepare_env_file() {
   fi
 
   echo "Checking deploy env values in $env_file"
+  OPTIONAL_ENV_WARNING_KEYS=""
   prompt_env_value "$env_file" "$remote_keys_file" "SUPERREFERRALS_SESSION_SECRET" \
     "SuperReferrals session secret" \
     "Used to encrypt account/session cookies. Generate once per environment and keep it stable across redeploys." \
@@ -604,6 +632,7 @@ prepare_env_file() {
     "iNFT contract address" \
     "Run npm run contracts:deploy:inft:testnet for staging or npm run contracts:deploy:inft:mainnet for production, then paste the address." \
     "plain" "optional"
+  print_optional_env_warning "$target"
 }
 
 run_bootstrap() {
