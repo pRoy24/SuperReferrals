@@ -17,12 +17,14 @@ import {
 import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
 import LanguageSelector from "@/components/LanguageSelector";
 import { readStoredAppLanguage, subscribeAppLanguage } from "@/lib/app-language-client";
+import type { EnvDiagnostics } from "@/lib/env-diagnostics";
 import { DEFAULT_APP_LANGUAGE, appLanguages, videoLanguageMatchesAppLanguage } from "@/lib/localization";
 import type { AppLanguageCode, PublicFeedItem, VideoAspectRatio } from "@/lib/types";
 
 type AdminAspectFilter = "all" | VideoAspectRatio;
 
 type AdminDashboardPayload = {
+  envDiagnostics: EnvDiagnostics;
   analytics: {
     storefronts: number;
     customers: number;
@@ -232,6 +234,24 @@ export default function AdminPage() {
       </section>
 
       {message && <p className="notice">{message}</p>}
+
+      {dashboard?.envDiagnostics.issues.length ? (
+        <section className="environment-banner admin-env-banner" role="status" aria-label="Deployment environment diagnostics">
+          <span>Config</span>
+          <div>
+            <p>
+              {dashboard.envDiagnostics.environment} configuration has optional operational gaps. The app can still run, but some admin, 0G, settlement, registry, or iNFT functionality may be limited until these values are set.
+            </p>
+            <ul>
+              {dashboard.envDiagnostics.issues.map((issue) => (
+                <li key={`${issue.key}:${issue.message}`}>
+                  <strong>{issue.key}</strong>: {issue.message} {issue.howToSet}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      ) : null}
 
       {analytics && (
         <section className="admin-stat-grid" aria-label="Basic analytics">

@@ -8,6 +8,7 @@ export type EnvDiagnosticIssue = {
   message: string;
   howToSet: string;
   severity: EnvDiagnosticSeverity;
+  adminOnly?: boolean;
 };
 
 export type EnvDiagnostics = {
@@ -179,19 +180,22 @@ export function getEnvDiagnostics(): EnvDiagnostics {
     label: "0G DA endpoint",
     message: "Live data availability submissions need a 0G DA endpoint.",
     howToSet: "Set the DA submission endpoint from your 0G operator or leave blank until DA publishing is enabled.",
-    severity: "warning"
+    severity: "warning",
+    adminOnly: true
   });
   addMissingIssue(issues, "USER_REGISTRY_CONTRACT_ADDRESS", {
     label: "User registry contract",
     message: "Live user profile registry writes need the deployed registry contract address.",
     howToSet: "Deploy SuperReferralsUserRegistry on the target 0G network and set the address.",
-    severity: "warning"
+    severity: "warning",
+    adminOnly: true
   });
   addMissingIssue(issues, "AGENT_REGISTRY_CONTRACT_ADDRESS", {
     label: "Agent registry contract",
     message: "Live agent registry writes need the deployed agent registry contract address.",
     howToSet: "Deploy SuperReferralsAgentRegistry on the target 0G network and set the address.",
-    severity: "warning"
+    severity: "warning",
+    adminOnly: true
   });
   addMissingIssue(issues, "INFT_CONTRACT_ADDRESS", {
     label: "iNFT contract",
@@ -215,6 +219,14 @@ export function getEnvDiagnostics(): EnvDiagnostics {
     mockMode,
     appCanRun: true,
     issues: uniqueIssues(issues)
+  };
+}
+
+export function getLandingEnvDiagnostics(): EnvDiagnostics {
+  const diagnostics = getEnvDiagnostics();
+  return {
+    ...diagnostics,
+    issues: diagnostics.issues.filter((issue) => !issue.adminOnly)
   };
 }
 

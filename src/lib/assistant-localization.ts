@@ -17,6 +17,18 @@ type AssistantCopy = {
   placeholder: string;
   send: string;
   typing: string;
+  empty: {
+    loading: string;
+    title: string;
+    intro: string;
+    contextLabel: string;
+    modelLabel: string;
+    environmentLabel: string;
+    suggestionsLabel: string;
+    modelFallback: string;
+    environmentFallback: string;
+    suggestions: Record<string, string[]>;
+  };
   errors: {
     load: string;
     request: string;
@@ -45,6 +57,59 @@ export const assistantCopy: Record<AppLanguageCode, AssistantCopy> = {
     placeholder: "Ask about this page...",
     send: "Send",
     typing: "Assistant is responding",
+    empty: {
+      loading: "Loading page context...",
+      title: "How can I help with this page?",
+      intro: "Ask about the current workflow, available actions, or what to do next. The assistant uses this page context and your chat history.",
+      contextLabel: "Context",
+      modelLabel: "Model",
+      environmentLabel: "Environment",
+      suggestionsLabel: "Try asking",
+      modelFallback: "0G Compute assistant",
+      environmentFallback: "Current deployment",
+      suggestions: {
+        "/": [
+          "What can I create from here?",
+          "Which route should I open first?",
+          "How do referrals become videos?"
+        ],
+        "/dashboard": [
+          "How do I create a storefront?",
+          "What should I configure before publishing?",
+          "Where do I manage credits and pricing?"
+        ],
+        "/storefronts": [
+          "How do I choose a storefront?",
+          "What does each storefront card show?",
+          "How do I open a product video creator?"
+        ],
+        "/r": [
+          "What do I need before generating a video?",
+          "How does payment work on this storefront?",
+          "Which render settings should I check?"
+        ],
+        "/inft": [
+          "What can I do with this iNFT?",
+          "Which paid actions are available?",
+          "How do edits affect ownership history?"
+        ],
+        "/payment_success": [
+          "What happens after payment succeeds?",
+          "Where should I go next?",
+          "How do I check my credits?"
+        ],
+        "/payment_cancel": [
+          "How do I return to setup?",
+          "Can I retry checkout?",
+          "What should I check before paying again?"
+        ],
+        default: [
+          "What can I do on this page?",
+          "What should I try next?",
+          "Explain the visible controls."
+        ]
+      }
+    },
     errors: {
       load: "Assistant failed to load.",
       request: "Assistant request failed.",
@@ -88,6 +153,59 @@ export const assistantCopy: Record<AppLanguageCode, AssistantCopy> = {
     placeholder: "询问此页面...",
     send: "发送",
     typing: "助手正在回复",
+    empty: {
+      loading: "正在加载页面上下文...",
+      title: "需要我帮你了解此页面吗？",
+      intro: "你可以询问当前流程、可用操作或下一步该做什么。助手会使用此页面上下文和你的对话历史。",
+      contextLabel: "上下文",
+      modelLabel: "模型",
+      environmentLabel: "环境",
+      suggestionsLabel: "可以这样问",
+      modelFallback: "0G Compute 助手",
+      environmentFallback: "当前部署",
+      suggestions: {
+        "/": [
+          "我可以从这里创建什么？",
+          "应该先打开哪个页面？",
+          "推荐链接如何变成视频？"
+        ],
+        "/dashboard": [
+          "如何创建店铺？",
+          "发布前需要配置什么？",
+          "在哪里管理额度和定价？"
+        ],
+        "/storefronts": [
+          "如何选择店铺？",
+          "每张店铺卡片显示什么？",
+          "如何打开商品视频创建器？"
+        ],
+        "/r": [
+          "生成视频前需要准备什么？",
+          "这个店铺的付款流程是什么？",
+          "我应该检查哪些渲染设置？"
+        ],
+        "/inft": [
+          "我可以用这个 iNFT 做什么？",
+          "有哪些付费操作？",
+          "编辑会如何影响所有权历史？"
+        ],
+        "/payment_success": [
+          "支付成功后会发生什么？",
+          "下一步应该去哪里？",
+          "如何检查我的额度？"
+        ],
+        "/payment_cancel": [
+          "如何返回设置？",
+          "可以重新尝试结账吗？",
+          "再次付款前应该检查什么？"
+        ],
+        default: [
+          "这个页面可以做什么？",
+          "下一步应该尝试什么？",
+          "说明一下可见控件。"
+        ]
+      }
+    },
     errors: {
       load: "助手加载失败。",
       request: "助手请求失败。",
@@ -121,17 +239,34 @@ export function localizedAssistantPageLabel(
   pathname: string,
   pageTitle?: string
 ) {
+  const normalizedPathname = normalizeAssistantPagePathForLocale(pathname);
   const labels = assistantCopy[language].pageLabels;
   if (pageTitle && labels[pageTitle]) {
     return labels[pageTitle];
   }
-  if (pageTitle && !isGeneratedPathLabel(pageTitle, pathname)) {
+  if (pageTitle && !isGeneratedPathLabel(pageTitle, normalizedPathname)) {
     return pageTitle;
   }
-  if (labels[pathname]) {
-    return labels[pathname];
+  if (labels[normalizedPathname]) {
+    return labels[normalizedPathname];
   }
-  return pageLabelFromPath(pathname, language);
+  return pageLabelFromPath(normalizedPathname, language);
+}
+
+export function localizedAssistantEmptySuggestions(language: AppLanguageCode, pathname: string) {
+  const suggestions = assistantCopy[language].empty.suggestions;
+  return suggestions[assistantSuggestionKey(pathname)] || suggestions.default;
+}
+
+export function normalizeAssistantPagePathForLocale(pathname: string) {
+  const normalized = `/${pathname.split(/[?#]/)[0].split("/").filter(Boolean).join("/")}`;
+  if (normalized === "/zh") {
+    return "/";
+  }
+  if (normalized.startsWith("/zh/")) {
+    return normalized.slice(3) || "/";
+  }
+  return normalized === "/" ? "/" : normalized.replace(/\/$/, "");
 }
 
 function pageLabelFromPath(pathname: string, language: AppLanguageCode) {
@@ -156,4 +291,26 @@ function pageLabelFromPath(pathname: string, language: AppLanguageCode) {
 
 function isGeneratedPathLabel(pageTitle: string, pathname: string) {
   return pageTitle === pageLabelFromPath(pathname, "en");
+}
+
+function assistantSuggestionKey(pathname: string) {
+  const normalized = normalizeAssistantPagePathForLocale(pathname);
+  if (normalized === "/") {
+    return "/";
+  }
+  const [firstSegment] = normalized.split("/").filter(Boolean);
+  if (!firstSegment) {
+    return "default";
+  }
+  if (firstSegment === "storefronts") {
+    return normalized === "/storefronts" ? "/storefronts" : "/r";
+  }
+  if (firstSegment === "r") {
+    return "/r";
+  }
+  if (firstSegment === "inft") {
+    return "/inft";
+  }
+  const directKey = `/${firstSegment}`;
+  return assistantCopy.en.empty.suggestions[directKey] ? directKey : "default";
 }

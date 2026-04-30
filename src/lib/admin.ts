@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { env } from "./env";
+import { getEnvDiagnostics, type EnvDiagnostics } from "./env-diagnostics";
 import { nowIso } from "./ids";
 import { resolveRenditionLanguageCode } from "./rendition-language";
 import type {
@@ -15,6 +16,7 @@ export type AdminPublishedFeedItem = PublicFeedItem & {
 };
 
 export type AdminDashboardPayload = {
+  envDiagnostics: EnvDiagnostics;
   analytics: {
     storefronts: number;
     customers: number;
@@ -49,6 +51,7 @@ export function buildAdminDashboardPayload(store: SuperReferralsStore): AdminDas
   const views = store.feedViews.reduce((total, view) => total + Math.max(0, Number(view.count || 0)), 0);
 
   return {
+    envDiagnostics: getEnvDiagnostics(),
     analytics: {
       storefronts: store.customers.filter((customer) => Boolean(customer.storefront)).length,
       customers: store.customers.length,
