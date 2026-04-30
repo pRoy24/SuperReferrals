@@ -1,8 +1,12 @@
 import {
   Clapperboard,
+  Coins,
+  Cpu,
   Database,
   ExternalLink,
   Film,
+  GitBranch,
+  KeyRound,
   Link2,
   Network,
   ShieldCheck,
@@ -40,6 +44,39 @@ const valuePoints = [
   "Turn product images and details into audience-ready videos.",
   "Give buyers context before they purchase.",
   "Replace bare tracking URLs with useful media."
+];
+
+const blockchainPillars = [
+  {
+    icon: Coins,
+    title: "Configurable crypto stores",
+    copy: "Launch storefronts with model menus, pricing, and checkout in the cryptocurrency you choose, so customers can pay you directly."
+  },
+  {
+    icon: Film,
+    title: "Render to tradable iNFTs",
+    copy: "Every customer receives a completed video render and a tradable iNFT record powered by 0G blockchain and KeeperHub."
+  },
+  {
+    icon: Cpu,
+    title: "Serve the models you want",
+    copy: "Choose the generation models, aspect ratios, and prices your storefront offers instead of exposing every backend option."
+  },
+  {
+    icon: KeyRound,
+    title: "Gate render access",
+    copy: "Public discovery does not have to mean open rendering. Use address whitelists to decide who can create videos on your store."
+  },
+  {
+    icon: GitBranch,
+    title: "Purchase clones, not transfers",
+    copy: "Every iNFT can be purchased as a deep clone. Buyers can replace scenes, retranslate, update outros and CTA links, or join their copy with other videos they own while your original remains yours."
+  },
+  {
+    icon: ShieldCheck,
+    title: "Onchain lineage",
+    copy: "Every child purchase, edit, join, and downstream operation can be audited onchain, preserving a clear history for every derivative video."
+  }
 ];
 
 export default async function Home() {
@@ -180,6 +217,38 @@ export default async function Home() {
           <RouteButton href="/storefronts" title="Create a product video" copy="Choose a storefront, connect a wallet, and generate." />
           <RouteButton href="/feed" title="View video gallery" copy="Browse completed videos and social actions." />
           <RouteButton href={inftHref} title="Open latest video" copy="Preview the latest render." />
+        </div>
+      </section>
+
+      <section className="landing-section blockchain-section">
+        <div className="blockchain-header">
+          <div>
+            <div className="eyebrow">Powered by blockchain</div>
+            <h2>Programmable storefronts for crypto-native video referrals.</h2>
+          </div>
+          <p>
+            SuperReferrals connects storefront payments, render access, iNFT ownership, and derivative
+            creation into an auditable onchain workflow without making every store open by default.
+          </p>
+        </div>
+        <div className="blockchain-rail" aria-label="Blockchain infrastructure">
+          <span>0G blockchain</span>
+          <span>KeeperHub</span>
+          <span>Auditable iNFT lineage</span>
+        </div>
+        <div className="blockchain-grid">
+          {blockchainPillars.map((pillar) => {
+            const Icon = pillar.icon;
+            return (
+              <article className="blockchain-card" key={pillar.title}>
+                <div className="blockchain-card-heading">
+                  <span className="blockchain-card-icon"><Icon size={18} /></span>
+                  <h3>{pillar.title}</h3>
+                </div>
+                <p>{pillar.copy}</p>
+              </article>
+            );
+          })}
         </div>
       </section>
 
