@@ -4,6 +4,7 @@ import path from "node:path";
 import { appBaseUrl, env } from "./env";
 import { createId, makeReferrerCode, nowIso, normalizeWallet } from "./ids";
 import { isINFTTokenMissing, recoverINFTFromChain } from "./inft";
+import { normalizeAppLanguage } from "./localization";
 import { findPaymentToken, getTransactionChainId, settlementTokenForCurrency } from "./payment-tokens";
 import { defaultINFTActionPricesUsd, defaultModelPricingConfigurations, defaultPricing } from "./pricing";
 import {
@@ -17,6 +18,7 @@ import type {
   AgentProfile,
   AgentTownEvent,
   Customer,
+  CustomerPreferences,
   CustomerStorefrontConditions,
   DeletedVideoReference,
   Generation,
@@ -42,6 +44,9 @@ const LEGACY_DEMO_CUSTOMER_ID = "cus_demo";
 const LEGACY_DEMO_SUB_ACCOUNT_ID = "sub_demo";
 const LEGACY_DEMO_OWNER_WALLET = "0x1111111111111111111111111111111111111111";
 
+type CustomerUpsertInput = Partial<Omit<Customer, "preferences">> & {
+  preferences?: Partial<CustomerPreferences>;
+};
 type RedisRestConfig = {
   url: string;
   token: string;
@@ -1075,7 +1080,7 @@ export function isPublicStorefrontCustomer(customer: Customer) {
     isUsableEvmAddress(customer.ownerWallet);
 }
 
-export function upsertCustomer(store: SuperReferralsStore, input: Partial<Customer>) {
+export function upsertCustomer(store: SuperReferralsStore, input: CustomerUpsertInput) {
   const timestamp = nowIso();
   const id = input.id || createId("cus");
   const existing = store.customers.find((customer) => customer.id === id);
@@ -1107,6 +1112,7 @@ export function upsertCustomer(store: SuperReferralsStore, input: Partial<Custom
     referrerBaseUrl: (input.referrerBaseUrl || existing?.referrerBaseUrl || appBaseUrl()).replace(/\/$/, ""),
     ensName: input.ensName ?? existing?.ensName,
     storefront: normalizeStorefrontDetails(input.storefront, existing?.storefront),
+    preferences: normalizeCustomerPreferences(input.preferences, existing?.preferences),
     subscription: {
       status: input.subscription?.status || existing?.subscription.status || "not_started",
       streamId: input.subscription?.streamId || existing?.subscription.streamId,
@@ -1132,6 +1138,7 @@ export function addSubAccount(store: SuperReferralsStore, input: {
   email?: string;
   username?: string;
   externalApiKey?: string;
+  preferences?: Partial<SubAccountPreferences>;
 }) {
   const timestamp = nowIso();
   const id = createId("sub");
@@ -1156,6 +1163,7 @@ export function addSubAccount(store: SuperReferralsStore, input: {
       user_type: "storefront_user"
     },
     externalApiKey: input.externalApiKey,
+    preferences: input.preferences ? normalizeSubAccountPreferences(input.preferences) : undefined,
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -1500,16 +1508,39 @@ function normalizeSubAccountPreferences(
   input: Partial<SubAccountPreferences>,
   existing?: SubAccountPreferences
 ): SubAccountPreferences {
+  const inputHasLanguage = Object.prototype.hasOwnProperty.call(input, "language");
   const renderForm = input.renderForm && typeof input.renderForm === "object" && !Array.isArray(input.renderForm)
     ? input.renderForm
     : existing?.renderForm;
   const renderFormMode = input.renderFormMode === "simple" || input.renderFormMode === "advanced"
     ? input.renderFormMode
     : existing?.renderFormMode;
+  const language = inputHasLanguage
+    ? normalizeAppLanguage(input.language)
+    : existing?.language;
   return {
     renderForm,
     renderFormMode,
+    language,
     updatedAt: nowIso()
+  };
+}
+
+function normalizeCustomerPreferences(
+  input?: Partial<CustomerPreferences>,
+  existing?: CustomerPreferences
+): CustomerPreferences | undefined {
+  const inputHasLanguage = Boolean(input && Object.prototype.hasOwnProperty.call(input, "language"));
+  const nextLanguage = inputHasLanguage
+    ? normalizeAppLanguage(input?.language)
+    : existing?.language;
+  if (!nextLanguage) {
+    return undefined;
+  }
+  const languageChanged = inputHasLanguage && nextLanguage !== existing?.language;
+  return {
+    language: nextLanguage,
+    updatedAt: languageChanged ? nowIso() : existing?.updatedAt || nowIso()
   };
 }
 

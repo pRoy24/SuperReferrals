@@ -5769,3 +5769,113 @@ button.item {
     width: 100%;
   }
 }
+
+.global-language-selector {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  z-index: 118;
+  display: block;
+}
+
+.production-hackathon-banner + .global-language-selector {
+  top: 62px;
+}
+
+.global-language-selector label {
+  position: relative;
+  display: block;
+}
+
+.global-language-selector label::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  pointer-events: none;
+  transform: translateY(-65%) rotate(45deg);
+}
+
+.global-language-selector select {
+  width: auto;
+  min-width: 190px;
+  min-height: 38px;
+  appearance: none;
+  border: 1px solid rgba(31, 91, 160, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #0f172a;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 8px 32px 8px 14px;
+  box-shadow: 0 14px 36px rgba(49, 79, 126, 0.12);
+  backdrop-filter: blur(14px);
+}
+
+.global-language-selector select:hover,
+.global-language-selector select:focus-visible {
+  border-color: rgba(37, 99, 235, 0.38);
+  background: rgba(255, 255, 255, 0.98);
+  outline: none;
+}
+
+.landing-shell {
+  padding-top: 74px;
+}
+
+.public-main {
+  padding-top: 78px;
+}
+
+.storefront-user-main {
+  padding-top: 70px;
+}
+
+.inft-layout,
+.app-shell .main {
+  padding-top: 78px;
+}
+
+body:has(.feed-shell) .global-language-selector {
+  top: 76px;
+  right: 14px;
+}
+
+@media (max-width: 620px) {
+  .global-language-selector {
+    top: 10px;
+    right: 10px;
+  }
+
+  .production-hackathon-banner + .global-language-selector {
+    top: 68px;
+  }
+
+  .global-language-selector select {
+    min-width: min(180px, calc(100vw - 20px));
+    min-height: 36px;
+    font-size: 11px;
+    padding-right: 30px;
+  }
+
+  .landing-shell,
+  .public-main,
+  .storefront-user-main {
+    padding-top: 62px;
+  }
+
+  .inft-layout,
+  .app-shell .main {
+    padding-top: 68px;
+  }
+
+  body:has(.feed-shell) .global-language-selector {
+    top: 64px;
+  }
+}

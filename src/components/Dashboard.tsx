@@ -44,6 +44,7 @@ import {
 } from "@/lib/storefront-auth-client";
 import BreadcrumbNav from "@/components/BreadcrumbNav";
 import StorefrontVideoGrid from "@/components/StorefrontVideoGrid";
+import { syncStoredAppLanguagePreference } from "@/lib/app-language-client";
 import { isUsableEvmAddress } from "@/lib/wallet-address";
 import type { Customer, INFTPaidAction, ModelPricingConfiguration, PaymentCurrencySymbol, SuperReferralsStore, VideoAspectRatio, VideoModel } from "@/lib/types";
 
@@ -133,12 +134,14 @@ export default function Dashboard() {
           expiryDate: data.account?.expiryDate || credentials.expiryDate,
           refreshTokenExpiresAt: data.account?.refreshTokenExpiresAt || credentials.refreshTokenExpiresAt
         });
+        await syncStoredAppLanguagePreference().catch(() => undefined);
         setMessage(`Signed in to ${data.account?.email || "your SuperReferrals account"}.`);
       } finally {
         removeAuthCredentialsFromCurrentUrl();
       }
     } else {
       await refreshStoredSamsarCredentialsIfNeeded();
+      await syncStoredAppLanguagePreference().catch(() => undefined);
     }
     await load();
   }
@@ -479,6 +482,7 @@ export default function Dashboard() {
         expiryDate: data.account?.expiryDate,
         refreshTokenExpiresAt: data.account?.refreshTokenExpiresAt
       });
+      await syncStoredAppLanguagePreference().catch(() => undefined);
       await load();
       const credits = Number(data.account?.creditsRemaining || 0);
       setProcessorAccountForm((current) => ({ ...current, password: "" }));

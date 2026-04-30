@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSubAccountForCustomer } from "@/lib/orchestrator";
+import { normalizeAppLanguage } from "@/lib/localization";
 import { mutateStore, publicSubAccount, readStore, updateSubAccountPreferences } from "@/lib/store";
 
 export async function GET() {
@@ -23,16 +24,21 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = await request.json();
+    const preferences = {
+      renderForm: isRecord(body.preferences?.renderForm) ? body.preferences.renderForm : undefined,
+      renderFormMode: body.preferences?.renderFormMode === "simple" || body.preferences?.renderFormMode === "advanced"
+        ? body.preferences.renderFormMode
+        : undefined
+    } as Parameters<typeof updateSubAccountPreferences>[1]["preferences"];
+    const language = normalizeAppLanguage(body.preferences?.language || body.language);
+    if (language) {
+      preferences.language = language;
+    }
     const account = await mutateStore((store) => updateSubAccountPreferences(store, {
       id: cleanOptionalString(body.subAccountId) || cleanOptionalString(body.id),
       customerId: cleanOptionalString(body.customerId),
       wallet: cleanOptionalString(body.wallet),
-      preferences: {
-        renderForm: isRecord(body.preferences?.renderForm) ? body.preferences.renderForm : undefined,
-        renderFormMode: body.preferences?.renderFormMode === "simple" || body.preferences?.renderFormMode === "advanced"
-          ? body.preferences.renderFormMode
-          : undefined
-      }
+      preferences
     }));
     if (!account) {
       throw new Error("sub-account was not found");

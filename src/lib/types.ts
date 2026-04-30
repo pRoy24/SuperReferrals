@@ -13,6 +13,7 @@ export type VideoModel = "VEO3.1I2V" | "SEEDANCEI2V" | "KLING3.0" | "RUNWAYML";
 export type PaymentRail = "direct" | "uniswap" | "keeperhub";
 export type PaymentCurrencySymbol = "USD" | "USDC" | "USDT" | "ETH" | "WETH";
 export type VideoAspectRatio = "16:9" | "9:16";
+export type AppLanguageCode = "en" | "zh";
 export type INFTPaidAction =
   | "translate"
   | "join"
@@ -109,12 +110,18 @@ export interface Customer {
   referrerBaseUrl: string;
   ensName?: string;
   storefront?: CustomerStorefrontDetails;
+  preferences?: CustomerPreferences;
   subscription: {
     status: "not_started" | "active" | "paused";
     streamId?: string;
     creditsRemaining?: number;
   };
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerPreferences {
+  language?: AppLanguageCode;
   updatedAt: string;
 }
 
@@ -149,6 +156,7 @@ export interface SubAccount {
 export interface SubAccountPreferences {
   renderForm?: Record<string, unknown>;
   renderFormMode?: "simple" | "advanced";
+  language?: AppLanguageCode;
   updatedAt: string;
 }
 

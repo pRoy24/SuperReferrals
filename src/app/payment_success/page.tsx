@@ -4,6 +4,7 @@ import { RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import BreadcrumbNav from "@/components/BreadcrumbNav";
+import { syncStoredAppLanguagePreference } from "@/lib/app-language-client";
 import {
   authCredentialsFromCurrentUrl,
   fetchWithSamsarAuth,
@@ -39,6 +40,7 @@ export default function PaymentSuccessPage() {
             headers: { "content-type": "application/json" },
             body: JSON.stringify(credentials)
           }).catch(() => undefined);
+          await syncStoredAppLanguagePreference().catch(() => undefined);
           removeAuthCredentialsFromCurrentUrl();
         }
         const response = await fetchWithSamsarAuth("/api/bootstrap?scope=account", {
@@ -54,6 +56,7 @@ export default function PaymentSuccessPage() {
         const account = customer?.samsarAccount || {};
         const hasSession = Boolean(account.hasSession || account.authToken || account.apiKey);
         if (creditsRemaining > 0 && hasSession) {
+          await syncStoredAppLanguagePreference().catch(() => undefined);
           if (cancelled) return;
           setSyncState({
             status: "ready",

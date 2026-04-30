@@ -5,6 +5,7 @@ import { buildINFTAssistantSystemPrompt } from "./assistant-prompt";
 import { deriveAgentWallet, mintINFT } from "./inft";
 import { buildGenerationFeedSettings } from "./feed";
 import { bytes32From, createId, nowIso, normalizeWallet } from "./ids";
+import { normalizeAppLanguage } from "./localization";
 import {
   confirmKeeperPaymentSettlement,
   createKeeperPaymentIntent,
@@ -50,6 +51,7 @@ import {
   updateGeneration,
   upsertCustomer,
   publicStore,
+  updateSubAccountPreferences,
   withStoreScopedLock
 } from "./store";
 import {
@@ -310,6 +312,7 @@ export async function createSubAccountForCustomer(input: {
   wallet: string;
   email?: string;
   username?: string;
+  language?: string;
 }) {
   const existingStore = await readStore();
   const customer = existingStore.customers.find((item) => item.id === input.customerId);
@@ -321,6 +324,7 @@ export async function createSubAccountForCustomer(input: {
   const existingAccount = existingStore.subAccounts.find((item) =>
     item.customerId === input.customerId && normalizeWallet(item.wallet) === normalizedWallet
   );
+  const language = normalizeAppLanguage(input.language);
   if (existingAccount) {
     const blockchainRegistration = existingAccount.blockchainRegistration ||
       await tryCreateZeroGUserRegistration(customer, existingAccount);
@@ -330,11 +334,20 @@ export async function createSubAccountForCustomer(input: {
         throw new Error("wallet user record disappeared while provisioning");
       }
       current.blockchainRegistration = blockchainRegistration;
+      if (language) {
+        current.preferences = updateSubAccountPreferences(store, {
+          id: current.id,
+          preferences: { language }
+        })?.preferences;
+      }
       current.updatedAt = nowIso();
       return current;
     });
   }
-  const account = await mutateStore((store) => addSubAccount(store, input));
+  const account = await mutateStore((store) => addSubAccount(store, {
+    ...input,
+    preferences: language ? { language } : undefined
+  }));
   const blockchainRegistration = await tryCreateZeroGUserRegistration(customer, account);
   return mutateStore((store) => {
     const current = store.subAccounts.find((item) => item.id === account.id);

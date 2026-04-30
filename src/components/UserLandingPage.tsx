@@ -7,6 +7,12 @@ import { UserStoreCreatorSkeleton } from "@/components/FormLoadingSkeletons";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
 import StorefrontVideoGrid from "@/components/StorefrontVideoGrid";
 import {
+  applyDocumentAppLanguage,
+  persistAppLanguagePreference,
+  readStoredAppLanguage,
+  subscribeAppLanguage
+} from "@/lib/app-language-client";
+import {
   requestWalletAccounts,
   subscribeToBrowserWalletProviders,
   type BrowserWalletProvider,
@@ -42,6 +48,7 @@ import type {
   SubAccount,
   SuperReferralsStore,
   GenerationStatus,
+  AppLanguageCode,
   VideoAspectRatio,
   VideoModel
 } from "@/lib/types";
@@ -380,6 +387,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const [metadataWizardItems, setMetadataWizardItems] = useState<MetadataWizardItem[]>(() => parseMetadataWizardItems(""));
   const [outroFocusAreaWizard, setOutroFocusAreaWizard] = useState<OutroFocusAreaWizard>(() => parseOutroFocusAreaWizard(""));
   const [paymentCurrency, setPaymentCurrency] = useState<PaymentCurrencySymbol>("USDC");
+  const [appLanguage, setAppLanguage] = useState<AppLanguageCode | "">("");
   const [quote, setQuote] = useState<PaymentQuote | null>(null);
   const [autoPolling, setAutoPolling] = useState(false);
   const [renderFlow, setRenderFlow] = useState<RenderFlowState>({ status: "idle", message: "" });
@@ -400,6 +408,14 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   }, []);
 
   useEffect(() => subscribeToBrowserWalletProviders(setWalletProviders), []);
+
+  useEffect(() => {
+    const storedLanguage = readStoredAppLanguage();
+    if (storedLanguage) {
+      setAppLanguage(storedLanguage);
+    }
+    return subscribeAppLanguage(setAppLanguage);
+  }, []);
 
   const routeAccount = useMemo(
     () => store?.subAccounts.find((account) => account.referrerCode === referrerCode),
@@ -675,6 +691,37 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   }, [connectedSubAccount, customer, pricingOptions, serverRenderFormHydratedKey, subAccountPreferenceKey]);
 
   useEffect(() => {
+    const language = connectedSubAccount?.preferences?.language;
+    if (!language || readStoredAppLanguage()) {
+      return;
+    }
+    setAppLanguage(language);
+    applyDocumentAppLanguage(language);
+  }, [connectedSubAccount?.preferences?.language]);
+
+  useEffect(() => {
+    if (!customer || !connectedSubAccount || !appLanguage || connectedSubAccount.preferences?.language === appLanguage) {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      persistAppLanguagePreference(appLanguage, {
+        subAccountId: connectedSubAccount.id,
+        customerId: customer.id,
+        wallet: connectedSubAccount.wallet
+      }).catch(() => undefined);
+    }, 400);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [
+    appLanguage,
+    connectedSubAccount?.id,
+    connectedSubAccount?.preferences?.language,
+    connectedSubAccount?.wallet,
+    customer?.id
+  ]);
+
+  useEffect(() => {
     if (
       !customer ||
       !connectedSubAccount ||
@@ -927,7 +974,8 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
         customerId: customer.id,
         wallet: effectiveWallet,
         email: profileOverride.email || undefined,
-        username: profileOverride.username || `wallet-${shortWallet(effectiveWallet)}`
+        username: profileOverride.username || `wallet-${shortWallet(effectiveWallet)}`,
+        language: readStoredAppLanguage() || appLanguage || undefined
       })
     });
     const data = await assertOk(response);
