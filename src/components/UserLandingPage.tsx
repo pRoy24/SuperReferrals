@@ -6,13 +6,20 @@ import BreadcrumbNav from "@/components/BreadcrumbNav";
 import { UserStoreCreatorSkeleton } from "@/components/FormLoadingSkeletons";
 import LanguageSelector from "@/components/LanguageSelector";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
-import StorefrontVideoGrid from "@/components/StorefrontVideoGrid";
+import StorefrontVideoGrid, {
+  StorefrontVideoActions,
+  StorefrontVideoDeleteDialog,
+  buildStorefrontVideoItem,
+  type StorefrontVideoAction,
+  type StorefrontVideoItem
+} from "@/components/StorefrontVideoGrid";
 import {
   applyDocumentAppLanguage,
   persistAppLanguagePreference,
   readStoredAppLanguage,
   subscribeAppLanguage
 } from "@/lib/app-language-client";
+import VideoMosaic from "@/components/VideoMosaic";
 import {
   requestWalletAccounts,
   subscribeToBrowserWalletProviders,
@@ -427,6 +434,8 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const [autoPolling, setAutoPolling] = useState(false);
   const [renderFlow, setRenderFlow] = useState<RenderFlowState>({ status: "idle", message: "" });
   const [renderTaskStatus, setRenderTaskStatus] = useState<RenderTaskStatusState | null>(null);
+  const [renderPreviewBusyAction, setRenderPreviewBusyAction] = useState("");
+  const [renderPreviewDeleteItem, setRenderPreviewDeleteItem] = useState<StorefrontVideoItem | null>(null);
   const [lastValidGenerationPayloadPreview, setLastValidGenerationPayloadPreview] = useState("");
   const [renderSessionLocked, setRenderSessionLocked] = useState(false);
   const [renderOrientationWarning, setRenderOrientationWarning] = useState<RenderOrientationWarning | null>(null);
@@ -546,6 +555,12 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const trackedGeneration = renderFlow.generationId
     ? userGenerations.find((generation) => generation.id === renderFlow.generationId)
     : undefined;
+  const completedRenderPreviewItem = useMemo(() => {
+    if (!store || !trackedGeneration || trackedGeneration.status !== "COMPLETED" || !trackedGeneration.resultUrl) {
+      return null;
+    }
+    return buildStorefrontVideoItem(store, trackedGeneration);
+  }, [store, trackedGeneration]);
   const pollingGenerationIds = useMemo(
     () => userGenerations
       .filter((generation) => activeGenerationStatuses.has(generation.status))
@@ -1475,6 +1490,50 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     }
   }
 
+  async function updateRenderPreviewVideo(item: StorefrontVideoItem, action: StorefrontVideoAction) {
+    if (!customer) {
+      return false;
+    }
+    setRenderPreviewBusyAction(`${action}:${item.generationId}`);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/generations/${encodeURIComponent(item.generationId)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action,
+          actor: "user",
+          customerId: customer.id,
+          subAccountId: connectedSubAccount?.id,
+          wallet: connectedSubAccount?.wallet || walletAddress
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.message || "Video update failed.");
+      }
+      if (action === "delete") {
+        setRenderPreviewDeleteItem(null);
+        setRenderTaskStatus(null);
+      }
+      await load();
+      setMessage(renderPreviewActionMessage(action));
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Video update failed.");
+      return false;
+    } finally {
+      setRenderPreviewBusyAction("");
+    }
+  }
+
+  async function confirmRenderPreviewDelete() {
+    if (!renderPreviewDeleteItem) {
+      return;
+    }
+    await updateRenderPreviewVideo(renderPreviewDeleteItem, "delete");
+  }
+
   if (!store) {
     return <UserStoreCreatorSkeleton />;
   }
@@ -1680,7 +1739,22 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
             {renderGateError && imageCount > 0 && <p className="notice">{renderGateError}</p>}
           </div>
 
-          <RenderFlowNotice state={renderFlow} taskStatus={renderTaskStatus} />
+          <RenderFlowNotice
+            busyAction={renderPreviewBusyAction}
+            onVideoAction={updateRenderPreviewVideo}
+            onVideoDelete={setRenderPreviewDeleteItem}
+            previewItem={completedRenderPreviewItem}
+            state={renderFlow}
+            taskStatus={renderTaskStatus}
+          />
+
+          {renderPreviewDeleteItem && (
+            <StorefrontVideoDeleteDialog
+              busy={renderPreviewBusyAction === `delete:${renderPreviewDeleteItem.generationId}`}
+              onCancel={() => setRenderPreviewDeleteItem(null)}
+              onConfirm={confirmRenderPreviewDelete}
+            />
+          )}
 
           <div className="panel storefront-user-video-panel">
             <div className="panel-header">
@@ -2449,9 +2523,17 @@ function WizardSection({
 }
 
 function RenderFlowNotice({
+  busyAction,
+  onVideoAction,
+  onVideoDelete,
+  previewItem,
   state,
   taskStatus
 }: {
+  busyAction: string;
+  onVideoAction: (item: StorefrontVideoItem, action: StorefrontVideoAction) => Promise<unknown> | unknown;
+  onVideoDelete: (item: StorefrontVideoItem) => void;
+  previewItem: StorefrontVideoItem | null;
   state: RenderFlowState;
   taskStatus: RenderTaskStatusState | null;
 }) {
@@ -2515,7 +2597,27 @@ function RenderFlowNotice({
       {state.txHash && <div className="mono">tx {state.txHash}</div>}
       {state.generationId && <div className="mono">task {state.generationId}</div>}
       {taskStatus?.errorMessage && <p className="subtle render-status-error">{taskStatus.errorMessage}</p>}
-      {taskStatus?.resultUrl && state.status === "completed" && (
+      {previewItem && state.status === "completed" && (
+        <div className="render-status-preview">
+          <VideoMosaic
+            actions={(item) => (
+              <StorefrontVideoActions
+                busyAction={busyAction}
+                item={item as StorefrontVideoItem}
+                onAction={onVideoAction}
+                onDelete={onVideoDelete}
+              />
+            )}
+            className="render-status-video-mosaic"
+            filterByLanguage={false}
+            items={[previewItem]}
+            moreHref=""
+            showFeedLink={(item) => (item as StorefrontVideoItem).published}
+            showInftLink
+          />
+        </div>
+      )}
+      {taskStatus?.resultUrl && state.status === "completed" && !previewItem && (
         <a className="btn small" href={taskStatus.resultUrl} target="_blank" rel="noreferrer">
           <ExternalLink size={15} /> Open video
         </a>
@@ -3249,6 +3351,16 @@ function buildRenderTaskStatus(generation: Generation, statusResponse?: unknown)
     ...(errorMessage ? { errorMessage } : {}),
     ...(expressGenerationStatus ? { expressGenerationStatus } : {})
   };
+}
+
+function renderPreviewActionMessage(action: StorefrontVideoAction) {
+  if (action === "publish") {
+    return "Video published.";
+  }
+  if (action === "delete") {
+    return "Video deleted permanently.";
+  }
+  return "Video unpublished.";
 }
 
 function extractRenderStatusResultUrl(value: unknown): string {

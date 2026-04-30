@@ -9,13 +9,13 @@ import { resolveRenditionLanguageCode } from "@/lib/rendition-language";
 import { fetchWithSamsarAuth } from "@/lib/storefront-auth-client";
 import type { AppLanguageCode, Generation, INFTRecord, PublicFeedItem, SuperReferralsStore } from "@/lib/types";
 
-type StorefrontVideoItem = PublicFeedItem & {
+export type StorefrontVideoItem = PublicFeedItem & {
   creatorWallet?: string;
   published: boolean;
 };
 
 type StorefrontVideoMode = "published" | "unpublished";
-type StorefrontVideoAction = "publish" | "unpublish" | "delete";
+export type StorefrontVideoAction = "publish" | "unpublish" | "delete";
 
 type StorefrontVideoGridProps = {
   actor: "owner" | "user";
@@ -178,7 +178,7 @@ export default function StorefrontVideoGrid({
 
       <VideoMosaic
         actions={(item) => (
-          <VideoActions
+          <StorefrontVideoActions
             busyAction={busyAction}
             item={item as StorefrontVideoItem}
             onAction={updateVideo}
@@ -208,33 +208,17 @@ export default function StorefrontVideoGrid({
       )}
 
       {confirmDeleteItem && (
-        <div className="video-delete-dialog-backdrop" onClick={() => deleteBusy ? undefined : setConfirmDeleteItem(null)}>
-          <div
-            aria-labelledby="video-delete-title"
-            aria-modal="true"
-            className="video-delete-dialog"
-            onClick={(event) => event.stopPropagation()}
-            role="dialog"
-          >
-            <h3 id="video-delete-title">Are you sure?</h3>
-            <p>This action is not reversible.</p>
-            <div className="video-delete-dialog-actions">
-              <button className="btn small" disabled={deleteBusy} onClick={() => setConfirmDeleteItem(null)} type="button">
-                Cancel
-              </button>
-              <button className="btn small warn" disabled={deleteBusy} onClick={confirmDeleteVideo} type="button">
-                {deleteBusy && <RefreshCw size={14} className="spin" />}
-                Continue
-              </button>
-            </div>
-          </div>
-        </div>
+        <StorefrontVideoDeleteDialog
+          busy={deleteBusy}
+          onCancel={() => setConfirmDeleteItem(null)}
+          onConfirm={confirmDeleteVideo}
+        />
       )}
     </div>
   );
 }
 
-function VideoActions({
+export function StorefrontVideoActions({
   busyAction,
   item,
   onAction,
@@ -299,6 +283,40 @@ function VideoActions({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+export function StorefrontVideoDeleteDialog({
+  busy,
+  onCancel,
+  onConfirm
+}: {
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="video-delete-dialog-backdrop" onClick={() => busy ? undefined : onCancel()}>
+      <div
+        aria-labelledby="video-delete-title"
+        aria-modal="true"
+        className="video-delete-dialog"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <h3 id="video-delete-title">Are you sure?</h3>
+        <p>This action is not reversible.</p>
+        <div className="video-delete-dialog-actions">
+          <button className="btn small" disabled={busy} onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button className="btn small warn" disabled={busy} onClick={onConfirm} type="button">
+            {busy && <RefreshCw size={14} className="spin" />}
+            Continue
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -430,20 +448,14 @@ function compareStorefrontVideoItems(left: StorefrontVideoItem, right: Storefron
   if (left.published && right.published) {
     const leftAdminOrder = normalizeAdminOrder(left.adminOrder);
     const rightAdminOrder = normalizeAdminOrder(right.adminOrder);
-    if (leftAdminOrder !== undefined || rightAdminOrder !== undefined) {
-      if (leftAdminOrder === undefined) {
-        return 1;
-      }
-      if (rightAdminOrder === undefined) {
-        return -1;
-      }
+    if (leftAdminOrder !== undefined && rightAdminOrder !== undefined) {
       return leftAdminOrder - rightAdminOrder || videoTime(right) - videoTime(left);
     }
   }
   return videoTime(right) - videoTime(left);
 }
 
-function buildStorefrontVideoItem(store: SuperReferralsStore, generation: Generation): StorefrontVideoItem | null {
+export function buildStorefrontVideoItem(store: SuperReferralsStore, generation: Generation): StorefrontVideoItem | null {
   const inft = store.infts.find((item) => item.generationId === generation.id || item.id === generation.inftId);
   const videoUrl = generation.resultUrl || inft?.videoUrl || "";
   if (!videoUrl) {

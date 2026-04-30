@@ -284,13 +284,7 @@ function buildMetrics(store: SuperReferralsStore, generation: Generation): FeedM
 function compareFeedItems(left: PublicFeedItem, right: PublicFeedItem) {
   const leftAdminOrder = normalizeAdminOrder(left.adminOrder);
   const rightAdminOrder = normalizeAdminOrder(right.adminOrder);
-  if (leftAdminOrder !== undefined || rightAdminOrder !== undefined) {
-    if (leftAdminOrder === undefined) {
-      return 1;
-    }
-    if (rightAdminOrder === undefined) {
-      return -1;
-    }
+  if (leftAdminOrder !== undefined && rightAdminOrder !== undefined) {
     return leftAdminOrder - rightAdminOrder || feedCreatedTime(right) - feedCreatedTime(left);
   }
   return feedCreatedTime(right) - feedCreatedTime(left);

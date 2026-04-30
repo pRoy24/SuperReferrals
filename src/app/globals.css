@@ -3170,6 +3170,22 @@ button.item {
   color: #b91c1c;
 }
 
+.render-status-preview {
+  margin-top: 12px;
+}
+
+.render-status-video-mosaic {
+  width: 100%;
+}
+
+.render-status-video-mosaic .video-mosaic-card {
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
+}
+
+.render-status-video-mosaic .video-mosaic-footer {
+  display: none;
+}
+
 .render-warning-backdrop {
   position: fixed;
   inset: 0;

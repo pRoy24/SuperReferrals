@@ -194,30 +194,21 @@ function isPublishedVideoGeneration(store: SuperReferralsStore, generation: Gene
 }
 
 function compareAdminGenerations(left: Generation, right: Generation) {
-  return compareAdminOrderValues(
-    normalizeAdminOrder(left.feed?.adminOrder),
-    normalizeAdminOrder(right.feed?.adminOrder)
-  ) || generationTime(right) - generationTime(left);
+  const leftAdminOrder = normalizeAdminOrder(left.feed?.adminOrder);
+  const rightAdminOrder = normalizeAdminOrder(right.feed?.adminOrder);
+  if (leftAdminOrder !== undefined && rightAdminOrder !== undefined) {
+    return leftAdminOrder - rightAdminOrder || generationTime(right) - generationTime(left);
+  }
+  return generationTime(right) - generationTime(left);
 }
 
 function compareAdminFeedItems(left: AdminPublishedFeedItem, right: AdminPublishedFeedItem) {
-  return compareAdminOrderValues(
-    normalizeAdminOrder(left.adminOrder),
-    normalizeAdminOrder(right.adminOrder)
-  ) || feedItemTime(right) - feedItemTime(left);
-}
-
-function compareAdminOrderValues(left?: number, right?: number) {
-  if (left === undefined && right === undefined) {
-    return 0;
+  const leftAdminOrder = normalizeAdminOrder(left.adminOrder);
+  const rightAdminOrder = normalizeAdminOrder(right.adminOrder);
+  if (leftAdminOrder !== undefined && rightAdminOrder !== undefined) {
+    return leftAdminOrder - rightAdminOrder || feedItemTime(right) - feedItemTime(left);
   }
-  if (left === undefined) {
-    return 1;
-  }
-  if (right === undefined) {
-    return -1;
-  }
-  return left - right;
+  return feedItemTime(right) - feedItemTime(left);
 }
 
 function generationTime(generation: Generation) {
