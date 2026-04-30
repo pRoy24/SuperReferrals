@@ -30,6 +30,7 @@ type VideoMosaicProps = {
   className?: string;
   emptyText?: string;
   filterByLanguage?: boolean;
+  feedHrefForItem?: (item: PublicFeedItem) => string;
   getCreatorWallet?: (item: PublicFeedItem) => string | undefined;
   labels?: Partial<VideoMosaicLabels>;
   limit?: number;
@@ -81,6 +82,7 @@ export default function VideoMosaic({
   className = "",
   emptyText = "No published videos yet.",
   filterByLanguage = true,
+  feedHrefForItem = defaultFeedHrefForItem,
   getCreatorWallet,
   labels,
   limit,
@@ -584,7 +586,7 @@ function formatVideoTime(value: number) {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-function feedHrefForItem(item: PublicFeedItem) {
+function defaultFeedHrefForItem(item: PublicFeedItem) {
   const mode = normalizeMosaicAspectRatio(item.aspectRatio) === "9:16" ? "mobile" : "desktop";
   return `/feed/${encodeURIComponent(item.generationId || item.id)}/${mode}`;
 }

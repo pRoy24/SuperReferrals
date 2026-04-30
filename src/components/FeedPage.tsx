@@ -6,6 +6,7 @@ import {
   ChevronRight,
   ExternalLink,
   Heart,
+  LayoutGrid,
   Maximize2,
   MessageCircle,
   Monitor,
@@ -15,6 +16,7 @@ import {
   Search,
   Send,
   Smartphone,
+  Store,
   Volume2,
   VolumeX,
   X
@@ -32,6 +34,11 @@ type FeedViewMode = "mobile" | "desktop";
 type FeedPageProps = {
   initialGenerationId?: string;
   initialViewMode?: FeedViewMode;
+  customerId?: string;
+  storefrontHref?: string;
+  storefrontLogoUrl?: string;
+  storefrontName?: string;
+  mosaicHref?: string;
 };
 type VideoProgress = {
   currentTime: number;
@@ -75,7 +82,15 @@ const DESKTOP_SWIPE_NAV_LOCK_MS = 620;
 const PRELOAD_READY_STATE = 2; // HAVE_CURRENT_DATA
 const PRELOAD_NETWORK_LOADING_STATE = 2; // NETWORK_LOADING
 
-export default function FeedPage({ initialGenerationId = "", initialViewMode }: FeedPageProps = {}) {
+export default function FeedPage({
+  initialGenerationId = "",
+  initialViewMode,
+  customerId = "",
+  storefrontHref = "",
+  storefrontLogoUrl = "",
+  storefrontName = "",
+  mosaicHref = ""
+}: FeedPageProps = {}) {
   const [items, setItems] = useState<PublicFeedItem[]>([]);
   const [query, setQuery] = useState("");
   const [appLanguage, setAppLanguage] = useState<AppLanguageCode>(DEFAULT_APP_LANGUAGE);
@@ -153,7 +168,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
       loadFeed().catch((error) => setMessage(error.message));
     }, 180);
     return () => window.clearTimeout(timeout);
-  }, [viewerId, query, appLanguage, initialGenerationId]);
+  }, [viewerId, query, appLanguage, customerId, initialGenerationId]);
 
   useEffect(() => {
     if (visibleItems.length > 0 && activeIndex >= visibleItems.length) {
@@ -284,6 +299,9 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
       }
       if (initialGenerationId.trim()) {
         params.set("focusId", initialGenerationId.trim());
+      }
+      if (customerId.trim()) {
+        params.set("customerId", customerId.trim());
       }
       const response = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
       const data = await parseResponse<FeedResponse>(response);
@@ -698,11 +716,21 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
         <div className="feed-topbar-left">
           <BreadcrumbNav />
           <div className="feed-brand-title">
-            <img alt="" aria-hidden="true" height={28} src="/favicon.svg" width={28} />
-            <h1>Video feed</h1>
+            <img alt="" aria-hidden="true" height={28} src={storefrontLogoUrl || "/favicon.svg"} width={28} />
+            <h1>{storefrontName ? `${storefrontName} feed` : "Video feed"}</h1>
           </div>
         </div>
         <div className="feed-toolbar">
+          {storefrontHref && (
+            <a className="icon-toggle" href={storefrontHref} title="Open storefront">
+              <Store size={18} />
+            </a>
+          )}
+          {mosaicHref && (
+            <a className="icon-toggle" href={mosaicHref} title="Open mosaic">
+              <LayoutGrid size={18} />
+            </a>
+          )}
           <LanguageSelector className="is-feed" />
           <button className={`icon-toggle ${viewMode === "mobile" ? "active" : ""}`} onClick={() => setViewMode("mobile")} title="Mobile feed">
             <Smartphone size={18} />

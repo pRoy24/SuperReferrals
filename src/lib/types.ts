@@ -14,6 +14,14 @@ export type PaymentRail = "direct" | "uniswap" | "keeperhub";
 export type PaymentCurrencySymbol = "USD" | "USDC" | "USDT" | "ETH" | "WETH";
 export type VideoAspectRatio = "16:9" | "9:16";
 export type AppLanguageCode = "en" | "zh";
+export type StorefrontThemeId =
+  | "theme-1"
+  | "theme-2"
+  | "theme-3"
+  | "theme-4"
+  | "theme-5"
+  | "theme-6";
+export type StorefrontEnsNetwork = "sepolia" | "mainnet" | "base";
 export type INFTPaidAction =
   | "translate"
   | "join"
@@ -56,7 +64,21 @@ export interface CustomerStorefrontDetails {
   supportEmail?: string;
   category?: string;
   tags?: string[];
+  logoUrl?: string;
+  themeId?: StorefrontThemeId;
+  ens?: CustomerStorefrontEnsProxy;
   conditions?: CustomerStorefrontConditions;
+}
+
+export interface CustomerStorefrontEnsProxy {
+  enabled: boolean;
+  name?: string;
+  network: StorefrontEnsNetwork;
+  storefrontPath?: string;
+  feedPath?: string;
+  mosaicPath?: string;
+  videoPath?: string;
+  contentHash?: string;
 }
 
 export interface CustomerStorefrontConditions {

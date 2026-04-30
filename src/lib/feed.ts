@@ -66,6 +66,7 @@ export async function listPublicFeedItems(filters: {
   language?: string;
   viewerId?: string;
   focusId?: string;
+  customerId?: string;
 } = {}) {
   const store = await readStore();
   const viewerId = normalizeViewerId(filters.viewerId);
@@ -77,6 +78,9 @@ export async function listPublicFeedItems(filters: {
     .map((generation) => buildPublicFeedItem(store, generation, viewerId))
     .filter((item): item is PublicFeedItem => Boolean(item));
 
+  if (filters.customerId) {
+    items = items.filter((item) => item.customerId === filters.customerId);
+  }
   if (search) {
     items = items.filter((item) => searchableText(item).includes(search));
   }

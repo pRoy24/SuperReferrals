@@ -5,8 +5,11 @@ import {
   CircleDollarSign,
   Database,
   ExternalLink,
+  Globe2,
+  Image as ImageIcon,
   KeyRound,
   Network,
+  Palette,
   Plus,
   Radio,
   RefreshCw,
@@ -46,8 +49,15 @@ import BreadcrumbNav from "@/components/BreadcrumbNav";
 import LanguageSelector from "@/components/LanguageSelector";
 import StorefrontVideoGrid from "@/components/StorefrontVideoGrid";
 import { syncStoredAppLanguagePreference } from "@/lib/app-language-client";
+import {
+  normalizeStorefrontEnsName,
+  normalizeStorefrontProxyPath,
+  storefrontInternalPath,
+  storefrontPublicHref
+} from "@/lib/storefront-routing";
+import { DEFAULT_STOREFRONT_THEME_ID, STOREFRONT_THEMES } from "@/lib/storefront-themes";
 import { isUsableEvmAddress } from "@/lib/wallet-address";
-import type { Customer, INFTPaidAction, ModelPricingConfiguration, PaymentCurrencySymbol, SuperReferralsStore, VideoAspectRatio, VideoModel } from "@/lib/types";
+import type { Customer, INFTPaidAction, ModelPricingConfiguration, PaymentCurrencySymbol, StorefrontEnsNetwork, StorefrontThemeId, SuperReferralsStore, VideoAspectRatio, VideoModel } from "@/lib/types";
 
 const processorCreditAmounts = [10, 25, 50, 100];
 const conditionModelOptions: VideoModel[] = ["RUNWAYML", "VEO3.1I2V", "SEEDANCEI2V", "KLING3.0"];
@@ -68,6 +78,8 @@ export default function Dashboard() {
   const [toast, setToast] = useState<ToastState>(null);
   const [activeCustomerId, setActiveCustomerId] = useState("");
   const [creatingNewStorefront, setCreatingNewStorefront] = useState(false);
+  const [ensSettingsOpen, setEnsSettingsOpen] = useState(false);
+  const [appOrigin, setAppOrigin] = useState("");
   const [processorAmountUsd, setProcessorAmountUsd] = useState(25);
   const [processorAccountForm, setProcessorAccountForm] = useState({
     email: "",
@@ -101,6 +113,16 @@ export default function Dashboard() {
     storefrontSupportEmail: "",
     storefrontCategory: "",
     storefrontTags: "",
+    storefrontLogoUrl: "",
+    storefrontThemeId: DEFAULT_STOREFRONT_THEME_ID as StorefrontThemeId,
+    ensProxyEnabled: false,
+    ensProxyName: "",
+    ensProxyNetwork: "sepolia" as StorefrontEnsNetwork,
+    ensStorefrontPath: "/",
+    ensFeedPath: "/feed",
+    ensMosaicPath: "/mosaic",
+    ensVideoPath: "/feed",
+    ensContentHash: "",
     conditionalsEnabled: false,
     allowedModels: conditionModelOptions,
     allowedAspectRatios: conditionAspectOptions,
@@ -155,6 +177,10 @@ export default function Dashboard() {
     initializeStorefrontSession().catch((error) => setMessage(error.message));
   }, []);
 
+  useEffect(() => {
+    setAppOrigin(window.location.origin.replace(/\/$/, ""));
+  }, []);
+
   useEffect(() => subscribeToBrowserWalletProviders(setWalletProviders), []);
 
   useEffect(() => {
@@ -172,6 +198,12 @@ export default function Dashboard() {
       : [],
     [activeCustomer, store]
   );
+  const transactionChain = getTransactionChainConfig();
+  const defaultEnsProxyNetwork: StorefrontEnsNetwork = transactionChain.key === "base"
+    ? "base"
+    : transactionChain.key === "mainnet"
+      ? "mainnet"
+      : "sepolia";
 
   useEffect(() => {
     if (!store) return;
@@ -203,6 +235,16 @@ export default function Dashboard() {
       storefrontSupportEmail: customer.storefront?.supportEmail || "",
       storefrontCategory: customer.storefront?.category || "",
       storefrontTags: customer.storefront?.tags?.join(", ") || "",
+      storefrontLogoUrl: customer.storefront?.logoUrl || "",
+      storefrontThemeId: customer.storefront?.themeId || DEFAULT_STOREFRONT_THEME_ID,
+      ensProxyEnabled: customer.storefront?.ens?.enabled || false,
+      ensProxyName: customer.storefront?.ens?.name || "",
+      ensProxyNetwork: customer.storefront?.ens?.network || defaultEnsProxyNetwork,
+      ensStorefrontPath: customer.storefront?.ens?.storefrontPath || "/",
+      ensFeedPath: customer.storefront?.ens?.feedPath || "/feed",
+      ensMosaicPath: customer.storefront?.ens?.mosaicPath || "/mosaic",
+      ensVideoPath: customer.storefront?.ens?.videoPath || "/feed",
+      ensContentHash: customer.storefront?.ens?.contentHash || "",
       conditionalsEnabled: customer.storefront?.conditions?.enabled || false,
       allowedModels: customer.storefront?.conditions?.allowedModels?.length
         ? customer.storefront.conditions.allowedModels
@@ -223,7 +265,8 @@ export default function Dashboard() {
       ...current,
       email: customer.samsarAccount?.email || current.email
     }));
-  }, [activeCustomer, activeCustomerId, creatingNewStorefront, store]);
+    setEnsSettingsOpen(Boolean(customer.storefront?.ens?.enabled || customer.storefront?.ens?.name));
+  }, [activeCustomer, activeCustomerId, creatingNewStorefront, defaultEnsProxyNetwork, store]);
 
   const customer = activeCustomer;
   const activeStorefrontGenerations = customer
@@ -236,7 +279,6 @@ export default function Dashboard() {
   const completedJobs = activeStorefrontGenerations.filter((item) => item.status === "COMPLETED").length;
   const agentJobs = store?.agentJobs || [];
   const latestAgentJob = agentJobs[0];
-  const transactionChain = getTransactionChainConfig();
   const settlementToken = settlementTokenForCurrency("USDC", transactionChain.id) || getPaymentTokens(transactionChain.id)[0];
   const hasProcessorAccountSession = Boolean(customer?.samsarAccount?.hasSession || customer?.samsarAccount?.authToken || customer?.samsarAccount?.apiKey);
   const processorCreditsRemaining = hasProcessorAccountSession ? Number(customer?.subscription.creditsRemaining || 0) : 0;
@@ -252,6 +294,17 @@ export default function Dashboard() {
     const seedAccount = activeStorefrontSubAccounts[0];
     return seedAccount ? `/r/${seedAccount.referrerCode}` : customer ? `/storefronts/${customer.id}` : "";
   }, [activeStorefrontSubAccounts, customer]);
+  const publicStorefrontLinks = customer ? [
+    { label: "Storefront", href: storefrontPublicHref(customer, "storefront") },
+    { label: "Feed", href: storefrontPublicHref(customer, "feed") },
+    { label: "Mosaic", href: storefrontPublicHref(customer, "mosaic") }
+  ] : [];
+  const ensProxyRecordRows = customer ? [
+    { key: "url", value: `${appOrigin}${storefrontInternalPath(customer.id, "storefront")}` },
+    { key: "com.superreferrals.storefront", value: `${appOrigin}${storefrontInternalPath(customer.id, "storefront")}` },
+    { key: "com.superreferrals.feed", value: `${appOrigin}${storefrontInternalPath(customer.id, "feed")}` },
+    { key: "com.superreferrals.mosaic", value: `${appOrigin}${storefrontInternalPath(customer.id, "mosaic")}` }
+  ] : [];
 
   function updatePricingRow(id: string, patch: Partial<ModelPricingConfiguration>) {
     setCustomerForm((current) => ({
@@ -312,6 +365,7 @@ export default function Dashboard() {
       ? base?.samsarAccount?.walletAddress || ""
       : customerForm.ownerWallet;
     setCreatingNewStorefront(true);
+    setEnsSettingsOpen(false);
     setCustomerForm({
       id: "",
       name: `${processorAccountEmail || base?.name || "Customer"} storefront`,
@@ -327,6 +381,16 @@ export default function Dashboard() {
       storefrontSupportEmail: base?.storefront?.supportEmail || "",
       storefrontCategory: "",
       storefrontTags: "",
+      storefrontLogoUrl: "",
+      storefrontThemeId: DEFAULT_STOREFRONT_THEME_ID,
+      ensProxyEnabled: false,
+      ensProxyName: "",
+      ensProxyNetwork: defaultEnsProxyNetwork,
+      ensStorefrontPath: "/",
+      ensFeedPath: "/feed",
+      ensMosaicPath: "/mosaic",
+      ensVideoPath: "/feed",
+      ensContentHash: "",
       conditionalsEnabled: false,
       allowedModels: conditionModelOptions,
       allowedAspectRatios: conditionAspectOptions,
@@ -378,6 +442,18 @@ export default function Dashboard() {
             supportEmail: customerForm.storefrontSupportEmail,
             category: customerForm.storefrontCategory,
             tags: customerForm.storefrontTags,
+            logoUrl: customerForm.storefrontLogoUrl,
+            themeId: customerForm.storefrontThemeId,
+            ens: {
+              enabled: customerForm.ensProxyEnabled,
+              name: customerForm.ensProxyName,
+              network: customerForm.ensProxyNetwork,
+              storefrontPath: customerForm.ensStorefrontPath,
+              feedPath: customerForm.ensFeedPath,
+              mosaicPath: customerForm.ensMosaicPath,
+              videoPath: customerForm.ensVideoPath,
+              contentHash: customerForm.ensContentHash
+            },
             conditions: {
               enabled: customerForm.conditionalsEnabled,
               allowedModels: customerForm.allowedModels,
@@ -427,6 +503,50 @@ export default function Dashboard() {
       showToast(successMessage);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Save failed";
+      setMessage(errorMessage);
+      showToast(errorMessage, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function verifyEnsProxyRecords() {
+    const ensName = normalizeStorefrontEnsName(customerForm.ensProxyName);
+    if (!ensName) {
+      const warning = "Enter an ENS name before verification.";
+      setMessage(warning);
+      showToast(warning, "warning");
+      return;
+    }
+    setBusy("ens-verify");
+    setMessage("");
+    try {
+      const response = await fetch("/api/ens/resolve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: ensName })
+      });
+      const data = await assertOk(response);
+      const texts = data.result?.texts || {};
+      const expectedStorefrontPath = customer?.id
+        ? storefrontInternalPath(customer.id, "storefront")
+        : "/dashboard";
+      const expectedStorefrontUrl = appOrigin ? `${appOrigin}${expectedStorefrontPath}` : expectedStorefrontPath;
+      const matchingRecord = [
+        texts.url,
+        texts["com.superreferrals.storefront"],
+        texts["com.superreferrals.proxy"]
+      ].some((value) => typeof value === "string" && (
+        value === expectedStorefrontUrl ||
+        value.endsWith(expectedStorefrontPath)
+      ));
+      const successMessage = matchingRecord
+        ? `${ensName} resolves with a storefront URL record.`
+        : `${ensName} resolves, but no storefront URL record matched ${expectedStorefrontPath}.`;
+      setMessage(successMessage);
+      showToast(successMessage, matchingRecord ? "success" : "warning");
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "ENS verification failed";
       setMessage(errorMessage);
       showToast(errorMessage, "error");
     } finally {
@@ -837,9 +957,37 @@ export default function Dashboard() {
                 <TextField label="Store name" value={customerForm.name} onChange={(name) => setCustomerForm({ ...customerForm, name })} />
                 <TextField label="Storefront category" value={customerForm.storefrontCategory} onChange={(storefrontCategory) => setCustomerForm({ ...customerForm, storefrontCategory })} />
                 <TextField label="Storefront website URL" value={customerForm.storefrontWebsiteUrl} onChange={(storefrontWebsiteUrl) => setCustomerForm({ ...customerForm, storefrontWebsiteUrl })} />
+                <TextField label="Storefront logo URL" value={customerForm.storefrontLogoUrl} onChange={(storefrontLogoUrl) => setCustomerForm({ ...customerForm, storefrontLogoUrl })} />
                 <div className="field full">
                   <label>Storefront description</label>
                   <textarea value={customerForm.storefrontDescription} onChange={(event) => setCustomerForm({ ...customerForm, storefrontDescription: event.target.value })} />
+                </div>
+              </div>
+              <div className="theme-picker-section">
+                <div className="item-title">
+                  <div>
+                    <strong>Public storefront theme</strong>
+                    <p className="subtle">Theme 1 keeps the current storefront look; the other themes are complementary presets.</p>
+                  </div>
+                  <Palette size={17} />
+                </div>
+                <div className="theme-picker-grid" role="radiogroup" aria-label="Public storefront theme">
+                  {STOREFRONT_THEMES.map((theme) => (
+                    <button
+                      aria-checked={customerForm.storefrontThemeId === theme.id}
+                      className={`theme-choice ${customerForm.storefrontThemeId === theme.id ? "active" : ""}`}
+                      key={theme.id}
+                      onClick={() => setCustomerForm({ ...customerForm, storefrontThemeId: theme.id })}
+                      role="radio"
+                      type="button"
+                    >
+                      <span className="theme-swatch-row" aria-hidden="true">
+                        {theme.swatches.map((color) => <span key={color} style={{ background: color }} />)}
+                      </span>
+                      <strong>{theme.label}</strong>
+                      <small>{theme.accentLabel}</small>
+                    </button>
+                  ))}
                 </div>
               </div>
               <div className="setup-wallet-strip">
@@ -880,11 +1028,69 @@ export default function Dashboard() {
                   <TextField label="Failure refund bps" type="number" value={customerForm.refundOnFailureBps} onChange={(refundOnFailureBps) => setCustomerForm({ ...customerForm, refundOnFailureBps: Number(refundOnFailureBps) })} />
                 </div>
               </details>
+              <details
+                className="advanced-section storefront-ens-section"
+                onToggle={(event) => setEnsSettingsOpen(event.currentTarget.open)}
+                open={ensSettingsOpen}
+              >
+                <summary>ENS storefront proxy</summary>
+                <div className="ens-proxy-header">
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={customerForm.ensProxyEnabled}
+                      onChange={(event) => setCustomerForm({ ...customerForm, ensProxyEnabled: event.target.checked })}
+                    />
+                    Enabled
+                  </label>
+                  <button className="btn small" onClick={verifyEnsProxyRecords} disabled={busy === "ens-verify" || !customerForm.ensProxyName} type="button">
+                    <Globe2 size={15} /> Verify ENS
+                  </button>
+                </div>
+                <div className="form-grid">
+                  <TextField label="ENS host" value={customerForm.ensProxyName} onChange={(ensProxyName) => setCustomerForm({ ...customerForm, ensProxyName })} />
+                  <div className="field">
+                    <label>ENS network</label>
+                    <select
+                      value={customerForm.ensProxyNetwork}
+                      onChange={(event) => setCustomerForm({ ...customerForm, ensProxyNetwork: event.target.value as StorefrontEnsNetwork })}
+                    >
+                      <option value="sepolia">Sepolia testnet</option>
+                      <option value="mainnet">Ethereum mainnet</option>
+                      <option value="base">Base mainnet</option>
+                    </select>
+                  </div>
+                  <TextField label="Storefront path" value={customerForm.ensStorefrontPath} onChange={(ensStorefrontPath) => setCustomerForm({ ...customerForm, ensStorefrontPath: normalizeStorefrontProxyPath(ensStorefrontPath, "/") })} />
+                  <TextField label="Feed path" value={customerForm.ensFeedPath} onChange={(ensFeedPath) => setCustomerForm({ ...customerForm, ensFeedPath: normalizeStorefrontProxyPath(ensFeedPath, "/feed") })} />
+                  <TextField label="Mosaic path" value={customerForm.ensMosaicPath} onChange={(ensMosaicPath) => setCustomerForm({ ...customerForm, ensMosaicPath: normalizeStorefrontProxyPath(ensMosaicPath, "/mosaic") })} />
+                  <TextField label="Video path prefix" value={customerForm.ensVideoPath} onChange={(ensVideoPath) => setCustomerForm({ ...customerForm, ensVideoPath: normalizeStorefrontProxyPath(ensVideoPath, "/feed") })} />
+                  <TextField label="Content hash" value={customerForm.ensContentHash} onChange={(ensContentHash) => setCustomerForm({ ...customerForm, ensContentHash })} full />
+                </div>
+                {customer && (
+                  <div className="ens-record-list">
+                    <div className="item-title">
+                      <strong>ENS text records</strong>
+                      <ImageIcon size={15} />
+                    </div>
+                    {ensProxyRecordRows.map((row) => (
+                      <div className="ens-record-row" key={row.key}>
+                        <code>{row.key}</code>
+                        <span>{row.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </details>
               <div className="button-row">
                 <button className="btn primary" onClick={saveCustomer} disabled={busy === "customer" || !hasCreditedProcessorAccount}>
                   <Save size={16} /> Save setup
                 </button>
                 <a className="btn" href="/storefronts"><Store size={16} /> Directory</a>
+                {publicStorefrontLinks.map((link) => (
+                  <a className="btn" href={link.href} key={link.label} target={link.href.startsWith("http") ? "_blank" : undefined} rel={link.href.startsWith("http") ? "noreferrer" : undefined}>
+                    <ExternalLink size={16} /> {link.label}
+                  </a>
+                ))}
               </div>
             </div>
           </section>

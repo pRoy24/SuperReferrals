@@ -1,5 +1,10 @@
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import FeedPage from "@/components/FeedPage";
+import { readStore } from "@/lib/store";
+import { findStorefrontByEnsHost, requestHostFromHeaders, storefrontFeedPageProps } from "@/lib/storefront-routing";
+
+export const dynamic = "force-dynamic";
 
 export default async function FocusedDeviceFeedPage({
   params
@@ -10,5 +15,8 @@ export default async function FocusedDeviceFeedPage({
   if (viewMode !== "mobile" && viewMode !== "desktop") {
     notFound();
   }
-  return <FeedPage initialGenerationId={decodeURIComponent(generationId)} initialViewMode={viewMode} />;
+  const store = await readStore();
+  const requestHeaders = await headers();
+  const customer = findStorefrontByEnsHost(store.customers, requestHostFromHeaders(requestHeaders));
+  return <FeedPage initialGenerationId={decodeURIComponent(generationId)} initialViewMode={viewMode} {...storefrontFeedPageProps(customer)} />;
 }

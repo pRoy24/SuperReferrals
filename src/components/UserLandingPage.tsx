@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, ArrowDown, ArrowUp, Bot, Check, ChevronDown, CircleDollarSign, CircleHelp, Clipboard, Code2, ExternalLink, GripVertical, ListChecks, Loader2, Play, Plus, RefreshCw, Store, Trash2, Undo2, Upload, Wallet } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ChangeEvent, type DragEvent, type ReactNode } from "react";
 import BreadcrumbNav from "@/components/BreadcrumbNav";
 import { UserStoreCreatorSkeleton } from "@/components/FormLoadingSkeletons";
 import LanguageSelector from "@/components/LanguageSelector";
@@ -46,6 +46,8 @@ import {
 } from "@/lib/pricing";
 import { appLanguageToRenderFormLanguage } from "@/lib/localization";
 import { getStorefrontAccessError } from "@/lib/storefront-access";
+import { storefrontPublicHref } from "@/lib/storefront-routing";
+import { storefrontThemeStyle } from "@/lib/storefront-themes";
 import { isUsableEvmAddress } from "@/lib/wallet-address";
 import type {
   Customer,
@@ -1548,16 +1550,25 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   if (!customer) {
     return <main className="public-main storefront-user-main"><div className="notice">Customer store was not found.</div></main>;
   }
+  const storefrontFeedHref = storefrontPublicHref(customer, "feed");
+  const storefrontMosaicHref = storefrontPublicHref(customer, "mosaic");
 
   return (
-    <main className="public-main storefront-user-main">
-      <section className="hero-band public-hero">
+    <main className="public-main storefront-user-main storefront-theme" style={storefrontThemeStyle(customer.storefront?.themeId)}>
+      <section className="hero-band public-hero storefront-branded-hero">
         <div className="public-hero-copy">
           <div className="topbar-title-row">
             <BreadcrumbNav />
             <div className="eyebrow">{customer.name}</div>
           </div>
-          <h1>Generate a product video</h1>
+          <div className="storefront-hero-title-row">
+            {customer.storefront?.logoUrl && (
+              <span className="storefront-logo-frame">
+                <img alt="" src={customer.storefront.logoUrl} />
+              </span>
+            )}
+            <h1>Generate a product video</h1>
+          </div>
           <p className="subtle">
             {customer.storefront?.description || "Connect your wallet, choose a render configuration, pay the store price, and track your previous render tasks."}
           </p>
@@ -1565,12 +1576,16 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
             <span><Wallet size={15} /> payout {isUsableEvmAddress(customer.ownerWallet) ? shortWallet(customer.ownerWallet) : "wallet required"}</span>
             {customer.storefront?.category && <span><Store size={15} /> {customer.storefront.category}</span>}
             {customer.ensName && <span>{customer.ensName}</span>}
+            {customer.storefront?.ens?.enabled && customer.storefront.ens.name && <span>{customer.storefront.ens.name}</span>}
           </div>
         </div>
         <div className="landing-hero-actions">
           <LanguageSelector />
           <a className="btn" href="/storefronts">
             <Store size={16} /> Directory
+          </a>
+          <a className="btn" href={storefrontMosaicHref}>
+            <ExternalLink size={16} /> Mosaic
           </a>
           <button className="btn" onClick={() => load()} title="Refresh data">
             <RefreshCw size={16} /> Refresh
@@ -1734,7 +1749,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
                   <ExternalLink size={16} /> Open Uniswap
                 </a>
               )}
-              <a className="btn" href="/feed">
+              <a className="btn" href={storefrontFeedHref}>
                 <ExternalLink size={16} /> Open feed
               </a>
               {autoPolling && <span className="badge ok">polling {pollingGenerationIds.length} render{pollingGenerationIds.length === 1 ? "" : "s"}</span>}
@@ -2968,13 +2983,70 @@ function formatAtomicAmountString(amountAtomic?: string, decimals?: number) {
 type SelectFieldOption = string | { value: string; label: string };
 
 function LabelWithTooltip({ label, tooltip }: { label: ReactNode; tooltip?: string }) {
+  const tooltipId = useId();
+  const [open, setOpen] = useState(false);
+  const [tooltipOffsetX, setTooltipOffsetX] = useState(0);
+
   if (!tooltip) {
     return <>{label}</>;
   }
+  const accessibleLabel = typeof label === "string" ? `${label} help` : "Field help";
+  const tooltipStyle = { "--tooltip-shift-x": `${tooltipOffsetX}px` } as CSSProperties;
+
+  function updateTooltipPosition(element: HTMLElement) {
+    const viewportWidth = window.innerWidth;
+    const tooltipWidth = Math.min(280, viewportWidth * 0.7);
+    const padding = 12;
+    const rect = element.getBoundingClientRect();
+    const centeredLeft = rect.left + rect.width / 2 - tooltipWidth / 2;
+    const centeredRight = centeredLeft + tooltipWidth;
+    const maxRight = viewportWidth - padding;
+    const nextOffset = centeredLeft < padding
+      ? padding - centeredLeft
+      : centeredRight > maxRight
+      ? maxRight - centeredRight
+      : 0;
+    setTooltipOffsetX(Math.round(nextOffset));
+  }
+
   return (
-    <span className="label-with-tooltip" title={tooltip}>
+    <span className={`label-with-tooltip ${open ? "open" : ""}`}>
       <span>{label}</span>
-      <CircleHelp size={13} aria-hidden="true" />
+      <span
+        aria-describedby={open ? tooltipId : undefined}
+        aria-expanded={open}
+        aria-label={accessibleLabel}
+        className="label-tooltip-trigger"
+        onBlur={() => setOpen(false)}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          updateTooltipPosition(event.currentTarget);
+          setOpen((current) => !current);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            updateTooltipPosition(event.currentTarget);
+            setOpen((current) => !current);
+          }
+          if (event.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+        onMouseEnter={(event) => {
+          updateTooltipPosition(event.currentTarget);
+          setOpen(true);
+        }}
+        onMouseLeave={() => setOpen(false)}
+        role="button"
+        tabIndex={0}
+      >
+        <CircleHelp size={13} aria-hidden="true" />
+        <span className="label-tooltip-popover" id={tooltipId} role="tooltip" style={tooltipStyle}>
+          {tooltip}
+        </span>
+      </span>
     </span>
   );
 }

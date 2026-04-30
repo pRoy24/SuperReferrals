@@ -156,13 +156,15 @@ Use `/dashboard` to:
 - Buy or refresh Samsar-backed SuperReferrals credits.
 - Connect the owner payout wallet.
 - Create multiple storefronts under one account.
-- Set public name, category, tags, support email, website, ENS name, and referral base URL.
+- Set public name, category, tags, support email, website, logo, storefront theme, ENS name, ENS proxy host, and referral base URL.
 - Configure render pricing through model-specific USDC-per-second settings.
 - Set prices for iNFT operations such as translation, joins, subtitle changes, outro changes, and footer updates.
 - Restrict render access by model, aspect ratio, max images, daily wallet limit, and wallet allowlist.
 - Publish a storefront into `/storefronts`.
 - Review generated videos, publish/unpublish them, and inspect recent render tasks.
 - Run Agent Town for agent-planned campaign operations and 0G receipts.
+
+Public storefront video surfaces are available at `/storefronts/:customerId/feed` and `/storefronts/:customerId/mosaic`. When an owner enables an ENS proxy host, `/feed`, `/feed/:generationId/:viewMode`, and `/mosaic` requests on that host are filtered to that storefront, while `/` renders the storefront page.
 
 ## For Creators and Users
 

@@ -17,10 +17,16 @@ import {
   resolveRenditionLanguageCode
 } from "./rendition-language";
 import {
+  normalizeStorefrontEnsName,
+  normalizeStorefrontEnsNetwork,
+  normalizeStorefrontProxyPath
+} from "./storefront-routing";
+import {
   extractSamsarVideoSessionIdFromUrl,
   normalizeSamsarVideoSessionId
 } from "./samsar";
 import { normalizeWalletList } from "./storefront-access";
+import { normalizeStorefrontThemeId } from "./storefront-themes";
 import { isUsableEvmAddress } from "./wallet-address";
 import type {
   AgentJob,
@@ -28,6 +34,7 @@ import type {
   AgentTownEvent,
   Customer,
   CustomerPreferences,
+  CustomerStorefrontEnsProxy,
   CustomerStorefrontConditions,
   DeletedVideoReference,
   Generation,
@@ -1654,12 +1661,25 @@ function normalizeStorefrontDetails(
     supportEmail: cleanOptionalString(input?.supportEmail ?? existing?.supportEmail),
     category: cleanOptionalString(input?.category ?? existing?.category),
     tags: normalizeStorefrontTags(input?.tags ?? existing?.tags),
+    logoUrl: cleanOptionalUrl(input?.logoUrl ?? existing?.logoUrl),
+    themeId: normalizeStorefrontThemeId(input?.themeId ?? existing?.themeId),
+    ens: normalizeStorefrontEnsProxy(input?.ens, existing?.ens),
     conditions: normalizeStorefrontConditions(input?.conditions, existing?.conditions)
   };
 }
 
 function cleanOptionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function cleanOptionalUrl(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return /^https?:\/\//i.test(trimmed) || trimmed.startsWith("/")
+    ? trimmed
+    : undefined;
 }
 
 function normalizeStorefrontTags(value: unknown) {
@@ -1677,6 +1697,29 @@ function normalizeStorefrontTags(value: unknown) {
       .slice(0, 8);
   }
   return undefined;
+}
+
+function normalizeStorefrontEnsProxy(
+  input?: CustomerStorefrontEnsProxy,
+  existing?: CustomerStorefrontEnsProxy
+): CustomerStorefrontEnsProxy | undefined {
+  const source = input || existing;
+  if (!source) {
+    return undefined;
+  }
+  const name = normalizeStorefrontEnsName(input?.name ?? existing?.name);
+  const enabled = Boolean(input?.enabled ?? existing?.enabled ?? false);
+  const contentHash = cleanOptionalString(input?.contentHash ?? existing?.contentHash);
+  return {
+    enabled,
+    name: name || undefined,
+    network: normalizeStorefrontEnsNetwork(input?.network ?? existing?.network),
+    storefrontPath: normalizeStorefrontProxyPath(input?.storefrontPath ?? existing?.storefrontPath, "/"),
+    feedPath: normalizeStorefrontProxyPath(input?.feedPath ?? existing?.feedPath, "/feed"),
+    mosaicPath: normalizeStorefrontProxyPath(input?.mosaicPath ?? existing?.mosaicPath, "/mosaic"),
+    videoPath: normalizeStorefrontProxyPath(input?.videoPath ?? existing?.videoPath, "/feed"),
+    contentHash
+  };
 }
 
 function normalizeStorefrontConditions(

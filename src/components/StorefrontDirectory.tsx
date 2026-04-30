@@ -9,6 +9,7 @@ import {
   getStorefrontConditionTiles,
   resolveModelPriceDetails
 } from "@/lib/pricing";
+import { storefrontThemeStyle } from "@/lib/storefront-themes";
 import type { Customer, StorefrontRating, SuperReferralsStore } from "@/lib/types";
 import { isUsableEvmAddress } from "@/lib/wallet-address";
 
@@ -100,14 +101,18 @@ export default function StorefrontDirectory() {
           </div>
         )}
         {storefronts.map((item) => (
-          <article className="storefront-card" key={item.customer.id}>
+          <article className="storefront-card storefront-theme" key={item.customer.id} style={storefrontThemeStyle(item.customer.storefront?.themeId)}>
             <div className="storefront-card-header">
               <div>
                 <span className="eyebrow">{item.customer.storefront?.category || "Customer store"}</span>
                 <h2>{item.customer.name}</h2>
                 {item.routeCodes.length > 0 && <p className="mono route-code">{item.routeCodes.length} existing route{item.routeCodes.length === 1 ? "" : "s"}</p>}
               </div>
-              <span className="storefront-icon"><Store size={20} /></span>
+              {item.customer.storefront?.logoUrl ? (
+                <span className="storefront-logo-frame compact"><img alt="" src={item.customer.storefront.logoUrl} /></span>
+              ) : (
+                <span className="storefront-icon"><Store size={20} /></span>
+              )}
             </div>
 
             <p className="storefront-description">

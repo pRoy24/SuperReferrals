@@ -6,6 +6,7 @@ import VideoMosaic from "@/components/VideoMosaic";
 import { readStoredAppLanguage, subscribeAppLanguage } from "@/lib/app-language-client";
 import { DEFAULT_APP_LANGUAGE, videoLanguageMatchesAppLanguage } from "@/lib/localization";
 import { resolveRenditionLanguageCode } from "@/lib/rendition-language";
+import { feedViewModeForAspectRatio, storefrontInternalPath } from "@/lib/storefront-routing";
 import { fetchWithSamsarAuth } from "@/lib/storefront-auth-client";
 import type { AppLanguageCode, Generation, INFTRecord, PublicFeedItem, SuperReferralsStore } from "@/lib/types";
 
@@ -186,6 +187,10 @@ export default function StorefrontVideoGrid({
           />
         )}
         emptyText={mode === "published" ? emptyText : "No unpublished videos for this storefront yet."}
+        feedHrefForItem={(item) => storefrontInternalPath(customerId, "video", {
+          generationId: item.generationId,
+          viewMode: feedViewModeForAspectRatio(item.aspectRatio)
+        })}
         getCreatorWallet={(item) => (item as StorefrontVideoItem).creatorWallet}
         items={pageItems}
         key={`${mode}:${listVersion}`}
