@@ -714,15 +714,29 @@ a:hover {
 .landing-card {
   display: grid;
   align-content: start;
-  gap: 12px;
-  min-height: 236px;
+  gap: 14px;
+  min-height: 210px;
   padding: 22px;
   border-radius: 18px;
+}
+
+.landing-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.landing-card-heading h2 {
+  margin: 0;
+  font-size: clamp(19px, 2vw, 24px);
+  line-height: 1.2;
 }
 
 .landing-card-icon {
   width: 44px;
   height: 44px;
+  flex: 0 0 44px;
   display: grid;
   place-items: center;
   border-radius: 12px;

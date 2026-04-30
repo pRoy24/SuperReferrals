@@ -21,17 +21,17 @@ const productPillars = [
   {
     icon: Database,
     title: "Catalog-ready",
-    copy: "Use product images, descriptions, prices, CTA URLs, and campaign metadata from your existing tools."
+    copy: "Use the simple or advanced video creator wizard to pull product images, prices, CTA URLs, and campaign metadata into each render."
   },
   {
     icon: SlidersHorizontal,
     title: "Flexible video styles",
-    copy: "Create explainers, launch edits, anime promos, futuristic ads, or brand-specific videos from one brief."
+    copy: "Create explainers, launch edits, anime promos, futuristic ads, or brand-specific videos from product or listing metadata in both landscape and portrait formats."
   },
   {
     icon: Film,
     title: "Referral pages that convert",
-    copy: "Each link opens a page with product context, creator attribution, purchase actions, and shareable video output."
+    copy: "Turn every ref link into an editable marketing video page with product attributes, creator context, share actions, and a clear CTA."
   }
 ];
 
@@ -160,8 +160,10 @@ export default async function Home() {
           const Icon = pillar.icon;
           return (
             <article className="landing-card" key={pillar.title}>
-              <span className="landing-card-icon"><Icon size={20} /></span>
-              <h2>{pillar.title}</h2>
+              <div className="landing-card-heading">
+                <span className="landing-card-icon"><Icon size={20} /></span>
+                <h2>{pillar.title}</h2>
+              </div>
               <p>{pillar.copy}</p>
             </article>
           );
