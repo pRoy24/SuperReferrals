@@ -1110,6 +1110,7 @@ a:hover {
   height: 22px;
   margin: 0;
   padding: 0;
+  box-sizing: border-box;
   appearance: none;
   background: transparent;
   cursor: pointer;
@@ -1156,6 +1157,10 @@ a:hover {
   background: linear-gradient(90deg, rgba(61, 214, 198, 0.96) var(--mosaic-scrubber-progress), rgba(255, 255, 255, 0.3) var(--mosaic-scrubber-progress));
 }
 
+.video-mosaic-volume-slider::-webkit-slider-runnable-track {
+  background: linear-gradient(90deg, rgba(61, 214, 198, 0.96) var(--mosaic-volume-progress, 0%), rgba(255, 255, 255, 0.3) var(--mosaic-volume-progress, 0%));
+}
+
 .video-mosaic-scrubber input::-moz-range-track,
 .video-mosaic-volume-slider::-moz-range-track {
   height: 4px;
@@ -1164,7 +1169,8 @@ a:hover {
   background: rgba(255, 255, 255, 0.3);
 }
 
-.video-mosaic-scrubber input::-moz-range-progress {
+.video-mosaic-scrubber input::-moz-range-progress,
+.video-mosaic-volume-slider::-moz-range-progress {
   height: 4px;
   border-radius: 999px;
   background: rgba(61, 214, 198, 0.96);
@@ -4358,6 +4364,7 @@ button.item {
   height: 22px;
   margin: 0;
   padding: 0;
+  box-sizing: border-box;
   appearance: none;
   background: transparent;
   cursor: pointer;
@@ -4369,7 +4376,7 @@ button.item {
   height: 4px;
   border: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.32);
+  background: linear-gradient(90deg, rgba(248, 251, 255, 0.96) var(--feed-volume-progress, 0%), rgba(255, 255, 255, 0.32) var(--feed-volume-progress, 0%));
 }
 
 .feed-volume-slider::-moz-range-track {
@@ -4377,6 +4384,12 @@ button.item {
   border: 0;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.32);
+}
+
+.feed-volume-slider::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(248, 251, 255, 0.96);
 }
 
 .feed-volume-slider::-webkit-slider-thumb {

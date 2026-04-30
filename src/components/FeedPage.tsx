@@ -1288,6 +1288,7 @@ function VolumeControl({
   const iconSize = variant === "mobile" ? 20 : 18;
   const displayValue = muted ? 0 : Math.round(value * 100);
   const buttonClass = variant === "mobile" ? "round-action" : "glass-icon";
+  const sliderStyle = { "--feed-volume-progress": `${displayValue}%` } as CSSProperties;
 
   return (
     <div className={`feed-volume-control ${variant} ${open ? "open" : ""}`} onPointerDown={(event) => event.stopPropagation()}>
@@ -1310,6 +1311,7 @@ function VolumeControl({
             max="100"
             min="0"
             onChange={(event) => onVolume(Number(event.target.value) / 100)}
+            style={sliderStyle}
             type="range"
             value={displayValue}
           />

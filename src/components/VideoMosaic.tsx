@@ -416,6 +416,7 @@ function VideoMosaicVolumeControl({
   value: number;
 }) {
   const displayValue = muted ? 0 : Math.round(value * 100);
+  const sliderStyle = { "--mosaic-volume-progress": `${displayValue}%` } as CSSProperties;
 
   return (
     <div className={`video-mosaic-volume-control ${open ? "open" : ""}`}>
@@ -438,6 +439,7 @@ function VideoMosaicVolumeControl({
             max="100"
             min="0"
             onChange={(event) => onVolume(Number(event.target.value) / 100)}
+            style={sliderStyle}
             type="range"
             value={displayValue}
           />

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1189 240" role="img" aria-label="SuperReferrals logo">
+  <defs>
+    <linearGradient id="superreferrals-logo-gradient" x1="32" y1="32" x2="208" y2="208" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f97316" />
+      <stop offset="1" stop-color="#2563eb" />
+    </linearGradient>
+  </defs>
+  <g aria-hidden="true">
+    <rect x="32" y="32" width="176" height="176" rx="44" fill="url(#superreferrals-logo-gradient)" />
+    <g transform="translate(65 65) scale(4.583333)" fill="none" stroke="#ffffff" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z" />
+      <path d="M20 2v4" />
+      <path d="M22 4h-4" />
+      <circle cx="4" cy="20" r="2" />
+    </g>
+  </g>
+  <text x="296" y="157" fill="#f97316" stroke="#f97316" stroke-width="1.6" stroke-linejoin="round" paint-order="stroke fill" font-family="Avenir Next, Avenir, Arial Black, Helvetica Neue, Arial, sans-serif" font-size="108" font-weight="900" letter-spacing="0">Super</text>
+  <text x="591" y="157" fill="#1d2534" stroke="#1d2534" stroke-width="1.6" stroke-linejoin="round" paint-order="stroke fill" font-family="Avenir Next, Avenir, Arial Black, Helvetica Neue, Arial, sans-serif" font-size="108" font-weight="900" letter-spacing="0">Referrals</text>
+</svg>
