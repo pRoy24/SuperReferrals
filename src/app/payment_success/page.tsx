@@ -4,6 +4,7 @@ import { RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import BreadcrumbNav from "@/components/BreadcrumbNav";
+import LanguageSelector from "@/components/LanguageSelector";
 import { syncStoredAppLanguagePreference } from "@/lib/app-language-client";
 import {
   authCredentialsFromCurrentUrl,
@@ -109,6 +110,7 @@ export default function PaymentSuccessPage() {
           <p className="subtle">{syncState.message}</p>
         </div>
         <div className="page-top-actions">
+          <LanguageSelector />
           <BreadcrumbNav />
           <a className="btn primary" href="/dashboard">Open dashboard</a>
           {syncState.status === "syncing" && (

@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent, type PointerEvent, type RefObject, type UIEvent, type WheelEvent } from "react";
 import BreadcrumbNav from "@/components/BreadcrumbNav";
+import LanguageSelector from "@/components/LanguageSelector";
 import { DEFAULT_FEED_VIDEO_VOLUME, persistFeedVideoVolume, readFeedVideoVolume, subscribeFeedVideoVolume } from "@/lib/feed-video-preferences";
 import { samsarAuthHeaders } from "@/lib/storefront-auth-client";
 import type { FeedSortOption, PublicFeedItem } from "@/lib/types";
@@ -664,6 +665,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
         </div>
         <div className="feed-toolbar">
           <BreadcrumbNav />
+          <LanguageSelector className="is-feed" />
           <button className={`icon-toggle ${viewMode === "mobile" ? "active" : ""}`} onClick={() => setViewMode("mobile")} title="Mobile feed">
             <Smartphone size={18} />
           </button>

@@ -11,6 +11,10 @@ import {
   DEFAULT_RENDITION_LANGUAGE_CODE,
   resolveRenditionLanguageCode
 } from "./rendition-language";
+import {
+  extractSamsarVideoSessionIdFromUrl,
+  normalizeSamsarVideoSessionId
+} from "./samsar";
 import { normalizeWalletList } from "./storefront-access";
 import { isUsableEvmAddress } from "./wallet-address";
 import type {
@@ -362,6 +366,7 @@ function backfillVideoMetadata(store: SuperReferralsStore) {
       continue;
     }
 
+    changed = backfillGenerationSamsarSessionId(generation) || changed;
     const metadata = resolveBackfilledVideoMetadata(generation);
     generationMetadata.set(generation.id, metadata);
     changed = applyVideoMetadata(generation, metadata) || changed;
@@ -369,6 +374,7 @@ function backfillVideoMetadata(store: SuperReferralsStore) {
 
   for (const inft of store.infts) {
     const generation = generationsById.get(inft.generationId) || generationsById.get(inft.id);
+    changed = backfillINFTSamsarSessionId(inft, generation) || changed;
     const metadata = resolveBackfilledVideoMetadata(
       generation,
       inft,
@@ -378,6 +384,146 @@ function backfillVideoMetadata(store: SuperReferralsStore) {
   }
 
   return changed;
+}
+
+function backfillGenerationSamsarSessionId(generation: Generation) {
+  const sessionId = resolveBackfilledSamsarSessionId(generation);
+  if (!sessionId) {
+    return false;
+  }
+
+  let changed = false;
+  const existingRequestId = cleanString(generation.samsarRequestId);
+  const existingSessionId = cleanString(generation.samsarSessionId);
+
+  if (!existingRequestId && existingSessionId && existingSessionId.startsWith("extreq_")) {
+    generation.samsarRequestId = existingSessionId;
+    changed = true;
+  }
+  if (shouldReplaceSamsarSessionId(existingSessionId, sessionId)) {
+    generation.samsarSessionId = sessionId;
+    changed = true;
+  }
+
+  const metadata = isPlainObject(generation.input?.metadata) ? generation.input.metadata as Record<string, unknown> : undefined;
+  if (metadata) {
+    const actionSessionId = cleanString(metadata.samsarActionSessionId);
+    const generationRequestId = cleanString(generation.samsarRequestId);
+    const externalRequestId = generationRequestId.startsWith("extreq_")
+      ? generationRequestId
+      : actionSessionId.startsWith("extreq_")
+        ? actionSessionId
+        : "";
+    if (externalRequestId && !cleanString(metadata.samsarExternalRequestId)) {
+      metadata.samsarExternalRequestId = externalRequestId;
+      changed = true;
+    }
+    if (actionSessionId && shouldReplaceSamsarSessionId(actionSessionId, sessionId)) {
+      metadata.samsarActionSessionId = sessionId;
+      changed = true;
+    }
+  }
+
+  if (isPlainObject(generation.samsarVideoMetadata)) {
+    const metadata = generation.samsarVideoMetadata as Record<string, unknown>;
+    if (metadata.samsar_session_id !== sessionId) {
+      metadata.samsar_session_id = sessionId;
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+function backfillINFTSamsarSessionId(inft: INFTRecord, generation?: Generation) {
+  const sessionId = resolveBackfilledSamsarSessionId(generation, inft);
+  if (!sessionId) {
+    return false;
+  }
+
+  let changed = false;
+  const attributes = inft.attributes || (inft.attributes = []);
+  const existingSessionAttribute = getINFTAttributeValue(attributes, "samsar_session_id");
+  const existingRequestAttribute = getINFTAttributeValue(attributes, "samsar_request_id");
+  const requestId =
+    cleanString(generation?.samsarRequestId) ||
+    existingRequestAttribute ||
+    (existingSessionAttribute.startsWith("extreq_") ? existingSessionAttribute : "");
+
+  if (requestId) {
+    changed = upsertINFTAttribute(attributes, "samsar_request_id", requestId) || changed;
+  }
+  if (shouldReplaceSamsarSessionId(existingSessionAttribute, sessionId)) {
+    changed = upsertINFTAttribute(attributes, "samsar_session_id", sessionId) || changed;
+  }
+
+  if (!isPlainObject(inft.samsarVideoMetadata)) {
+    inft.samsarVideoMetadata = {};
+    changed = true;
+  }
+  const metadata = inft.samsarVideoMetadata as Record<string, unknown>;
+  if (metadata.samsar_session_id !== sessionId) {
+    metadata.samsar_session_id = sessionId;
+    changed = true;
+  }
+
+  return changed;
+}
+
+function resolveBackfilledSamsarSessionId(generation?: Generation, inft?: INFTRecord) {
+  const existingSessionId = firstNonExternalSamsarSessionId(
+    generation?.samsarSessionId,
+    generation?.input?.metadata?.samsarActionSessionId,
+    getINFTAttributeValue(inft?.attributes, "samsar_session_id")
+  );
+  if (existingSessionId) {
+    return existingSessionId;
+  }
+  return extractSamsarVideoSessionIdFromUrl(generation?.resultUrl, inft?.videoUrl);
+}
+
+function firstNonExternalSamsarSessionId(...values: unknown[]) {
+  for (const value of values) {
+    const sessionId = cleanString(value);
+    if (sessionId && !sessionId.startsWith("extreq_")) {
+      return normalizeSamsarVideoSessionId(sessionId);
+    }
+  }
+  return "";
+}
+
+function shouldReplaceSamsarSessionId(current: unknown, next: string) {
+  const currentSessionId = cleanString(current);
+  if (!currentSessionId) {
+    return true;
+  }
+  if (currentSessionId.startsWith("extreq_")) {
+    return true;
+  }
+  return normalizeSamsarVideoSessionId(currentSessionId) !== next;
+}
+
+function getINFTAttributeValue(attributes: INFTRecord["attributes"] | undefined, traitType: string) {
+  const normalizedTraitType = traitType.trim().toLowerCase();
+  const attribute = attributes?.find((item) => item.trait_type.trim().toLowerCase() === normalizedTraitType);
+  return cleanString(attribute?.value);
+}
+
+function upsertINFTAttribute(attributes: INFTRecord["attributes"], traitType: string, value: string) {
+  const existing = attributes.find((item) => item.trait_type.trim().toLowerCase() === traitType);
+  if (existing) {
+    if (existing.value === value) {
+      return false;
+    }
+    existing.value = value;
+    return true;
+  }
+  attributes.push({ trait_type: traitType, value });
+  return true;
+}
+
+function cleanString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function isVideoGeneration(generation: Generation) {

@@ -172,6 +172,24 @@ export function normalizeSamsarVideoSessionId(value: unknown) {
   return candidate.startsWith("extreq_") ? candidate.slice("extreq_".length) : candidate;
 }
 
+export function extractSamsarVideoSessionIdFromUrl(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value !== "string") {
+      continue;
+    }
+    const candidate = value.trim();
+    if (!candidate) {
+      continue;
+    }
+    const decoded = safeDecodeURIComponent(candidate);
+    const match = decoded.match(/(?:^|[/_-])video-([a-f0-9]{24})(?:[_./-]|$)/i);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+  return "";
+}
+
 export function normalizeSamsarActionSessionId(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -590,6 +608,14 @@ function firstStringValue(...values: unknown[]) {
     }
   }
   return "";
+}
+
+function safeDecodeURIComponent(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 export async function createSamsarAssistantCompletion(payload: Record<string, unknown>) {

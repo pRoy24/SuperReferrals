@@ -1,4 +1,5 @@
 import BreadcrumbNav from "@/components/BreadcrumbNav";
+import LanguageSelector from "@/components/LanguageSelector";
 
 export default function PaymentCancelPage() {
   return (
@@ -10,6 +11,7 @@ export default function PaymentCancelPage() {
           <p className="subtle">No credits were purchased. You can restart checkout from the console.</p>
         </div>
         <div className="page-top-actions">
+          <LanguageSelector />
           <BreadcrumbNav />
           <a className="btn primary" href="/dashboard">Return to console</a>
         </div>

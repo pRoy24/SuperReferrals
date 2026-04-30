@@ -15,7 +15,7 @@ import {
 import { samsarAuthHeaders } from "@/lib/storefront-auth-client";
 import type { AppLanguageCode } from "@/lib/types";
 
-export default function LanguageSelector() {
+export default function LanguageSelector({ className = "" }: { className?: string }) {
   const [language, setLanguage] = useState<AppLanguageCode>(DEFAULT_APP_LANGUAGE);
   const [resolved, setResolved] = useState(false);
 
@@ -68,7 +68,7 @@ export default function LanguageSelector() {
   }
 
   return (
-    <div className={`global-language-selector ${resolved ? "resolved" : ""}`}>
+    <div className={`language-selector ${resolved ? "resolved" : ""} ${className}`.trim()}>
       <label>
         <span className="sr-only">Language</span>
         <select

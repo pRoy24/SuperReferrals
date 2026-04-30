@@ -4,6 +4,8 @@ import { RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import BreadcrumbNav from "@/components/BreadcrumbNav";
+import LanguageSelector from "@/components/LanguageSelector";
+import { syncStoredAppLanguagePreference } from "@/lib/app-language-client";
 import {
   authCredentialsFromCurrentUrl,
   fetchWithSamsarAuth,
@@ -40,6 +42,7 @@ export default function SamsarCallbackPage() {
         expiryDate: data.account?.expiryDate || credentials.expiryDate,
         refreshTokenExpiresAt: data.account?.refreshTokenExpiresAt || credentials.refreshTokenExpiresAt
       });
+      await syncStoredAppLanguagePreference().catch(() => undefined);
       removeAuthCredentialsFromCurrentUrl();
       if (!cancelled) {
         router.replace("/dashboard?auth=connected");
@@ -67,6 +70,7 @@ export default function SamsarCallbackPage() {
           <p className="subtle">{message}</p>
         </div>
         <div className="page-top-actions">
+          <LanguageSelector />
           <BreadcrumbNav />
           <a className="btn primary" href="/dashboard">Open dashboard</a>
           <span className="badge">

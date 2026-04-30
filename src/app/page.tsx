@@ -10,6 +10,7 @@ import {
   Sparkles,
   Store,
 } from "lucide-react";
+import LanguageSelector from "@/components/LanguageSelector";
 import VideoMosaic from "@/components/VideoMosaic";
 import { listPublicFeedItems } from "@/lib/feed";
 import { readStore } from "@/lib/store";
@@ -53,9 +54,12 @@ export default async function Home() {
   return (
     <main className="landing-shell">
       <nav className="landing-nav" aria-label="Primary">
-        <a className="text-logo" href="/" aria-label="SuperReferrals home">
-          <span>Super</span>Referrals
-        </a>
+        <div className="landing-nav-left">
+          <a className="text-logo" href="/" aria-label="SuperReferrals home">
+            <span>Super</span>Referrals
+          </a>
+          <LanguageSelector />
+        </div>
         <div className="landing-nav-actions">
           <a className="btn ghost" href="/feed" target="_blank" rel="noreferrer">
             <Clapperboard size={16} /> Feed

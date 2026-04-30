@@ -3,6 +3,7 @@
 import { Cable, Captions, ChevronDown, Copy, Download, ExternalLink, ImagePlus, Languages, Link2, Loader2, PanelBottom, RefreshCw, Send, Share2, Trash2, UploadCloud, Wallet } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import BreadcrumbNav from "@/components/BreadcrumbNav";
+import LanguageSelector from "@/components/LanguageSelector";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
 import {
   detectBrowserWalletProviders,
@@ -48,6 +49,7 @@ const terminalActionStatuses = new Set(["COMPLETED", "FAILED", "CANCELLED", "REF
 export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [activeInft, setActiveInft] = useState(inft);
   const [actionResult, setActionResult] = useState("");
+  const [actionResultTone, setActionResultTone] = useState<"neutral" | "error">("neutral");
   const [busy, setBusy] = useState("");
   const [peerId, setPeerId] = useState("mock-peer-video-a");
   const [language, setLanguage] = useState(supportedSamsarProcessorLanguageOptions[1]?.value || "ES");
@@ -351,6 +353,19 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     };
   }
 
+  function showActionResult(message: string, tone: "neutral" | "error" = "neutral") {
+    setActionResult(message);
+    setActionResultTone(tone);
+  }
+
+  function showActionError(error: unknown, fallback: string) {
+    showActionResult(error instanceof Error ? error.message : fallback, "error");
+  }
+
+  function clearActionResult() {
+    showActionResult("");
+  }
+
   async function connectWallet(walletProvider?: BrowserWalletProvider) {
     setBusy("wallet");
     setActionPaymentFlow({ status: "idle", message: "" });
@@ -402,7 +417,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
 
   async function runAction(action: string, payload: Record<string, unknown> = {}) {
     if (videoOperationPending && action !== "message_peer") {
-      setActionResult("Wait for the current video operation to finish before starting another one.");
+      showActionResult("Wait for the current video operation to finish before starting another one.", "error");
       return;
     }
     setBusy(action);
@@ -420,9 +435,9 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       });
       const data = await parseResponse(response);
       if (action === "message_peer") {
-        setActionResult(JSON.stringify(data.result, null, 2));
+        showActionResult(JSON.stringify(data.result, null, 2));
       } else {
-        setActionResult("");
+        clearActionResult();
       }
       if (action !== "message_peer") {
         setLastVideoOperation(action);
@@ -442,7 +457,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
         }
       }
     } catch (error) {
-      setActionResult(error instanceof Error ? error.message : "Action failed");
+      showActionError(error, "Action failed");
     } finally {
       setBusy("");
     }
@@ -652,7 +667,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
         })
       });
       const data = await parseResponse(response);
-      setActionResult("");
+      clearActionResult();
       setLastVideoOperation(action);
       const requestId = extractActionRequestId(data.result);
       if (requestId) {
@@ -679,7 +694,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
         status: "failed",
         message: error instanceof Error ? error.message : "Paid INFT action failed."
       });
-      setActionResult(error instanceof Error ? error.message : "Paid INFT action failed");
+      showActionError(error, "Paid INFT action failed");
     } finally {
       setBusy("");
     }
@@ -722,7 +737,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     try {
       payload = buildUpdateOutroPayload();
     } catch (error) {
-      setActionResult(error instanceof Error ? error.message : "Invalid outro update input");
+      showActionError(error, "Invalid outro update input");
       return;
     }
     runPaidAction("update_outro", payload).catch(() => undefined);
@@ -754,7 +769,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     try {
       payload = buildUpdateFooterPayload();
     } catch (error) {
-      setActionResult(error instanceof Error ? error.message : "Invalid footer update input");
+      showActionError(error, "Invalid footer update input");
       return;
     }
     runPaidAction("update_footer", payload).catch(() => undefined);
@@ -820,6 +835,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
           <p className="subtle">{activeInft.description}</p>
         </div>
         <div className="page-top-actions">
+          <LanguageSelector />
           <BreadcrumbNav />
           <a className="btn" href="/">
             <RefreshCw size={16} /> Dashboard
@@ -886,7 +902,11 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                 )}
               </div>
             )}
-            {actionPaymentFlow.message && <p className="notice">{actionPaymentFlow.message}</p>}
+            {actionPaymentFlow.message && (
+              <p className={`notice ${actionPaymentFlow.status === "failed" ? "error" : ""}`}>
+                {actionPaymentFlow.message}
+              </p>
+            )}
             <div className="inft-action-picker" role="tablist" aria-label="INFT edit video actions">
               <button
                 className={`inft-action-choice ${expandedVideoAction === "translate" ? "active" : ""}`}
@@ -1155,7 +1175,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                 onDelete={() => mutateCreatedRender("delete")}
               />
             )}
-            {actionResult && <pre className="item mono">{actionResult}</pre>}
+            {actionResult && <pre className={`item mono inft-action-result ${actionResultTone === "error" ? "error" : ""}`}>{actionResult}</pre>}
             {showActionReview && (
               <StorefrontRatingForm
                 customerId={activeInft.customerId}
@@ -1462,7 +1482,7 @@ function ActionProgressCard({
         )}
       </details>
       <p className="mono inft-action-request">{poll.requestId}</p>
-      {poll.errorMessage && <p className="subtle">{poll.errorMessage}</p>}
+      {poll.errorMessage && <p className="subtle inft-action-error">{poll.errorMessage}</p>}
     </div>
   );
 }

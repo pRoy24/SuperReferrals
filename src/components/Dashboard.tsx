@@ -43,6 +43,7 @@ import {
   storeSamsarCredentials
 } from "@/lib/storefront-auth-client";
 import BreadcrumbNav from "@/components/BreadcrumbNav";
+import LanguageSelector from "@/components/LanguageSelector";
 import StorefrontVideoGrid from "@/components/StorefrontVideoGrid";
 import { syncStoredAppLanguagePreference } from "@/lib/app-language-client";
 import { isUsableEvmAddress } from "@/lib/wallet-address";
@@ -649,6 +650,7 @@ export default function Dashboard() {
             </p>
           </div>
           <div className="page-top-actions">
+            <LanguageSelector />
             <BreadcrumbNav />
             <button className="btn" onClick={() => load()} title="Refresh data">
               <RefreshCw size={16} /> Refresh

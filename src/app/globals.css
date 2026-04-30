@@ -2580,10 +2580,18 @@ button.item {
   border-radius: var(--radius);
   font-size: 13px;
   line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .notice.compact {
   margin: 0 0 10px;
+}
+
+.notice.error {
+  border-color: rgba(220, 38, 38, 0.24);
+  background: #fef2f2;
+  color: var(--danger);
 }
 
 .save-toast {
@@ -3084,6 +3092,20 @@ button.item {
   margin-bottom: 0;
   font-size: 11px;
   color: #64748b;
+}
+
+.inft-action-error,
+.inft-action-result.error {
+  color: var(--danger);
+}
+
+.inft-action-error,
+.inft-action-result {
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .inft-render-preview-frame {
@@ -5770,24 +5792,26 @@ button.item {
   }
 }
 
-.global-language-selector {
-  position: fixed;
-  top: 14px;
-  right: 16px;
-  z-index: 118;
-  display: block;
+.landing-nav-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
-.production-hackathon-banner + .global-language-selector {
-  top: 62px;
+.language-selector {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
-.global-language-selector label {
+.language-selector label {
   position: relative;
   display: block;
+  min-width: 0;
 }
 
-.global-language-selector label::after {
+.language-selector label::after {
   content: "";
   position: absolute;
   top: 50%;
@@ -5800,7 +5824,7 @@ button.item {
   transform: translateY(-65%) rotate(45deg);
 }
 
-.global-language-selector select {
+.language-selector select {
   width: auto;
   min-width: 190px;
   min-height: 38px;
@@ -5818,64 +5842,40 @@ button.item {
   backdrop-filter: blur(14px);
 }
 
-.global-language-selector select:hover,
-.global-language-selector select:focus-visible {
+.language-selector select:hover,
+.language-selector select:focus-visible {
   border-color: rgba(37, 99, 235, 0.38);
   background: rgba(255, 255, 255, 0.98);
   outline: none;
 }
 
-.landing-shell {
-  padding-top: 74px;
+.language-selector.is-feed select {
+  min-width: 178px;
+  border-color: rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8fbff;
+  box-shadow: none;
 }
 
-.public-main {
-  padding-top: 78px;
+.language-selector.is-feed select:hover,
+.language-selector.is-feed select:focus-visible {
+  border-color: rgba(244, 253, 255, 0.42);
+  background: rgba(255, 255, 255, 0.14);
 }
 
-.storefront-user-main {
-  padding-top: 70px;
-}
-
-.inft-layout,
-.app-shell .main {
-  padding-top: 78px;
-}
-
-body:has(.feed-shell) .global-language-selector {
-  top: 76px;
-  right: 14px;
+.language-selector.is-feed select option {
+  color: #0f172a;
 }
 
 @media (max-width: 620px) {
-  .global-language-selector {
-    top: 10px;
-    right: 10px;
+  .landing-nav-left {
+    flex-wrap: wrap;
   }
 
-  .production-hackathon-banner + .global-language-selector {
-    top: 68px;
-  }
-
-  .global-language-selector select {
+  .language-selector select {
     min-width: min(180px, calc(100vw - 20px));
     min-height: 36px;
     font-size: 11px;
     padding-right: 30px;
-  }
-
-  .landing-shell,
-  .public-main,
-  .storefront-user-main {
-    padding-top: 62px;
-  }
-
-  .inft-layout,
-  .app-shell .main {
-    padding-top: 68px;
-  }
-
-  body:has(.feed-shell) .global-language-selector {
-    top: 64px;
   }
 }

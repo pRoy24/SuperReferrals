@@ -56,6 +56,7 @@ import {
 } from "./store";
 import {
   createExternalImageListVideo,
+  extractSamsarVideoSessionIdFromUrl,
   fetchLatestVideoUrl,
   getSamsarStatus,
   normalizeSamsarActionSessionId,
@@ -1044,7 +1045,8 @@ function extractSamsarInternalSessionId(status: Record<string, unknown>) {
     status.videoSessionId,
     status.session_id,
     status.sessionId,
-    status.sessionID
+    status.sessionID,
+    extractSamsarVideoSessionIdFromUrl(extractSamsarResultUrl(status))
   );
 }
 
@@ -1623,7 +1625,7 @@ export async function runINFTAction(id: string, action: string, payload: Record<
   }
 
   if (action === "update_outro") {
-    const videoSessionId = resolveGenerationVideoActionSessionId(generation);
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation, inft);
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
@@ -1667,7 +1669,7 @@ export async function runINFTAction(id: string, action: string, payload: Record<
   }
 
   if (action === "add_outro") {
-    const videoSessionId = resolveGenerationVideoActionSessionId(generation);
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation, inft);
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
@@ -1693,7 +1695,7 @@ export async function runINFTAction(id: string, action: string, payload: Record<
   }
 
   if (action === "update_footer") {
-    const videoSessionId = resolveGenerationVideoActionSessionId(generation);
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation, inft);
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
@@ -1735,7 +1737,7 @@ export async function runINFTAction(id: string, action: string, payload: Record<
   }
 
   if (action === "cancel_render") {
-    const videoSessionId = resolveGenerationVideoActionSessionId(generation);
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation, inft);
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
@@ -1746,7 +1748,7 @@ export async function runINFTAction(id: string, action: string, payload: Record<
   }
 
   if (action === "translate") {
-    const videoSessionId = resolveGenerationVideoActionSessionId(generation);
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation, inft);
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
@@ -1766,7 +1768,7 @@ export async function runINFTAction(id: string, action: string, payload: Record<
   }
 
   if (action === "join") {
-    const videoSessionId = resolveGenerationVideoActionSessionId(generation);
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation, inft);
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
@@ -1787,7 +1789,7 @@ export async function runINFTAction(id: string, action: string, payload: Record<
   }
 
   if (action === "add_subtitles") {
-    const videoSessionId = resolveGenerationVideoActionSessionId(generation);
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation, inft);
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
@@ -1805,7 +1807,7 @@ export async function runINFTAction(id: string, action: string, payload: Record<
   }
 
   if (action === "remove_subtitles") {
-    const videoSessionId = resolveGenerationVideoActionSessionId(generation);
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation, inft);
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
     }
@@ -2387,13 +2389,27 @@ function actionCreditsRemaining(result: Record<string, unknown>) {
   return firstNumber(result, ["remainingCredits", "remaining_credits", "creditsRemaining"]);
 }
 
-function resolveGenerationVideoSessionId(generation: Pick<Generation, "samsarRequestId" | "samsarSessionId">) {
-  return firstInternalSamsarSessionId(generation.samsarSessionId, generation.samsarRequestId);
+function resolveGenerationVideoSessionId(generation: Pick<Generation, "samsarRequestId" | "samsarSessionId" | "resultUrl">) {
+  return firstInternalSamsarSessionId(
+    generation.samsarSessionId,
+    generation.samsarRequestId,
+    extractSamsarVideoSessionIdFromUrl(generation.resultUrl)
+  );
 }
 
-function resolveGenerationVideoActionSessionId(generation: Pick<Generation, "samsarRequestId" | "samsarSessionId">) {
+function resolveGenerationVideoActionSessionId(
+  generation: Pick<Generation, "samsarRequestId" | "samsarSessionId" | "resultUrl">,
+  inft?: Pick<INFTRecord, "videoUrl">
+) {
   const sessionId = normalizeSamsarActionSessionId(generation.samsarSessionId);
   const requestId = normalizeSamsarActionSessionId(generation.samsarRequestId);
+  if (sessionId && !sessionId.startsWith("extreq_")) {
+    return sessionId;
+  }
+  const urlSessionId = extractSamsarVideoSessionIdFromUrl(generation.resultUrl, inft?.videoUrl);
+  if (urlSessionId) {
+    return urlSessionId;
+  }
   if (requestId.startsWith("extreq_") && sessionId === normalizeSamsarVideoSessionId(requestId)) {
     return requestId;
   }

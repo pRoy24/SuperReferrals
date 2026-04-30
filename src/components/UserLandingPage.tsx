@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowDown, ArrowUp, Bot, ChevronDown, CircleDollarSign, 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from "react";
 import BreadcrumbNav from "@/components/BreadcrumbNav";
 import { UserStoreCreatorSkeleton } from "@/components/FormLoadingSkeletons";
+import LanguageSelector from "@/components/LanguageSelector";
 import StorefrontRatingForm from "@/components/StorefrontRatingForm";
 import StorefrontVideoGrid from "@/components/StorefrontVideoGrid";
 import {
@@ -1355,6 +1356,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
           </div>
         </div>
         <div className="landing-hero-actions">
+          <LanguageSelector />
           <BreadcrumbNav />
           <a className="btn" href="/storefronts">
             <Store size={16} /> Directory

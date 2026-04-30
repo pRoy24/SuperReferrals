@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import LanguageSelector from "@/components/LanguageSelector";
 import PageAssistant from "@/components/PageAssistant";
 import ProductionHackathonBanner from "@/components/ProductionHackathonBanner";
 import TextareaAutosizeInstaller from "@/components/TextareaAutosizeInstaller";
@@ -39,7 +38,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           enabled={deploymentEnvironment === "production"}
           stagingUrl={hackathonStagingUrl}
         />
-        <LanguageSelector />
         {children}
         <PageAssistant />
       </body>
