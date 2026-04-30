@@ -8,20 +8,21 @@ SKIP_BOOTSTRAP="${DEPLOY_SKIP_BOOTSTRAP:-false}"
 BOOTSTRAP_ARGS="${DEPLOY_BOOTSTRAP_ARGS:-}"
 SKIP_ENV_SETUP="${DEPLOY_SKIP_ENV_SETUP:-false}"
 VERCEL_DEFAULT_SCOPE="${VERCEL_SCOPE:-${VERCEL_TEAM:-proy24s-projects}}"
-VERCEL_DEFAULT_PROJECT="${VERCEL_PROJECT:-super-referrals}"
 
+APP_NAME="${DEPLOY_APP:-}"
 PRODUCTION=false
 CUSTOM_MESSAGE=""
 
 usage() {
   cat <<USAGE
-Usage: ./deploy.sh [--production] [--skip-bootstrap] [-m "commit message"]
+Usage: ./deploy.sh <superreferrals|superstores> [--production] [--skip-bootstrap] [-m "commit message"]
 
 Checks Vercel auth/project setup, lists existing deployed env key names, prompts only for missing values,
 syncs only missing env keys to Vercel, bootstraps storage, then commits and pushes all current changes to ${DEVELOP_BRANCH}.
 With --production, also merges ${DEVELOP_BRANCH} into ${MAIN_BRANCH} and pushes ${MAIN_BRANCH}.
 
 Environment overrides:
+  DEPLOY_APP             App to deploy when omitted from argv (default: superreferrals)
   DEPLOY_REMOTE          Git remote name (default: origin)
   DEPLOY_DEVELOP_BRANCH  Development branch (default: develop)
   DEPLOY_MAIN_BRANCH     Production branch (default: main)
@@ -36,6 +37,12 @@ die() {
   echo "deploy.sh: $*" >&2
   exit 1
 }
+
+if [[ $# -gt 0 && "$1" != -* ]]; then
+  APP_NAME="$1"
+  shift
+fi
+APP_NAME="${APP_NAME:-superreferrals}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,7 +69,23 @@ while [[ $# -gt 0 ]]; do
 done
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repository"
-cd "$ROOT"
+
+case "$APP_NAME" in
+  superreferrals)
+    APP_DIR="$ROOT/apps/superreferrals"
+    VERCEL_DEFAULT_PROJECT="${VERCEL_PROJECT:-super-referrals}"
+    ;;
+  superstores)
+    APP_DIR="$ROOT/apps/superstores"
+    VERCEL_DEFAULT_PROJECT="${VERCEL_PROJECT:-superstores}"
+    ;;
+  *)
+    die "unknown app: $APP_NAME"
+    ;;
+esac
+
+[[ -d "$APP_DIR" ]] || die "missing app directory: $APP_DIR"
+cd "$APP_DIR"
 
 is_truthy() {
   case "$1" in
@@ -138,6 +161,10 @@ read_vercel_token() {
   fi
   if [[ -f ".vercel-token" ]]; then
     tr -d '[:space:]' < ".vercel-token"
+    return
+  fi
+  if [[ -f "$ROOT/.vercel-token" ]]; then
+    tr -d '[:space:]' < "$ROOT/.vercel-token"
   fi
 }
 
@@ -592,6 +619,24 @@ prepare_env_file() {
 
   echo "Checking deploy env values in $env_file"
   OPTIONAL_ENV_WARNING_KEYS=""
+  case "$APP_NAME" in
+    superreferrals)
+      prepare_superreferrals_env_file "$env_file" "$remote_keys_file" "$target"
+      ;;
+    superstores)
+      prepare_superstores_env_file "$env_file" "$remote_keys_file" "$target"
+      ;;
+    *)
+      die "unknown app: $APP_NAME"
+      ;;
+  esac
+}
+
+prepare_superreferrals_env_file() {
+  local env_file="$1"
+  local remote_keys_file="$2"
+  local target="$3"
+
   prompt_env_value "$env_file" "$remote_keys_file" "SUPERREFERRALS_SESSION_SECRET" \
     "SuperReferrals session secret" \
     "Used to encrypt account/session cookies. Generate once per environment and keep it stable across redeploys." \
@@ -631,6 +676,38 @@ prepare_env_file() {
   prompt_env_value "$env_file" "$remote_keys_file" "INFT_CONTRACT_ADDRESS" \
     "iNFT contract address" \
     "Run npm run contracts:deploy:inft:testnet for staging or npm run contracts:deploy:inft:mainnet for production, then paste the address." \
+    "plain" "optional"
+  print_optional_env_warning "$target"
+}
+
+prepare_superstores_env_file() {
+  local env_file="$1"
+  local remote_keys_file="$2"
+  local target="$3"
+
+  prompt_env_value "$env_file" "$remote_keys_file" "SUPERSTORES_ADMIN_SECRET" \
+    "SuperStores admin secret" \
+    "Used to unlock the storefront admin wizard for deployment operators. Generate once per environment and keep it stable." \
+    "secret" "required" "generate"
+  prompt_env_value "$env_file" "$remote_keys_file" "SUPERSTORES_WEBHOOK_SECRET" \
+    "SuperStores webhook secret" \
+    "Used to authenticate sale distribution webhook deliveries and partner commission callbacks." \
+    "secret" "required" "generate"
+  prompt_env_value "$env_file" "$remote_keys_file" "SUPERSTORES_PLATFORM_TREASURY_WALLET" \
+    "Platform treasury wallet" \
+    "EVM wallet that receives SuperStores platform fees for this environment." \
+    "plain" "optional"
+  prompt_env_value "$env_file" "$remote_keys_file" "KEEPERHUB_API_KEY" \
+    "KeeperHub API key" \
+    "Used for internal ETH/USDC conversion and split settlement across seller, platform, and referral partner wallets." \
+    "secret" "optional"
+  prompt_env_value "$env_file" "$remote_keys_file" "KEEPERHUB_PAYMENT_WORKFLOW_ID_SEPOLIA" \
+    "KeeperHub Sepolia workflow" \
+    "Workflow used for staging ETH Sepolia payments and split settlement." \
+    "plain" "optional"
+  prompt_env_value "$env_file" "$remote_keys_file" "KEEPERHUB_PAYMENT_WORKFLOW_ID_BASE" \
+    "KeeperHub Base workflow" \
+    "Workflow used for production Base mainnet payments and split settlement." \
     "plain" "optional"
   print_optional_env_warning "$target"
 }
@@ -675,23 +752,23 @@ run_bootstrap() {
 }
 
 current_branch() {
-  git branch --show-current
+  git -C "$ROOT" branch --show-current
 }
 
 ensure_branch() {
   local branch="$1"
   if [[ "$(current_branch)" != "$branch" ]]; then
     echo "Checking out $branch"
-    git checkout "$branch"
+    git -C "$ROOT" checkout "$branch"
   fi
 }
 
 changed_files_count() {
-  git diff --cached --name-only | wc -l | tr -d '[:space:]'
+  git -C "$ROOT" diff --cached --name-only | wc -l | tr -d '[:space:]'
 }
 
 largest_changed_files() {
-  git diff --cached --numstat |
+  git -C "$ROOT" diff --cached --numstat |
     awk '$1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { print ($1 + $2) "\t" $3 }' |
     sort -rn |
     head -5 |
@@ -703,7 +780,7 @@ function_names_for_file() {
 
   case "$file" in
     *.c|*.cc|*.cpp|*.cxx|*.go|*.h|*.hpp|*.js|*.jsx|*.mjs|*.cjs|*.ts|*.tsx)
-      git diff --cached --unified=0 -- "$file" |
+      git -C "$ROOT" diff --cached --unified=0 -- "$file" |
         sed -nE \
           -e 's/^@@.*@@[[:space:]]*(export[[:space:]]+)?(default[[:space:]]+)?(async[[:space:]]+)?function[[:space:]]+([A-Za-z_$][A-Za-z0-9_$]*).*/\4/p' \
           -e 's/^@@.*@@[[:space:]]*(export[[:space:]]+)?(const|let|var)[[:space:]]+([A-Za-z_$][A-Za-z0-9_$]*)[[:space:]]*=.*/\3/p' \
@@ -789,7 +866,7 @@ commit_develop() {
   ensure_branch "$DEVELOP_BRANCH"
 
   echo "Staging changes"
-  git add .
+  git -C "$ROOT" add -A
 
   if [[ "$(changed_files_count)" == "0" ]]; then
     echo "No changes to commit on $DEVELOP_BRANCH"
@@ -800,26 +877,26 @@ commit_develop() {
   message="$(build_commit_message)"
 
   echo "Committing to $DEVELOP_BRANCH: $message"
-  git commit -m "$message"
+  git -C "$ROOT" commit -m "$message"
 }
 
 push_develop() {
   echo "Pushing $DEVELOP_BRANCH to $REMOTE"
-  git push "$REMOTE" "$DEVELOP_BRANCH"
+  git -C "$ROOT" push "$REMOTE" "$DEVELOP_BRANCH"
 }
 
 promote_to_main() {
   echo "Checking latest $MAIN_BRANCH from $REMOTE"
-  git fetch "$REMOTE" "$MAIN_BRANCH"
+  git -C "$ROOT" fetch "$REMOTE" "$MAIN_BRANCH"
 
   ensure_branch "$MAIN_BRANCH"
-  git pull --ff-only "$REMOTE" "$MAIN_BRANCH"
+  git -C "$ROOT" pull --ff-only "$REMOTE" "$MAIN_BRANCH"
 
   echo "Merging $DEVELOP_BRANCH into $MAIN_BRANCH"
-  git merge --no-edit "$DEVELOP_BRANCH"
+  git -C "$ROOT" merge --no-edit "$DEVELOP_BRANCH"
 
   echo "Pushing $MAIN_BRANCH to $REMOTE"
-  git push "$REMOTE" "$MAIN_BRANCH"
+  git -C "$ROOT" push "$REMOTE" "$MAIN_BRANCH"
 }
 
 TEMP_ENV_FILES=()

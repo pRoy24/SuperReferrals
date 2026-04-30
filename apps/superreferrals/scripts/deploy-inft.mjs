@@ -1,14 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createPublicClient, createWalletClient, defineChain, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
+const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(appRoot, "../..");
 const requestedNetwork = String(process.argv[2] || process.env.OG_NETWORK || "galileo").toLowerCase();
 const isMainnet = ["mainnet", "production", "og-mainnet"].includes(requestedNetwork);
 const initialEnvKeys = new Set(Object.keys(process.env));
-loadEnvFile(".env");
-loadEnvFile(".env.local");
-loadEnvFile(isMainnet ? ".env.production" : ".env.staging", { override: true });
+loadEnvFile(path.join(appRoot, ".env"));
+loadEnvFile(path.join(appRoot, ".env.local"));
+loadEnvFile(path.join(appRoot, isMainnet ? ".env.production" : ".env.staging"), { override: true });
 
 const chainId = Number(
   process.env.INFT_CHAIN_ID ||
@@ -28,7 +31,7 @@ if (!privateKey) {
   throw new Error("OG_PRIVATE_KEY is required to deploy SuperReferralsINFT");
 }
 
-const artifactPath = path.resolve("artifacts/contracts/SuperReferralsINFT.sol/SuperReferralsINFT.json");
+const artifactPath = path.join(repoRoot, "artifacts/contracts/SuperReferralsINFT.sol/SuperReferralsINFT.json");
 if (!fs.existsSync(artifactPath)) {
   throw new Error("Missing INFT artifact. Run npm run contracts:compile first.");
 }
@@ -65,8 +68,7 @@ if (receipt.status !== "success" || !receipt.contractAddress) {
 console.log(`INFT_CONTRACT_ADDRESS=${receipt.contractAddress}`);
 console.log(`Explorer: ${explorerUrl.replace(/\/$/, "")}/tx/${txHash}`);
 
-function loadEnvFile(fileName, options = {}) {
-  const envPath = path.resolve(fileName);
+function loadEnvFile(envPath, options = {}) {
   if (!fs.existsSync(envPath)) {
     return;
   }

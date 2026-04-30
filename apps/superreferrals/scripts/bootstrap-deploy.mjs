@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const monorepoRoot = path.resolve(repoRoot, "../..");
 const defaultConfigPath = path.join(repoRoot, "deploy.json");
 const DEFAULT_REDIS_PLAN = "free";
 const REDIS_ENV_KEYS = [
@@ -248,9 +249,19 @@ function resolveTarget(config, targetName, options) {
 
 function readToken() {
   if (process.env.VERCEL_TOKEN) return process.env.VERCEL_TOKEN;
-  const tokenPath = path.resolve(repoRoot, process.env.VERCEL_TOKEN_FILE || ".vercel-token");
-  if (!existsSync(tokenPath)) return "";
-  return readFileSync(tokenPath, "utf8").trim();
+  const configuredTokenFile = process.env.VERCEL_TOKEN_FILE;
+  const tokenPaths = configuredTokenFile
+    ? [path.resolve(repoRoot, configuredTokenFile)]
+    : [
+        path.join(repoRoot, ".vercel-token"),
+        path.join(monorepoRoot, ".vercel-token")
+      ];
+  for (const tokenPath of tokenPaths) {
+    if (existsSync(tokenPath)) {
+      return readFileSync(tokenPath, "utf8").trim();
+    }
+  }
+  return "";
 }
 
 function booleanString(value, fallback) {

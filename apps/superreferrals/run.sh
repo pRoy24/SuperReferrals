@@ -7,6 +7,7 @@ cd "$ROOT"
 LOCAL_ENV_FILE="${LOCAL_ENV_FILE:-.env.local}"
 LOCAL_ENV_EXAMPLE="${LOCAL_ENV_EXAMPLE:-.env.example}"
 LOCAL_CONFIGURE_LIVE="${LOCAL_CONFIGURE_LIVE:-false}"
+NPM_CACHE_DIR="${NPM_CACHE_DIR:-../../.npm-cache}"
 PORT="${PORT:-3000}"
 
 die() {
@@ -218,7 +219,7 @@ configure_local_env() {
 
 ensure_dependencies() {
   if [[ ! -d node_modules ]]; then
-    npm install
+    npm install --cache "$NPM_CACHE_DIR"
   fi
 }
 

@@ -124,7 +124,7 @@ function optionalRedisRestConfig(): RedisRestConfig | undefined {
 function missingRedisConfigError() {
   return new Error([
     "SuperReferrals needs durable Redis KV in deployed/serverless runtimes.",
-    "`./deploy.sh` configures the Vercel Upstash Redis integration by default, or run `npm run deploy:setup:staging` / `npm run deploy:setup:production` directly.",
+    "`./deploy.sh superreferrals` configures the Vercel Upstash Redis integration by default, or run `npm run deploy:setup:staging` / `npm run deploy:setup:production` from apps/superreferrals directly.",
     "Vercel should inject KV_REST_API_URL and KV_REST_API_TOKEN after the integration is linked; set those env vars manually only when overriding the managed Redis resource."
   ].join(" "));
 }

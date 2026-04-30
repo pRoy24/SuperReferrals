@@ -13,9 +13,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const monorepoRoot = path.resolve(repoRoot, "../..");
 
 const DEFAULT_TEAM = "proy24s-projects";
-const DEFAULT_PROJECT = "super-referrals";
+const DEFAULT_PROJECT = "superstores";
 
 const DEFAULT_TARGETS = {
   staging: {
@@ -270,10 +271,17 @@ function normalizeBranch(branch) {
 
 function readToken(options) {
   if (process.env.VERCEL_TOKEN) return process.env.VERCEL_TOKEN;
-  const tokenFile = process.env.VERCEL_TOKEN_FILE || ".vercel-token";
-  const tokenPath = path.resolve(repoRoot, tokenFile);
-  if (existsSync(tokenPath)) {
-    return readFileSync(tokenPath, "utf8").trim();
+  const configuredTokenFile = process.env.VERCEL_TOKEN_FILE;
+  const tokenPaths = configuredTokenFile
+    ? [path.resolve(repoRoot, configuredTokenFile)]
+    : [
+        path.join(repoRoot, ".vercel-token"),
+        path.join(monorepoRoot, ".vercel-token")
+      ];
+  for (const tokenPath of tokenPaths) {
+    if (existsSync(tokenPath)) {
+      return readFileSync(tokenPath, "utf8").trim();
+    }
   }
   return options.useGlobalToken ? "" : "";
 }

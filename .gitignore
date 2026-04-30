@@ -37,6 +37,7 @@ gas-report.txt
 
 # Local app state and development caches
 .superreferrals/
+.superstores/
 .npm-cache/
 .turbo/
 .swc/

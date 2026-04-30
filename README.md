@@ -1,7 +1,7 @@
 # SuperReferrals
 
 <p align="center">
-  <img src="public/superreferrals-logo.png" alt="SuperReferrals" width="290" />
+  <img src="apps/superreferrals/public/superreferrals-logo.png" alt="SuperReferrals" width="290" />
 </p>
 
 <p align="center">
@@ -197,50 +197,51 @@ Use `/storefronts` or a referral route to:
 
 ## For Developers
 
-SuperReferrals is a Next.js app using the App Router, React client components, local or Redis-backed mutable state, Samsar video APIs, EVM wallet flows, 0G services, and Solidity contracts.
+SuperReferrals is a Next.js app in `apps/superreferrals` using the App Router, React client components, local or Redis-backed mutable state, Samsar video APIs, EVM wallet flows, 0G services, and Solidity contracts.
 
 ### Stack
 
 | Layer | Implementation |
 | --- | --- |
-| Web app | Next.js, React, TypeScript, and global CSS in `src/app/globals.css` |
+| Web app | Next.js, React, TypeScript, and global CSS in `apps/superreferrals/src/app/globals.css` |
 | Video generation | `samsar-js` processor APIs |
 | Payments | EVM wallet transactions, USDC/ETH/WETH/USDT token support, KeeperHub settlement, and Uniswap quote/swap helpers |
 | Storage and AI | 0G chain, 0G storage, 0G DA, 0G compute |
 | Contracts | Hardhat plus Solidity contracts in `contracts/` |
-| App state | Local `.superreferrals/*.json` in development or Vercel KV/Upstash Redis in deployed runtimes |
+| App state | Local `apps/superreferrals/.superreferrals/*.json` in development or Vercel KV/Upstash Redis in deployed runtimes |
 
 ### Important Source Areas
 
 | Path | Purpose |
 | --- | --- |
-| `src/app/page.tsx` | Landing page data loader. |
-| `src/components/LandingPageClient.tsx` | Landing page UI and route launcher. |
-| `src/components/Dashboard.tsx` | Storefront owner console. |
-| `src/components/UserLandingPage.tsx` | Public storefront/referral creator workflow. |
-| `src/components/StorefrontDirectory.tsx` | Public storefront marketplace. |
-| `src/components/FeedPage.tsx` | Public video feed and social actions. |
-| `src/components/INFTPage.tsx` | iNFT playback, paid actions, metadata, and sharing. |
-| `src/components/AdminPage.tsx` | Admin feed controls and analytics. |
-| `src/components/PageAssistant.tsx` | Page-aware assistant UI. |
-| `src/lib/pricing.ts` | Model pricing, render limits, and iNFT action prices. |
-| `src/lib/payment-verification.ts` | Payment verification before render execution. |
-| `src/lib/zero-g.ts`, `src/lib/zero-g-chain.ts` | 0G storage/chain helpers. |
-| `src/lib/agent-framework.ts` | Agent Town plan, receipts, settlement context, and AXL timeline. |
+| `apps/superreferrals/src/app/page.tsx` | Landing page data loader. |
+| `apps/superreferrals/src/components/LandingPageClient.tsx` | Landing page UI and route launcher. |
+| `apps/superreferrals/src/components/Dashboard.tsx` | Storefront owner console. |
+| `apps/superreferrals/src/components/UserLandingPage.tsx` | Public storefront/referral creator workflow. |
+| `apps/superreferrals/src/components/StorefrontDirectory.tsx` | Public storefront marketplace. |
+| `apps/superreferrals/src/components/FeedPage.tsx` | Public video feed and social actions. |
+| `apps/superreferrals/src/components/INFTPage.tsx` | iNFT playback, paid actions, metadata, and sharing. |
+| `apps/superreferrals/src/components/AdminPage.tsx` | Admin feed controls and analytics. |
+| `apps/superreferrals/src/components/PageAssistant.tsx` | Page-aware assistant UI. |
+| `apps/superreferrals/src/lib/pricing.ts` | Model pricing, render limits, and iNFT action prices. |
+| `apps/superreferrals/src/lib/payment-verification.ts` | Payment verification before render execution. |
+| `apps/superreferrals/src/lib/zero-g.ts`, `apps/superreferrals/src/lib/zero-g-chain.ts` | 0G storage/chain helpers. |
+| `apps/superreferrals/src/lib/agent-framework.ts` | Agent Town plan, receipts, settlement context, and AXL timeline. |
 
 ## Run Locally
 
 Run the guided local script:
 
 ```bash
+cd apps/superreferrals
 ./run.sh
 ```
 
 Then open `http://localhost:3000`.
 
-`./run.sh` creates `.env.local` from `.env.example` when missing, prompts for required local secrets, installs dependencies if `node_modules` is missing, frees `PORT` when needed, and starts `npm run dev`. Press Enter at the session/admin secret prompts to generate secure local values.
+`./run.sh` creates `apps/superreferrals/.env.local` from `apps/superreferrals/.env.example` when missing, prompts for required local secrets, installs dependencies if `node_modules` is missing, frees `PORT` when needed, and starts `npm run dev`. Press Enter at the session/admin secret prompts to generate secure local values.
 
-For a no-key local demo, keep the default mock mode in `.env.local`:
+For a no-key local demo, keep the default mock mode in `apps/superreferrals/.env.local`:
 
 ```bash
 SUPERREFERRALS_MOCKS=true
@@ -252,9 +253,9 @@ To configure live providers locally, run:
 LOCAL_CONFIGURE_LIVE=true ./run.sh
 ```
 
-or set `SUPERREFERRALS_MOCKS=false` in `.env.local` and rerun `./run.sh`.
+or set `SUPERREFERRALS_MOCKS=false` in `apps/superreferrals/.env.local` and rerun `./run.sh` from `apps/superreferrals`.
 
-If `.env.local` does not exist yet, seed it from another template:
+If `apps/superreferrals/.env.local` does not exist yet, seed it from another template:
 
 ```bash
 LOCAL_ENV_EXAMPLE=.env.staging.example ./run.sh
@@ -269,23 +270,23 @@ npm run build
 npm run contracts:compile
 ```
 
-Deploy staging with the remote guided script:
+From the repository root, deploy staging with the remote guided script:
 
 ```bash
-./deploy.sh
+./deploy.sh superreferrals
 ```
 
 Deploy staging and production:
 
 ```bash
-./deploy.sh --production
+./deploy.sh superreferrals --production
 ```
 
-`./deploy.sh` is remote-only. It checks Vercel auth/project setup first, prompts the deployer to log in or paste a token if needed, lists key names for the target Vercel environment without pulling secret values, creates the target env file when missing, and prompts only for keys absent from that Vercel environment. Before deploy it syncs only absent Vercel keys from the local target env file, and the sync runs without overwrite mode, so existing Vercel values are not replaced. With `--production`, it runs the same setup for staging and production before promoting `develop` to `main`.
+`./deploy.sh superreferrals` is remote-only. It changes into `apps/superreferrals` for Vercel env setup and storage bootstrap, checks Vercel auth/project setup first, prompts the deployer to log in or paste a token if needed, lists key names for the target Vercel environment without pulling secret values, creates the target env file when missing, and prompts only for keys absent from that Vercel environment. Before deploy it syncs only absent Vercel keys from the app target env file, and the sync runs without overwrite mode, so existing Vercel values are not replaced. With `--production`, it runs the same setup for staging and production before promoting `develop` to `main`.
 
 ## Environment Notes
 
-The app defaults to local JSON state in development when Redis env vars are absent. Deployed serverless runtimes require Vercel KV/Upstash Redis through `KV_REST_API_URL`/`KV_REST_API_TOKEN` or `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`.
+The app defaults to local JSON state in development when Redis env vars are absent. Local app state lives under `apps/superreferrals/.superreferrals` by default. Deployed serverless runtimes require Vercel KV/Upstash Redis through `KV_REST_API_URL`/`KV_REST_API_TOKEN` or `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`.
 
 Key env groups:
 
@@ -327,20 +328,21 @@ Non-production runtime maps mainnet transaction configs back to Sepolia unless b
 
 ## Deploy and Ops
 
-The Vercel project is `proy24s-projects/super-referrals`.
+The Vercel project is `proy24s-projects/super-referrals`. Its Vercel Root Directory should be `apps/superreferrals`.
 
 Bootstrap storage, commit, push, and deploy:
 
 ```bash
-./deploy.sh
-./deploy.sh --production
+./deploy.sh superreferrals
+./deploy.sh superreferrals --production
 ```
 
-`deploy.sh` checks Vercel auth/project setup, lists existing key names for each target Vercel environment, creates `.env.staging` or `.env.production` from the matching example when missing, prompts only for values absent from the target Vercel environment, syncs only absent keys as sensitive env vars without overwriting existing remote keys, provisions storage, then stages and commits the current worktree before pushing `develop`; `--production` also prepares production env/storage and promotes `develop` to `main`. Run it only from an intentional worktree.
+`deploy.sh` checks Vercel auth/project setup, lists existing key names for each target Vercel environment, creates `apps/superreferrals/.env.staging` or `apps/superreferrals/.env.production` from the matching example when missing, prompts only for values absent from the target Vercel environment, syncs only absent keys as sensitive env vars without overwriting existing remote keys, provisions storage from inside `apps/superreferrals`, then stages and commits the current worktree before pushing `develop`; `--production` also prepares production env/storage and promotes `develop` to `main`. Run it only from an intentional worktree.
 
 Preview env sync:
 
 ```bash
+cd apps/superreferrals
 npm run vercel:env:sync -- staging --dry-run
 npm run vercel:env:sync -- production --dry-run
 ```
@@ -348,6 +350,7 @@ npm run vercel:env:sync -- production --dry-run
 Apply env sync only when the target env files contain real values:
 
 ```bash
+cd apps/superreferrals
 npm run vercel:env:staging
 npm run vercel:env:production
 ```
@@ -355,11 +358,12 @@ npm run vercel:env:production
 Direct storage bootstrap:
 
 ```bash
+cd apps/superreferrals
 npm run deploy:setup:staging
 npm run deploy:setup:production
 ```
 
-`deploy.json` defines the Vercel project, Upstash Redis setup, staging/production env files, and 0G storage requirements. Vercel env changes apply to new deployments only, so redeploy or push after syncing.
+`apps/superreferrals/deploy.json` defines the Vercel project, Upstash Redis setup, staging/production env files, and 0G storage requirements. Vercel env changes apply to new deployments only, so redeploy or push after syncing.
 
 ## Contracts
 
@@ -375,12 +379,14 @@ Contracts live in `contracts/`.
 Compile:
 
 ```bash
+cd apps/superreferrals
 npm run contracts:compile
 ```
 
 Deploy iNFT collection:
 
 ```bash
+cd apps/superreferrals
 npm run contracts:deploy:inft:testnet
 npm run contracts:deploy:inft:mainnet
 ```

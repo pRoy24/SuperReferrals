@@ -1,0 +1,52 @@
+{
+  "vercel": {
+    "defaultScope": "proy24s-projects",
+    "defaultProject": "superstores",
+    "blob": {
+      "enabled": false,
+      "storeName": "superstores-private",
+      "access": "private",
+      "region": "iad1"
+    },
+    "redis": {
+      "integration": "upstash/upstash-kv",
+      "resourceName": "superstores-redis",
+      "plan": "free",
+      "primaryRegion": "iad1",
+      "eviction": false,
+      "prodPack": false,
+      "autoUpgrade": false
+    }
+  },
+  "targets": {
+    "staging": {
+      "envFile": ".env.staging",
+      "environment": "preview",
+      "branch": "develop"
+    },
+    "production": {
+      "envFile": ".env.production",
+      "environment": "production",
+      "branch": "",
+      "redisFromTarget": "staging"
+    }
+  },
+  "zeroG": {
+    "required": [
+      "NEXT_PUBLIC_SUPERSTORES_COLLECTIBLES_CHAIN",
+      "NEXT_PUBLIC_SUPERSTORES_PAYMENT_CHAIN",
+      "OG_CHAIN_ID",
+      "OG_RPC_URL",
+      "OG_STORAGE_INDEXER_RPC"
+    ],
+    "recommended": [
+      "OG_STORAGE_GATEWAY_URL",
+      "SUPERSTORES_ADMIN_SECRET",
+      "SUPERSTORES_WEBHOOK_SECRET",
+      "SUPERSTORES_PLATFORM_TREASURY_WALLET",
+      "KEEPERHUB_API_KEY",
+      "KEEPERHUB_PAYMENT_WORKFLOW_ID_SEPOLIA",
+      "KEEPERHUB_PAYMENT_WORKFLOW_ID_BASE"
+    ]
+  }
+}

@@ -16,7 +16,7 @@
     "deploy:setup": "node scripts/bootstrap-deploy.mjs",
     "deploy:setup:staging": "node scripts/bootstrap-deploy.mjs staging",
     "deploy:setup:production": "node scripts/bootstrap-deploy.mjs production",
-    "contracts:compile": "hardhat compile",
+    "contracts:compile": "hardhat --config ../../hardhat.config.cjs compile",
     "contracts:deploy:inft": "node scripts/deploy-inft.mjs",
     "contracts:deploy:inft:testnet": "node scripts/deploy-inft.mjs galileo",
     "contracts:deploy:inft:mainnet": "node scripts/deploy-inft.mjs mainnet"

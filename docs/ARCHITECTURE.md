@@ -22,14 +22,14 @@ The generation path is:
 
 ## Live Adapters
 
-- Samsar: `src/lib/samsar.ts`
-- Uniswap Trading API: `src/lib/uniswap.ts`
-- KeeperHub direct execution: `src/lib/keeperhub.ts`
-- 0G Storage: `src/lib/zero-g.ts`
-- INFT contract mint: `src/lib/inft.ts`
-- 0G Agent application: `src/lib/agent-framework.ts`
-- ENS lookup: `src/lib/ens.ts`
-- Gensyn AXL peer messaging: `src/lib/axl.ts`
+- Samsar: `apps/superreferrals/src/lib/samsar.ts`
+- Uniswap Trading API: `apps/superreferrals/src/lib/uniswap.ts`
+- KeeperHub direct execution: `apps/superreferrals/src/lib/keeperhub.ts`
+- 0G Storage: `apps/superreferrals/src/lib/zero-g.ts`
+- INFT contract mint: `apps/superreferrals/src/lib/inft.ts`
+- 0G Agent application: `apps/superreferrals/src/lib/agent-framework.ts`
+- ENS lookup: `apps/superreferrals/src/lib/ens.ts`
+- Gensyn AXL peer messaging: `apps/superreferrals/src/lib/axl.ts`
 
 All adapters return deterministic mock results when `SUPERREFERRALS_MOCKS=true`, which keeps local development usable without keys. Staging and production set `SUPERREFERRALS_MOCKS=false` once the live provider keys and contract addresses are configured. For Samsar, each storefront owner connects through the storefront portal, then the backend provisions a long-lived APP_KEY using `SAMSAR_APP_SECRET`.
 
