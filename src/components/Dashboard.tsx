@@ -651,6 +651,7 @@ export default function Dashboard() {
           <a className="nav-item" href="#published-videos"><Radio size={16} /> Published videos</a>
           <a className="nav-item" href="#agent-town"><Network size={16} /> Agent Town</a>
           <a className="nav-item" href="#render-history"><Bot size={16} /> Render history</a>
+          {customerLanding && <a className="nav-item" href={customerLanding}><ExternalLink size={16} /> Public view</a>}
           <a className="nav-item" href="/storefronts"><Store size={16} /> Storefront directory</a>
         </nav>
       </aside>
@@ -669,6 +670,11 @@ export default function Dashboard() {
           </div>
           <div className="page-top-actions">
             <LanguageSelector />
+            {customerLanding && (
+              <a className="btn primary" href={customerLanding}>
+                <ExternalLink size={16} /> Public facing URL
+              </a>
+            )}
             <button className="btn" onClick={() => load()} title="Refresh data">
               <RefreshCw size={16} /> Refresh
             </button>
@@ -878,7 +884,6 @@ export default function Dashboard() {
                 <button className="btn primary" onClick={saveCustomer} disabled={busy === "customer" || !hasCreditedProcessorAccount}>
                   <Save size={16} /> Save setup
                 </button>
-                {customerLanding && <a className="btn" href={customerLanding}><ExternalLink size={16} /> Open user landing</a>}
                 <a className="btn" href="/storefronts"><Store size={16} /> Directory</a>
               </div>
             </div>
