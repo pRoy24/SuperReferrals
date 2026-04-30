@@ -27,9 +27,11 @@ import {
 } from "@/lib/app-language-client";
 import { DEFAULT_APP_LANGUAGE, normalizeAppLanguage } from "@/lib/localization";
 import { landingCopy } from "@/lib/landing-localization";
+import type { EnvDiagnostics } from "@/lib/env-diagnostics";
 import type { AppLanguageCode, PublicFeedItem } from "@/lib/types";
 
 type LandingPageClientProps = {
+  envDiagnostics: EnvDiagnostics;
   featuredFeedItems: PublicFeedItem[];
   inftHref: string;
   initialLanguage: AppLanguageCode;
@@ -42,6 +44,7 @@ const blockchainIcons = [Coins, Film, Cpu, KeyRound, GitBranch, ShieldCheck];
 const howStepIcons = [Store, Link2, Sparkles, GitBranch, Coins, Database, Cpu];
 
 export default function LandingPageClient({
+  envDiagnostics,
   featuredFeedItems,
   inftHref,
   initialLanguage,
@@ -78,6 +81,24 @@ export default function LandingPageClient({
           </a>
         </div>
       </nav>
+
+      {envDiagnostics.issues.length > 0 && (
+        <section className="environment-banner landing-env-banner" role="status" aria-label="Deployment environment setup">
+          <span>Admin setup</span>
+          <div>
+            <p>
+              {envDiagnostics.environment} configuration needs review. The app can still run, but these values should be set before live storefront creation and payments.
+            </p>
+            <ul>
+              {envDiagnostics.issues.map((issue) => (
+                <li key={`${issue.key}:${issue.message}`}>
+                  <strong>{issue.key}</strong>: {issue.message} {issue.howToSet}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
 
       <section className="landing-hero">
         <div className="landing-hero-copy">

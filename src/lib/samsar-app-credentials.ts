@@ -22,6 +22,10 @@ export function requireSamsarAppSecret() {
   return secret;
 }
 
+export function hasUsableSamsarAppSecret() {
+  return env("SAMSAR_APP_SECRET").length >= MIN_APP_SECRET_LENGTH;
+}
+
 export function hasStoredSamsarAppKey(customer?: Pick<Customer, "samsarAccount">) {
   return Boolean(customer?.samsarAccount?.appKeyHash && customer.samsarAccount.appKeyEncrypted);
 }

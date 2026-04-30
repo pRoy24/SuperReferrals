@@ -8,6 +8,7 @@ import {
 import { hasStoredSamsarAppKey, samsarAppClientCredentials } from "@/lib/samsar-app-credentials";
 import { fetchSamsarProcessorCredits } from "@/lib/samsar-processor";
 import { mutateStore, publicCustomer, readStore, upsertCustomer } from "@/lib/store";
+import { assertUsableEvmAddress } from "@/lib/wallet-address";
 
 export async function POST(request: Request) {
   try {
@@ -76,7 +77,7 @@ export async function POST(request: Request) {
       if (!rawWallet) {
         throw new Error("wallet is required");
       }
-      const walletAddress = normalizeWallet(rawWallet);
+      const walletAddress = normalizeWallet(assertUsableEvmAddress(rawWallet, "Store owner payout wallet"));
       if (!hasStoredSamsarAppKey(customer) && !requestAuthToken && !customer.samsarAccount?.authToken && !customer.samsarAccount?.apiKey) {
         throw new Error("Sign in before linking a wallet to your SuperReferrals account.");
       }

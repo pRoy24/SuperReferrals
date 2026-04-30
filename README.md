@@ -5,11 +5,11 @@
 </p>
 
 <p align="center">
-  <strong>Turn referral links into videos that convert.</strong>
+  <strong>Turn referral links into product videos and editable iNFTs.</strong>
 </p>
 
 <p align="center">
-  Give every recommendation a product story, visual style, QR-ready call to action, and editable onchain video record.
+  Give every recommendation a product story, visual style, QR-ready call to action, and auditable onchain video record.
 </p>
 
 <p align="center">
@@ -22,9 +22,9 @@
 
 ![SuperReferrals live landing page](docs/screenshots/staging-landing.png)
 
-SuperReferrals replaces bare tracking links with product video storefronts. A storefront owner configures products, models, pricing, wallet rules, and render policies. A creator or buyer opens a referral route, connects a wallet, pays the storefront price, generates a product video, and receives a public iNFT record that can be shared, copied, translated, edited, or audited.
+SuperReferrals replaces bare tracking links with storefront-controlled video generation. A storefront owner configures products, models, pricing, wallet access, and render policies. A creator or buyer opens a storefront or referral route, connects a wallet, pays the quoted price, generates a product video, and receives a public iNFT record that can be shared, copied, translated, edited, and audited.
 
-The app is built for crypto-native referral commerce: catalog-driven videos, storefront-controlled pricing, 0G storage and compute, KeeperHub payment settlement, Uniswap swap support, Samsar video generation, and public feed discovery.
+The app is built for crypto-native referral commerce: catalog-driven videos, storefront-controlled pricing, EVM payment verification, KeeperHub settlement, optional Uniswap routing, Samsar video generation, 0G storage/compute, and public feed discovery.
 
 ## Live Staging
 
@@ -32,47 +32,47 @@ Use this deployment for hackathon review and product testing:
 
 [https://super-referrals-git-develop-proy24s-projects.vercel.app/](https://super-referrals-git-develop-proy24s-projects.vercel.app/)
 
-The current staging deployment includes a demo storefront, a referral route, completed renders, public feed items, and iNFT pages. Read-only review works without a wallet. Rendering, copy purchases, and paid edits require a browser wallet on the configured payment network and must satisfy the storefront's wallet access policy.
+The current staging deployment includes a demo storefront, a referral route, completed renders, public feed items, and iNFT pages. Read-only pages work without a wallet. Rendering, copy purchases, and paid edits require a browser wallet on the configured payment network and must satisfy the storefront's wallet access policy.
 
 Screenshots in this README were captured from live staging on 2026-04-30.
 
 ## What It Is
 
-SuperReferrals is three products in one:
+SuperReferrals is organized around three audiences:
 
 | Audience | What they get |
 | --- | --- |
 | Storefront owners | A console to publish video storefronts, buy credits, link payout wallets, set render rules, choose models, price videos and iNFT actions, and inspect render/agent history. |
-| Creators and buyers | A clean referral page where they connect a wallet, build a product video from images, catalog metadata, prompts, CTAs, and language settings, then pay and track the render. |
-| Hackathon judges and developers | A full-stack demo of product referral commerce across Next.js, Samsar video generation, EVM payments, 0G storage/compute, iNFT records, assistant UX, and agent receipts. |
+| Creators and buyers | A public storefront or referral page where they connect a wallet, build a product video from images, catalog metadata, prompts, CTAs, and language settings, then pay and track the render. |
+| Hackathon judges and developers | A full-stack reference flow across Next.js, Samsar video generation, EVM payments, KeeperHub settlement, 0G storage/compute, iNFT records, assistant UX, and agent receipts. |
 
 ## Quick Tour
 
-### 1. Start From A Storefront
+### 1. Start from a storefront
 
-The storefront directory lets users browse created storefronts, compare model limits and pricing, then open the storefront that matches their render needs.
+The storefront directory lets users browse public storefronts, compare model limits and pricing, and open the storefront that matches their render needs.
 
 ![Live storefront directory](docs/screenshots/staging-storefront-directory.png)
 
-### 2. Generate A Product Video
+### 2. Generate a product video
 
-The public creator page supports wallet connection, storefront pricing, simple wizard mode, advanced JSON mode, image uploads, metadata, prompts, language selection, CTA outro/footer options, feed publishing, and copy-purchase settings.
+The public creator page supports wallet connection, storefront pricing, simple wizard mode, advanced JSON mode, image uploads, product metadata, prompts, language/subtitle settings, CTA outro/footer options, feed publishing, and copy-purchase settings.
 
 ![Live product video creator](docs/screenshots/staging-video-creator.png)
 
-### 3. Browse The Video Feed
+### 3. Browse the public feed
 
-The feed is a public discovery surface for completed renders. It supports mobile and desktop layouts, deep links to specific renders, language-aware filtering, views, likes, comments, share links, and a page assistant.
+The feed is a public discovery surface for completed renders. It supports mobile and desktop layouts, deep links to specific renders, language filtering, views, likes, comments, share links, and a page assistant.
 
 ![Live video feed](docs/screenshots/staging-feed.png)
 
-### 4. Inspect And Operate On The iNFT
+### 4. Inspect and edit the iNFT
 
-Every completed render can become a public iNFT page with playback, ownership metadata, 0G persistence records, share actions, copy purchase, and paid edit operations such as retranslation, subtitle updates, outro updates, and footer updates.
+Every completed render can be opened as a public iNFT page with playback, ownership metadata, 0G persistence records, share actions, copy purchase, owner-gated download, and paid edit operations such as retranslation, subtitle updates, outro updates, and footer updates.
 
 ![Live iNFT viewer](docs/screenshots/staging-inft-viewer.png)
 
-### 5. Manage The Storefront
+### 5. Manage the storefront
 
 The owner console is where storefront owners purchase credits, connect their owner wallet, configure public storefront details, set USDC pricing, control model/aspect/image limits, manage wallet allowlists, review videos, run Agent Town, and inspect render history.
 
@@ -80,14 +80,14 @@ The owner console is where storefront owners purchase credits, connect their own
 
 ## Core Flow
 
-1. A storefront owner opens `/dashboard`, signs in or buys credits, connects an owner wallet, and publishes a storefront.
+1. A storefront owner opens `/dashboard`, connects or creates a Samsar-backed account, buys credits if needed, connects an owner wallet, and publishes a storefront.
 2. The owner chooses allowed video models, aspect ratios, max images, wallet access mode, daily limits, and pricing.
 3. A creator opens `/storefronts`, `/storefronts/:customerId`, or `/r/:referrerCode`.
 4. The creator connects a wallet and creates a render from product images, listing metadata, prompt direction, CTA URL, language, and publish settings.
 5. The app quotes payment in the selected token and verifies the mined transaction before starting the render.
-6. Samsar generates the video, SuperReferrals stores render metadata, and 0G persistence/iNFT records make the result auditable.
+6. Samsar generates the video. SuperReferrals stores render metadata, publishes feed/iNFT records when requested, and writes 0G persistence references when live providers are configured.
 7. The completed video appears on the creator's storefront history, the public feed if published, and `/inft/:id`.
-8. Owners or purchasers can run paid iNFT operations: translate, join, add/remove subtitles, add/update outro, and update footer.
+8. Owners or purchasers can run paid iNFT operations exposed by storefront pricing, including retranslation, subtitle updates, outro updates, and footer updates.
 
 ## View Map
 
@@ -96,12 +96,12 @@ The owner console is where storefront owners purchase credits, connect their own
 | Landing page | `/` | Explains the product, shows the campaign flow, links to the console, storefront directory, feed, and latest video, and embeds the page assistant. |
 | Storefront owner console | `/dashboard` | Storefront setup, Samsar account/credit purchase, owner wallet linking, public pricing, model rules, allowlists, published videos, Agent Town, and render history. |
 | Storefront directory | `/storefronts` | Lists public storefronts with pricing, render limits, wallet policy, rating summary, render count, route links, and open-store actions. |
-| Storefront creator | `/storefronts/:customerId` | Direct public storefront page for creating product videos and iNFTs from a selected customer storefront. |
+| Storefront creator | `/storefronts/:customerId` | Direct public storefront page for creating product videos and iNFTs from a selected storefront. |
 | Referral creator | `/r/:referrerCode` | Referral-specific creator route with the same generation workflow plus referrer attribution. |
 | Public feed | `/feed` | Public video gallery with mobile/desktop modes, search, language filtering, playback controls, likes, comments, and assistant. |
 | Focused feed item | `/feed/:generationId` | Opens the feed focused on one generation. |
 | Focused feed mode | `/feed/:generationId/:viewMode` | Opens one generation in `mobile` or `desktop` feed mode. |
-| iNFT viewer | `/inft/:id` | Public render ownership page with video playback, owner-gated download, copy purchase, paid edit actions, AXL peer message, 0G persistence, metadata, and sharing. |
+| iNFT viewer | `/inft/:id` | Public render ownership page with video playback, owner-gated download, copy purchase, paid edit actions, AXL peer messaging, 0G persistence, metadata, and sharing. |
 | Admin dashboard | `/admin` | Secret-protected feed operations: analytics, language/aspect filters, drag reorder, unpublish, and delete. |
 | Payment success | `/payment_success` | Handles credit checkout completion and redirects back to the owner console when credits are ready. |
 | Payment cancelled | `/payment_cancel` | Confirms checkout cancellation and routes the user back to the console. |
@@ -109,11 +109,11 @@ The owner console is where storefront owners purchase credits, connect their own
 
 ## Why It Matters
 
-- Referral links become useful media, not opaque redirects.
+- Referral links become useful media instead of opaque redirects.
 - Product pages can pull catalog data once and reuse it across campaigns.
 - Storefront owners keep control of model menus, prices, accepted wallets, render limits, and iNFT operation prices.
 - Buyers get context before they purchase or share.
-- Creators get reusable videos, QR-ready CTAs, public gallery placement, and editable iNFT ownership.
+- Creators get reusable videos, QR-ready CTAs, optional public gallery placement, and editable iNFT ownership.
 - Judges can inspect a complete cross-system workflow: payments, generation, storage, onchain records, assistant UX, and agent orchestration.
 
 ## Product Capabilities
@@ -123,8 +123,8 @@ The owner console is where storefront owners purchase credits, connect their own
 | Catalog-ready generation | Product images, scene text, campaign metadata, listing details, CTA URLs, logo URLs, and feed tags can be composed into each render. |
 | Simple and advanced creation | The simple wizard is optimized for storefront users. Advanced JSON exposes the assembled SuperReferrals generation payload. |
 | Model and policy control | Storefronts can enable specific models, aspect ratios, max image counts, daily wallet limits, and whitelist-only access. |
-| Payment rails | Direct token transfers, KeeperHub settlement paths, and Uniswap-assisted swaps are supported through quote and verification APIs. |
-| iNFT lifecycle | Completed videos can be copied, translated, joined, subtitled, and updated while preserving lineage and ownership context. |
+| Payment rails | Direct token transfers, KeeperHub-mediated settlement, and Uniswap-assisted swaps are supported through quote and verification APIs. |
+| iNFT lifecycle | Completed videos can be copied, retranslated, subtitled, and updated while preserving lineage and ownership context. |
 | Public discovery | Published renders appear in the feed with view, like, comment, language, and aspect-mode behavior. |
 | Page assistant | Landing, storefront, feed, and iNFT views include a contextual assistant backed by 0G compute. |
 | Agent Town | The owner console can run a multi-agent workflow with 0G receipts, KeeperHub settlement context, AXL messages, and rollback controls. |
@@ -158,13 +158,13 @@ Use `/dashboard` to:
 - Create multiple storefronts under one account.
 - Set public name, category, tags, support email, website, ENS name, and referral base URL.
 - Configure render pricing through model-specific USDC-per-second settings.
-- Price iNFT actions such as translate, join, subtitles, outro, and footer updates.
+- Set prices for iNFT operations such as translation, joins, subtitle changes, outro changes, and footer updates.
 - Restrict render access by model, aspect ratio, max images, daily wallet limit, and wallet allowlist.
 - Publish a storefront into `/storefronts`.
 - Review generated videos, publish/unpublish them, and inspect recent render tasks.
 - Run Agent Town for agent-planned campaign operations and 0G receipts.
 
-## For Creators And Users
+## For Creators and Users
 
 Use `/storefronts` or a referral route to:
 
@@ -188,7 +188,7 @@ SuperReferrals is a Next.js app using the App Router, React client components, l
 | --- | --- |
 | Web app | Next.js, React, TypeScript, and global CSS in `src/app/globals.css` |
 | Video generation | `samsar-js` processor APIs |
-| Payments | EVM wallet transactions, USDC/ETH/WETH/USDT token support, KeeperHub, Uniswap quote/swap helpers |
+| Payments | EVM wallet transactions, USDC/ETH/WETH/USDT token support, KeeperHub settlement, and Uniswap quote/swap helpers |
 | Storage and AI | 0G chain, 0G storage, 0G DA, 0G compute |
 | Contracts | Hardhat plus Solidity contracts in `contracts/` |
 | App state | Local `.superreferrals/*.json` in development or Vercel KV/Upstash Redis in deployed runtimes |
@@ -198,7 +198,7 @@ SuperReferrals is a Next.js app using the App Router, React client components, l
 | Path | Purpose |
 | --- | --- |
 | `src/app/page.tsx` | Landing page data loader. |
-| `src/components/LandingPageClient.tsx` | Futuristic landing page UI and route launcher. |
+| `src/components/LandingPageClient.tsx` | Landing page UI and route launcher. |
 | `src/components/Dashboard.tsx` | Storefront owner console. |
 | `src/components/UserLandingPage.tsx` | Public storefront/referral creator workflow. |
 | `src/components/StorefrontDirectory.tsx` | Public storefront marketplace. |
@@ -211,47 +211,20 @@ SuperReferrals is a Next.js app using the App Router, React client components, l
 | `src/lib/zero-g.ts`, `src/lib/zero-g-chain.ts` | 0G storage/chain helpers. |
 | `src/lib/agent-framework.ts` | Agent Town plan, receipts, settlement context, and AXL timeline. |
 
-## Run Locally
+## Install
 
-Install dependencies:
+Use the local example env for development. It is mock-first, so the app boots without provider keys and shows an admin setup notice for missing live values.
 
 ```bash
 npm install
-```
-
-Create a local env file:
-
-```bash
-cp .env.example .env.local
-```
-
-Run the app:
-
-```bash
-npm run dev
+./run.sh
 ```
 
 Open `http://localhost:3000`.
 
-For a no-key local demo, keep mocks enabled:
+`./run.sh` creates `.env.local` from `.env.example` when missing, checks the local env file, prompts only for missing local values, installs dependencies if needed, frees the configured port, and starts `npm run dev`. By default it keeps live-provider prompts off while `SUPERREFERRALS_MOCKS=true`; set `LOCAL_CONFIGURE_LIVE=true` or `SUPERREFERRALS_MOCKS=false` in `.env.local` to configure local live-provider values.
 
-```bash
-SUPERREFERRALS_MOCKS=true
-```
-
-For staging-like live providers:
-
-```bash
-cp .env.staging.example .env.local
-```
-
-For production-like live providers:
-
-```bash
-cp .env.production.example .env.local
-```
-
-Useful checks:
+Before deploying, run:
 
 ```bash
 npm run typecheck
@@ -259,21 +232,38 @@ npm run build
 npm run contracts:compile
 ```
 
+Deploy staging with the remote guided script:
+
+```bash
+./deploy.sh
+```
+
+Deploy staging and production:
+
+```bash
+./deploy.sh --production
+```
+
+`./deploy.sh` is remote-only. It checks Vercel auth/project setup first, prompts the deployer to log in or paste a token if needed, lists key names for the target Vercel environment without pulling secret values, creates the target env file when missing, and prompts only for keys absent from that Vercel environment. Before deploy it syncs only absent Vercel keys from the local target env file, and the sync runs without overwrite mode, so existing Vercel values are not replaced. With `--production`, it runs the same setup for staging and production before promoting `develop` to `main`.
+
 ## Environment Notes
 
-The app defaults to local JSON state in development when Redis env vars are absent. Deployed serverless runtimes require Vercel KV/Upstash Redis through `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
+The app defaults to local JSON state in development when Redis env vars are absent. Deployed serverless runtimes require Vercel KV/Upstash Redis through `KV_REST_API_URL`/`KV_REST_API_TOKEN` or `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`.
 
 Key env groups:
 
 | Group | Variables |
 | --- | --- |
-| Runtime mode | `SUPERREFERRALS_MOCKS`, `SUPERREFERRALS_STORE_BACKEND`, `DEPLOYMENT_ENV` |
-| Samsar | `SAMSAR_APP_SECRET` plus account/session credentials created through the app |
-| Payment chain | `TRANSACTION_NETWORK`, `TRANSACTION_CHAIN_ID`, `TRANSACTION_RPC_URL`, `NEXT_PUBLIC_TRANSACTION_*` |
-| Settlement | `KEEPERHUB_API_KEY`, `KEEPERHUB_WALLET_ADDRESS`, `KEEPERHUB_PAYMENT_WORKFLOW_ID_<NETWORK>`, `UNISWAP_API_KEY` |
-| 0G | `OG_NETWORK`, `OG_CHAIN_ID`, `OG_RPC_URL`, `OG_STORAGE_INDEXER_RPC`, `OG_PRIVATE_KEY`, optional `OG_COMPUTE_*` |
-| Contracts | `USER_REGISTRY_CONTRACT_ADDRESS`, `INFT_CONTRACT_ADDRESS` |
+| Runtime mode | `APP_BASE_URL`, `DEPLOYMENT_ENV`, `NEXT_PUBLIC_DEPLOYMENT_ENV`, `SUPERREFERRALS_SESSION_SECRET`, `SUPERREFERRALS_MOCKS` |
+| State | `SUPERREFERRALS_STORE_BACKEND`, `SUPERREFERRALS_DATA_DIR`, `KV_REST_API_URL`, `KV_REST_API_TOKEN`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` |
+| Samsar | `SAMSAR_APP_SECRET`, the Samsar platform APP_SECRET used to create/authenticate generated APP_KEY credentials and encrypt stored APP_KEYs; `SAMSAR_API_URL`; optional `SAMSAR_WEBHOOK_SECRET`. The app can run without `SAMSAR_APP_SECRET`, but live storefront APP_KEY provisioning is disabled. |
+| Payment chain | `TRANSACTION_NETWORK`, `TRANSACTION_CHAIN_ID`, `TRANSACTION_RPC_URL`, `TRANSACTION_EXPLORER_URL`, `NEXT_PUBLIC_TRANSACTION_*` |
+| Settlement and swaps | `KEEPERHUB_API_KEY`, `KEEPERHUB_WALLET_ADDRESS`, `KEEPERHUB_PAYMENT_WORKFLOW_ID*`, `UNISWAP_API_KEY` |
+| 0G | `OG_NETWORK`, `OG_CHAIN_ID`, `OG_RPC_URL`, `OG_BLOCK_EXPLORER_URL`, `OG_STORAGE_INDEXER_RPC`, `OG_STORAGE_GATEWAY_URL`, `OG_PRIVATE_KEY`, `OG_DA_URL`, `OG_COMPUTE_*` |
+| Contracts and agent services | `USER_REGISTRY_*`, `AGENT_REGISTRY_*`, `INFT_*`, `OG_SERVICE_MARKETPLACE_URL`, `AXL_BASE_URL`, `ENS_CHAIN_ID`, `ENS_RPC_URL` |
 | Admin | `ADMIN_SECRET` |
+
+`SAMSAR_APP_SECRET` is the Samsar platform secret used to create/authenticate generated APP_KEY credentials and encrypt stored APP_KEYs. Get it from the Samsar credentials for the target environment; leave it blank only when live storefront APP_KEY provisioning is intentionally disabled.
 
 <details>
 <summary>Network guardrails</summary>
@@ -298,16 +288,18 @@ Production is designed for 0G mainnet plus Ethereum mainnet or Base payment depl
 Non-production runtime maps mainnet transaction configs back to Sepolia unless both `NODE_ENV=production` and `DEPLOYMENT_ENV=production` are set. Renders do not start until the server verifies sender, recipient, chain, token, and amount. `ALLOW_MOCK_RENDER_PAYMENT=true` is only for local demos.
 </details>
 
-## Deploy And Ops
+## Deploy and Ops
 
 The Vercel project is `proy24s-projects/super-referrals`.
 
-Bootstrap storage and deploy:
+Bootstrap storage, commit, push, and deploy:
 
 ```bash
 ./deploy.sh
 ./deploy.sh --production
 ```
+
+`deploy.sh` checks Vercel auth/project setup, lists existing key names for each target Vercel environment, creates `.env.staging` or `.env.production` from the matching example when missing, prompts only for values absent from the target Vercel environment, syncs only absent keys as sensitive env vars without overwriting existing remote keys, provisions storage, then stages and commits the current worktree before pushing `develop`; `--production` also prepares production env/storage and promotes `develop` to `main`. Run it only from an intentional worktree.
 
 Preview env sync:
 

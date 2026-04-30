@@ -15,7 +15,11 @@ import {
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { readRouteAppLanguage, readStoredAppLanguage, subscribeAppLanguage } from "@/lib/app-language-client";
+import { assistantCopy, localizedAssistantPageLabel } from "@/lib/assistant-localization";
+import { DEFAULT_APP_LANGUAGE, normalizeAppLanguage } from "@/lib/localization";
 import { samsarAuthHeaders } from "@/lib/storefront-auth-client";
+import type { AppLanguageCode } from "@/lib/types";
 
 type AssistantRole = "user" | "assistant";
 
@@ -38,18 +42,31 @@ type AssistantThread = {
 
 const ASSISTANT_USER_STORAGE_KEY = "superreferrals:page-assistant-user";
 
-export default function PageAssistant() {
+export default function PageAssistant({
+  initialLanguage = DEFAULT_APP_LANGUAGE
+}: {
+  initialLanguage?: AppLanguageCode;
+} = {}) {
   const pathname = usePathname() || "/";
   if (pathname === "/feed") {
     return null;
   }
 
-  return <PageAssistantPanel pathname={pathname} />;
+  return <PageAssistantPanel initialLanguage={initialLanguage} pathname={pathname} />;
 }
 
-function PageAssistantPanel({ pathname }: { pathname: string }) {
+function PageAssistantPanel({
+  initialLanguage,
+  pathname
+}: {
+  initialLanguage: AppLanguageCode;
+  pathname: string;
+}) {
   const [thread, setThread] = useState<AssistantThread | null>(null);
   const [input, setInput] = useState("");
+  const [appLanguage, setAppLanguage] = useState<AppLanguageCode>(
+    normalizeAppLanguage(initialLanguage) || DEFAULT_APP_LANGUAGE
+  );
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [busy, setBusy] = useState<"load" | "send" | "clear" | "">("");
@@ -58,8 +75,9 @@ function PageAssistantPanel({ pathname }: { pathname: string }) {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const assistantUserIdRef = useRef("");
 
+  const t = assistantCopy[appLanguage];
   const messages = useMemo(() => thread?.messages || [], [thread?.messages]);
-  const pageTitle = thread?.pageTitle || pageLabelFromPath(pathname);
+  const pageTitle = localizedAssistantPageLabel(appLanguage, pathname, thread?.pageTitle);
   const assistantClass = [
     "page-assistant",
     isExpanded ? "expanded" : ""
@@ -68,6 +86,11 @@ function PageAssistantPanel({ pathname }: { pathname: string }) {
   useEffect(() => {
     assistantUserIdRef.current = getOrCreateAssistantUserId();
   }, []);
+
+  useEffect(() => {
+    setAppLanguage(readRouteAppLanguage() || readStoredAppLanguage() || normalizeAppLanguage(initialLanguage) || DEFAULT_APP_LANGUAGE);
+    return subscribeAppLanguage(setAppLanguage);
+  }, [initialLanguage]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -81,13 +104,13 @@ function PageAssistantPanel({ pathname }: { pathname: string }) {
       headers: assistantHeaders(userId),
       signal: controller.signal
     })
-      .then(assertOk)
+      .then((response) => assertOk(response, t.errors.generic))
       .then((data) => {
         setThread(data.thread as AssistantThread);
       })
       .catch((loadError) => {
         if (!controller.signal.aborted) {
-          setError(loadError instanceof Error ? loadError.message : "Assistant failed to load.");
+          setError(loadError instanceof Error ? loadError.message : t.errors.load);
         }
       })
       .finally(() => {
@@ -97,7 +120,7 @@ function PageAssistantPanel({ pathname }: { pathname: string }) {
       });
 
     return () => controller.abort();
-  }, [pathname]);
+  }, [pathname, t.errors.load]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -144,10 +167,10 @@ function PageAssistantPanel({ pathname }: { pathname: string }) {
           message,
           userId: assistantUserIdRef.current
         })
-      }).then(assertOk);
+      }).then((response) => assertOk(response, t.errors.generic));
       setThread(data.thread as AssistantThread);
     } catch (sendError) {
-      setError(sendError instanceof Error ? sendError.message : "Assistant request failed.");
+      setError(sendError instanceof Error ? sendError.message : t.errors.request);
       setThread((current) => current
         ? { ...current, messages: current.messages.filter((item) => item.id !== optimisticMessage.id) }
         : current);
@@ -160,7 +183,7 @@ function PageAssistantPanel({ pathname }: { pathname: string }) {
     if (busy === "clear" || messages.length === 0) {
       return;
     }
-    const confirmed = window.confirm("Clear this page assistant conversation?");
+    const confirmed = window.confirm(t.clearConversationConfirm);
     if (!confirmed) {
       return;
     }
@@ -174,10 +197,10 @@ function PageAssistantPanel({ pathname }: { pathname: string }) {
           pagePath: pathname,
           userId: assistantUserIdRef.current
         })
-      }).then(assertOk);
+      }).then((response) => assertOk(response, t.errors.generic));
       setThread((current) => current ? { ...current, messages: [], updatedAt: new Date().toISOString() } : current);
     } catch (clearError) {
-      setError(clearError instanceof Error ? clearError.message : "Unable to clear assistant.");
+      setError(clearError instanceof Error ? clearError.message : t.errors.clear);
     } finally {
       setBusy("");
     }
@@ -189,7 +212,7 @@ function PageAssistantPanel({ pathname }: { pathname: string }) {
       setCopiedMessageId(message.id);
       window.setTimeout(() => setCopiedMessageId((current) => current === message.id ? "" : current), 1400);
     } catch {
-      setError("Unable to copy message.");
+      setError(t.errors.copy);
     }
   }
 
@@ -206,33 +229,33 @@ function PageAssistantPanel({ pathname }: { pathname: string }) {
         type="button"
         className="page-assistant-launcher"
         onClick={() => setIsOpen((current) => !current)}
-        aria-label={isOpen ? "Close assistant" : "Open assistant"}
+        aria-label={isOpen ? t.closeAssistant : t.openAssistant}
       >
         <span className="page-assistant-launcher-icon"><MessageCircle size={22} /></span>
         <span className="page-assistant-launcher-copy">
-          <strong>Assistant</strong>
+          <strong>{t.launcherLabel}</strong>
           <small>{pageTitle}</small>
         </span>
       </button>
 
       {isOpen && (
-        <section className="page-assistant-panel" aria-label="Page assistant">
+        <section className="page-assistant-panel" aria-label={t.panelLabel}>
           <header className="page-assistant-header">
             <div className="page-assistant-title">
               <span><Bot size={18} /></span>
               <div>
-                <strong>Assistant</strong>
+                <strong>{t.assistant}</strong>
                 <small>{pageTitle}</small>
               </div>
             </div>
             <div className="page-assistant-actions">
-              <button type="button" onClick={clearThread} disabled={busy === "clear" || messages.length === 0} title="Clear conversation" aria-label="Clear conversation">
+              <button type="button" onClick={clearThread} disabled={busy === "clear" || messages.length === 0} title={t.clearConversation} aria-label={t.clearConversation}>
                 {busy === "clear" ? <RefreshCw size={16} className="spin" /> : <Eraser size={16} />}
               </button>
-              <button type="button" onClick={() => setIsExpanded((current) => !current)} title={isExpanded ? "Condense assistant" : "Expand assistant"} aria-label={isExpanded ? "Condense assistant" : "Expand assistant"}>
+              <button type="button" onClick={() => setIsExpanded((current) => !current)} title={isExpanded ? t.condenseAssistant : t.expandAssistant} aria-label={isExpanded ? t.condenseAssistant : t.expandAssistant}>
                 {isExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
               </button>
-              <button type="button" onClick={() => setIsOpen(false)} title="Collapse assistant" aria-label="Collapse assistant">
+              <button type="button" onClick={() => setIsOpen(false)} title={t.collapseAssistant} aria-label={t.collapseAssistant}>
                 <Minus size={16} />
               </button>
             </div>
@@ -242,7 +265,7 @@ function PageAssistantPanel({ pathname }: { pathname: string }) {
             {error && (
               <div className="page-assistant-notice" role="status">
                 <span>{error}</span>
-                <button type="button" onClick={() => setError("")} aria-label="Dismiss assistant notice"><X size={14} /></button>
+                <button type="button" onClick={() => setError("")} aria-label={t.dismissNotice}><X size={14} /></button>
               </div>
             )}
             {messages.length > 0 ? (
@@ -252,9 +275,9 @@ function PageAssistantPanel({ pathname }: { pathname: string }) {
                   return (
                     <article className={`page-assistant-message ${isUser ? "user" : "assistant"}`} key={message.id}>
                       <div className="page-assistant-message-meta">
-                        <strong>{isUser ? "You" : "Assistant"}</strong>
-                        <span>{formatTime(message.createdAt)}</span>
-                        <button type="button" onClick={() => copyMessage(message)} title="Copy message" aria-label="Copy message">
+                        <strong>{isUser ? t.you : t.assistant}</strong>
+                        <span>{formatTime(message.createdAt, appLanguage)}</span>
+                        <button type="button" onClick={() => copyMessage(message)} title={t.copyMessage} aria-label={t.copyMessage}>
                           {copiedMessageId === message.id ? <Check size={13} /> : <Copy size={13} />}
                         </button>
                       </div>
@@ -267,7 +290,7 @@ function PageAssistantPanel({ pathname }: { pathname: string }) {
                     </article>
                   );
                 })}
-                {busy === "send" && <TypingIndicator />}
+                {busy === "send" && <TypingIndicator label={t.typing} />}
                 <div ref={messagesEndRef} />
               </div>
             ) : (
@@ -282,12 +305,12 @@ function PageAssistantPanel({ pathname }: { pathname: string }) {
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask about this page..."
+              placeholder={t.placeholder}
               rows={2}
             />
             <button type="submit" disabled={!input.trim() || busy === "send"} className="page-assistant-send">
               {busy === "send" ? <RefreshCw size={16} className="spin" /> : <Send size={16} />}
-              <span>Send</span>
+              <span>{t.send}</span>
             </button>
           </form>
         </section>
@@ -296,9 +319,9 @@ function PageAssistantPanel({ pathname }: { pathname: string }) {
   );
 }
 
-function TypingIndicator() {
+function TypingIndicator({ label }: { label: string }) {
   return (
-    <div className="page-assistant-typing" aria-label="Assistant is responding">
+    <div className="page-assistant-typing" aria-label={label}>
       <span />
       <span />
       <span />
@@ -314,10 +337,10 @@ function assistantHeaders(userId: string, init?: HeadersInit) {
   return headers;
 }
 
-async function assertOk(response: Response) {
+async function assertOk(response: Response, fallback: string) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(typeof data.message === "string" ? data.message : "Request failed");
+    throw new Error(typeof data.message === "string" ? data.message : fallback);
   }
   return data as Record<string, unknown>;
 }
@@ -341,27 +364,12 @@ function getOrCreateAssistantUserId() {
   }
 }
 
-function pageLabelFromPath(pathname: string) {
-  if (pathname === "/") {
-    return "Landing";
-  }
-  const segments = pathname.split("/").filter(Boolean);
-  if (!segments.length) {
-    return "SuperReferrals";
-  }
-  return segments
-    .slice(0, 2)
-    .map((segment) => segment.replace(/[-_]/g, " "))
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(" / ");
-}
-
-function formatTime(value: string) {
+function formatTime(value: string, language: AppLanguageCode) {
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) {
     return "";
   }
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : undefined, {
     month: "short",
     day: "numeric",
     hour: "numeric",

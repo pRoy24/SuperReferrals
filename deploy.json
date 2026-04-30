@@ -21,9 +21,6 @@
   "targets": {
     "staging": {
       "envFile": ".env.staging",
-      "fallbackEnvFiles": [
-        ".env.local"
-      ],
       "environment": "preview",
       "branch": "develop"
     },
@@ -36,11 +33,9 @@
   },
   "zeroG": {
     "required": [
-      "ZERO_G_MOCKS",
       "OG_CHAIN_ID",
       "OG_RPC_URL",
-      "OG_STORAGE_INDEXER_RPC",
-      "OG_PRIVATE_KEY"
+      "OG_STORAGE_INDEXER_RPC"
     ],
     "recommended": [
       "OG_STORAGE_GATEWAY_URL",
@@ -48,11 +43,14 @@
       "INFT_RPC_URL",
       "INFT_CONTRACT_ADDRESS",
       "USER_REGISTRY_CONTRACT_ADDRESS",
-      "OG_COMPUTE_PRIVATE_KEY",
-      "OG_COMPUTE_PROVIDER_ADDRESS",
-      "OG_COMPUTE_AUTO_FUND",
-      "OG_COMPUTE_AUTO_FUND_AMOUNT",
-      "OG_COMPUTE_AUTO_DEPOSIT_AMOUNT"
+      "AGENT_REGISTRY_CONTRACT_ADDRESS",
+      "OG_PRIVATE_KEY",
+      "OG_DA_URL",
+      "KEEPERHUB_API_KEY",
+      "KEEPERHUB_WALLET_ADDRESS",
+      "SAMSAR_APP_SECRET",
+      "ADMIN_SECRET",
+      "SUPERREFERRALS_SESSION_SECRET"
     ]
   }
 }

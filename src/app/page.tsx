@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import LandingPageClient from "@/components/LandingPageClient";
+import { getEnvDiagnostics } from "@/lib/env-diagnostics";
 import { listPublicFeedItems } from "@/lib/feed";
 import {
   appLanguageFromCookieHeader,
@@ -26,6 +27,7 @@ export default async function Home() {
 
   return (
     <LandingPageClient
+      envDiagnostics={getEnvDiagnostics()}
       featuredFeedItems={featuredFeed.items}
       inftHref={inftHref}
       initialLanguage={initialLanguage}

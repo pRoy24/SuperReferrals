@@ -516,9 +516,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const renderAccessError = getStorefrontAccessError(customer, store, {
     wallet: walletAddress || connectedSubAccount?.wallet
   });
-  const paymentSetupNotice = customer && !isUsableEvmAddress(customer.ownerWallet)
-    ? "Merchant payout wallet is not connected. Payment quotes will use the configured platform settlement wallet when available."
-    : "";
+  const hasMerchantPayoutWallet = Boolean(customer && isUsableEvmAddress(customer.ownerWallet));
   const renderGateError = renderConditionError || renderAccessError;
   const selectedPricingDetails = resolveModelPriceDetails(customer, selectedPricing);
   const estimatedDurationSeconds = estimateDurationSeconds(imageCount, selectedPricing);
@@ -587,6 +585,9 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     () => getTransactionChainConfig(normalizeTransactionChainIdForEnvironment(customer?.pricing.chainId)),
     [customer?.pricing.chainId]
   );
+  const paymentSetupNotice = customer && !hasMerchantPayoutWallet
+    ? `This storefront cannot accept payments yet. The owner needs to link a payout wallet; transfers are created on ${transactionChain.name}.`
+    : "";
   const paymentTokens = useMemo(() => getPaymentTokens(transactionChain.id), [transactionChain.id]);
   const selectablePaymentTokens = useMemo(
     () => [...paymentTokens].sort((left, right) => paymentTokenRank(left) - paymentTokenRank(right)),
@@ -607,7 +608,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     [generationForm]
   );
   const generationPayloadPreview = generationPayloadPreviewState.json || lastValidGenerationPayloadPreview;
-  const renderSubmitDisabled = busy === "generation" || busy === "orientation" || renderSessionLocked || imageCount === 0;
+  const renderSubmitDisabled = busy === "generation" || busy === "orientation" || renderSessionLocked || imageCount === 0 || Boolean(paymentSetupNotice);
 
   function updateGenerationForm(patch: RenderFormPatch) {
     const nextPatch = {
@@ -1186,6 +1187,9 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       if (renderAccessError) {
         throw new Error(renderAccessError);
       }
+      if (paymentSetupNotice) {
+        throw new Error(paymentSetupNotice);
+      }
       const paymentToken = paymentTokenForCurrency(paymentCurrency);
       setPaymentCurrency(paymentToken.symbol);
       const account = await ensureWalletSubAccount();
@@ -1228,7 +1232,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     const paymentAmountAtomic = activeQuote.paymentAmountAtomic || activeQuote.settlementAmountAtomic;
     const paymentRecipient = activeQuote.paymentRecipientAddress || customer.ownerWallet;
     if (!isUsableEvmAddress(paymentRecipient)) {
-      throw new Error("Quote did not include a valid non-zero payment recipient. Connect a merchant payout wallet or configure the platform settlement wallet.");
+      throw new Error("Quote did not include a valid payout wallet. The storefront owner must link a merchant wallet before accepting payments.");
     }
 
     if (activeQuote.paymentRail === "uniswap" && !sameToken) {
@@ -1347,6 +1351,9 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       }
       if (renderAccessError) {
         throw new Error(renderAccessError);
+      }
+      if (paymentSetupNotice) {
+        throw new Error(paymentSetupNotice);
       }
       const generationPayload = buildGenerationPayload(generationForm);
       const paymentToken = paymentTokenForCurrency(currency);
@@ -1555,7 +1562,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
             {customer.storefront?.description || "Connect your wallet, choose a render configuration, pay the store price, and track your previous render tasks."}
           </p>
           <div className="storefront-landing-meta">
-            <span><Wallet size={15} /> payout {isUsableEvmAddress(customer.ownerWallet) ? shortWallet(customer.ownerWallet) : "platform settlement if configured"}</span>
+            <span><Wallet size={15} /> payout {isUsableEvmAddress(customer.ownerWallet) ? shortWallet(customer.ownerWallet) : "wallet required"}</span>
             {customer.storefront?.category && <span><Store size={15} /> {customer.storefront.category}</span>}
             {customer.ensName && <span>{customer.ensName}</span>}
           </div>
@@ -1572,7 +1579,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       </section>
 
       {message && <p className="notice">{message}</p>}
-      {paymentSetupNotice && <p className="notice">{paymentSetupNotice}</p>}
+      {paymentSetupNotice && <p className="notice warning">{paymentSetupNotice}</p>}
 
       <div className="grid public-grid">
         <section className="stack storefront-setup-stack">
@@ -1708,7 +1715,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
               selectedPricingDetails={selectedPricingDetails}
             />
             <div className="button-row">
-              <button className="btn" onClick={createQuote} disabled={busy === "quote" || imageCount === 0}>
+              <button className="btn" onClick={createQuote} disabled={busy === "quote" || imageCount === 0 || Boolean(paymentSetupNotice)}>
                 <CircleDollarSign size={16} /> Quote {paymentCurrency}
               </button>
               <PaymentActionControl

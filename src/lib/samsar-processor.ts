@@ -2,6 +2,7 @@ import SamsarClient from "samsar-js";
 import { appBaseUrl, isProviderMock } from "./env";
 import { nowIso } from "./ids";
 import {
+  hasUsableSamsarAppSecret,
   hasStoredSamsarAppKey,
   requireSamsarAppSecret,
   secureSamsarAppKey,
@@ -292,6 +293,9 @@ export async function provisionSamsarProcessorAppKeyIfMissing(
   }
   const cleanAuthToken = authToken?.trim() || customer.samsarAccount?.authToken?.trim();
   if (!cleanAuthToken) {
+    return undefined;
+  }
+  if (!hasUsableSamsarAppSecret()) {
     return undefined;
   }
   return createSamsarProcessorAppKeyCredential(cleanAuthToken, {

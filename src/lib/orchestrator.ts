@@ -39,7 +39,7 @@ import {
   resolveRenditionLanguageCode
 } from "./rendition-language";
 import { assertStorefrontRenderAccess, assertStorefrontWalletAllowed } from "./storefront-access";
-import { hasStoredSamsarAppKey, samsarAppClientCredentials } from "./samsar-app-credentials";
+import { hasStoredSamsarAppKey, hasUsableSamsarAppSecret, samsarAppClientCredentials } from "./samsar-app-credentials";
 import {
   addGeneration,
   addINFT,
@@ -219,7 +219,7 @@ export async function createOrUpdateCustomer(input: Partial<Customer> & {
   if (input.storefront) {
     input.ownerWallet = assertUsableEvmAddress(
       input.ownerWallet || existingCustomer.ownerWallet || existingCustomer.samsarAccount?.walletAddress,
-      "Store owner wallet"
+      "Store owner payout wallet"
     );
   }
   if (input.createNewStorefront) {
@@ -2888,7 +2888,7 @@ function customerSamsarAuthToken(customer: Customer) {
 }
 
 function customerSamsarAppCredentials(customer: Customer) {
-  return hasStoredSamsarAppKey(customer) ? samsarAppClientCredentials(customer) : {};
+  return hasStoredSamsarAppKey(customer) && hasUsableSamsarAppSecret() ? samsarAppClientCredentials(customer) : {};
 }
 
 async function ensureCustomerSamsarAppCredentials(customer: Customer): Promise<{
@@ -2902,6 +2902,10 @@ async function ensureCustomerSamsarAppCredentials(customer: Customer): Promise<{
   const existingCredentials = customerSamsarAppCredentials(customer);
   if (existingCredentials.appKey) {
     return existingCredentials;
+  }
+
+  if (!hasUsableSamsarAppSecret()) {
+    throw new Error("SAMSAR_APP_SECRET is required to create storefront Samsar APP_KEY credentials. The app can run without it, but live storefront video operations are disabled until it is configured.");
   }
 
   const provisioned = await provisionSamsarProcessorAppKeyIfMissing(customer, customerSamsarAuthToken(customer));
@@ -2941,11 +2945,7 @@ function resolveRenderPaymentRecipientWallet(customer: Customer) {
   if (isUsableEvmAddress(customer.ownerWallet)) {
     return assertUsableEvmAddress(customer.ownerWallet, "Customer owner wallet");
   }
-  const keeperHubWallet = getKeeperHubWalletAddress();
-  if (isUsableEvmAddress(keeperHubWallet)) {
-    return assertUsableEvmAddress(keeperHubWallet, "KEEPERHUB_WALLET_ADDRESS");
-  }
-  throw new Error("Payment recipient wallet is not configured. Connect a merchant payout wallet or set KEEPERHUB_WALLET_ADDRESS before accepting render payments.");
+  throw new Error("Connect a valid merchant payout wallet before accepting storefront render payments.");
 }
 
 function shouldRunKeeperSettlement({

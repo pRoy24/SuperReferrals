@@ -52,7 +52,7 @@ import type { Customer, INFTPaidAction, ModelPricingConfiguration, PaymentCurren
 const processorCreditAmounts = [10, 25, 50, 100];
 const conditionModelOptions: VideoModel[] = ["RUNWAYML", "VEO3.1I2V", "SEEDANCEI2V", "KLING3.0"];
 const conditionAspectOptions: VideoAspectRatio[] = ["9:16", "16:9"];
-type ToastState = { id: number; kind: "success" | "error"; message: string } | null;
+type ToastState = { id: number; kind: "success" | "error" | "warning"; message: string } | null;
 const deploymentEnvironment = (
   process.env.NEXT_PUBLIC_DEPLOYMENT_ENV ||
   process.env.NEXT_PUBLIC_APP_ENV ||
@@ -243,6 +243,10 @@ export default function Dashboard() {
   const hasCreditedProcessorAccount = hasProcessorAccountSession && processorCreditsRemaining > 0;
   const processorAccountEmail = customer?.samsarAccount?.email || processorAccountForm.email;
   const linkedSamsarWallet = customer?.samsarAccount?.walletAddress || customerForm.ownerWallet;
+  const hasValidOwnerWallet = isUsableEvmAddress(customerForm.ownerWallet);
+  const ownerWalletRequiredNotice = hasValidOwnerWallet
+    ? ""
+    : `Link a valid payout wallet before publishing or collecting storefront payments. Customer transfers are created on ${transactionChain.name}.`;
   const connectingCustomerWallet = busy.startsWith("customer-wallet");
   const customerLanding = useMemo(() => {
     const seedAccount = activeStorefrontSubAccounts[0];
@@ -289,7 +293,7 @@ export default function Dashboard() {
     }));
   }
 
-  function showToast(message: string, kind: "success" | "error" = "success") {
+  function showToast(message: string, kind: "success" | "error" | "warning" = "success") {
     setToast({ id: Date.now(), kind, message });
   }
 
@@ -343,10 +347,10 @@ export default function Dashboard() {
       showToast(error, "error");
       return;
     }
-    if (!isUsableEvmAddress(customerForm.ownerWallet)) {
-      const error = "Connect a store owner e-wallet before saving your SuperReferrals storefront.";
-      setMessage(error);
-      showToast(error, "error");
+    if (!hasValidOwnerWallet) {
+      const warning = ownerWalletRequiredNotice;
+      setMessage(warning);
+      showToast(warning, "warning");
       return;
     }
     setBusy("customer");
@@ -432,7 +436,9 @@ export default function Dashboard() {
 
   async function connectCustomerWallet(walletProvider?: BrowserWalletProvider) {
     if (!hasProcessorAccountSession) {
-      setMessage("Sign in before linking a wallet to your SuperReferrals account.");
+      const warning = "Sign in before linking a payout wallet to your SuperReferrals account.";
+      setMessage(warning);
+      showToast(warning, "warning");
       return;
     }
     setBusy(`customer-wallet${walletProvider ? `-${walletProvider.id}` : ""}`);
@@ -459,9 +465,13 @@ export default function Dashboard() {
       });
       await assertOk(response);
       await load();
-      setMessage(`${walletProvider?.name || "Wallet"} connected. E-wallet address ${shortWallet(firstAccount)} is linked to your SuperReferrals account.`);
+      const successMessage = `${walletProvider?.name || "Wallet"} connected. Payout wallet ${shortWallet(firstAccount)} is ready for ${transactionChain.name} payments.`;
+      setMessage(successMessage);
+      showToast(successMessage);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Wallet connection failed");
+      const errorMessage = error instanceof Error ? error.message : "Wallet connection failed";
+      setMessage(errorMessage);
+      showToast(errorMessage, "error");
     } finally {
       setBusy("");
     }
@@ -748,7 +758,7 @@ export default function Dashboard() {
               </div>
               <div className="account-wallet-link">
                 <div className="field">
-                  <label>Linked account wallet</label>
+                  <label>Linked payout wallet</label>
                   <div className="readonly-value mono">{hasProcessorAccountSession && linkedSamsarWallet ? linkedSamsarWallet : "No wallet linked"}</div>
                 </div>
                 <button className="btn" onClick={() => connectCustomerWallet()} disabled={connectingCustomerWallet || !hasProcessorAccountSession}>
@@ -828,8 +838,8 @@ export default function Dashboard() {
               </div>
               <div className="setup-wallet-strip">
                 <div className="field">
-                  <label>Store owner e-wallet</label>
-                  <div className="readonly-value mono">{isUsableEvmAddress(customerForm.ownerWallet) ? customerForm.ownerWallet : "No wallet connected"}</div>
+                  <label>Store owner payout wallet</label>
+                  <div className="readonly-value mono">{hasValidOwnerWallet ? customerForm.ownerWallet : "No wallet connected"}</div>
                 </div>
                 <div className="wallet-provider-grid">
                   {(walletProviders.length > 0 ? walletProviders : []).map((walletProvider) => (
@@ -851,10 +861,11 @@ export default function Dashboard() {
                   )}
                 </div>
               </div>
+              {ownerWalletRequiredNotice && <p className="notice warning">{ownerWalletRequiredNotice}</p>}
               <details className="advanced-section">
                 <summary>Advanced owner and storefront details</summary>
                 <div className="form-grid">
-                  <TextField label="E-wallet address" value={customerForm.ownerWallet} onChange={(ownerWallet) => setCustomerForm({ ...customerForm, ownerWallet })} full />
+                  <TextField label="Payout wallet address" value={customerForm.ownerWallet} onChange={(ownerWallet) => setCustomerForm({ ...customerForm, ownerWallet })} full />
                   <TextField label="ENS name" value={customerForm.ensName} onChange={(ensName) => setCustomerForm({ ...customerForm, ensName })} />
                   <TextField label="Support email" value={customerForm.storefrontSupportEmail} onChange={(storefrontSupportEmail) => setCustomerForm({ ...customerForm, storefrontSupportEmail })} />
                   <TextField label="Referrer base URL" value={customerForm.referrerBaseUrl} onChange={(referrerBaseUrl) => setCustomerForm({ ...customerForm, referrerBaseUrl })} full />
@@ -1259,7 +1270,7 @@ function SaveToast({ toast }: { toast: ToastState }) {
   }
   return (
     <div className={`save-toast ${toast.kind}`} role="status" aria-live="polite">
-      <strong>{toast.kind === "success" ? "Saved" : "Update failed"}</strong>
+      <strong>{toast.kind === "success" ? "Saved" : toast.kind === "warning" ? "Wallet required" : "Update failed"}</strong>
       <span>{toast.message}</span>
     </div>
   );

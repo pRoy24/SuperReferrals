@@ -17,6 +17,10 @@ const REDIS_ENV_KEYS = [
   "UPSTASH_REDIS_REST_TOKEN",
   "UPSTASH_REDIS_REST_READ_ONLY_TOKEN"
 ];
+const REDIS_ENV_KEY_PAIRS = [
+  ["KV_REST_API_URL", "KV_REST_API_TOKEN"],
+  ["UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN"]
+];
 
 main();
 
@@ -53,10 +57,16 @@ function main() {
   if (!options.skipVercel) {
     ensureVercelCliAuth({ token, options });
     ensureVercelProjectLinked({ scope, project, token, options });
-    if (!options.skipRedis && target.redisFromTarget) {
-      reuseRedisEnvFromTarget({ config, sourceTargetName: target.redisFromTarget, target, token, options });
-    } else if (!options.skipRedis) {
-      ensureUpstashRedis({ redisConfig, target, scope, token, options });
+    if (!options.skipRedis) {
+      const targetEnvKeys = listTargetEnvKeys({ target, token, options });
+      const redisPair = existingRedisEnvPair(targetEnvKeys);
+      if (redisPair) {
+        console.log(`Upstash Redis: existing ${redisPair.join("/")} found in target Vercel env; reusing it and skipping provisioning.`);
+      } else if (target.redisFromTarget) {
+        reuseRedisEnvFromTarget({ config, sourceTargetName: target.redisFromTarget, target, targetEnvKeys, token, options });
+      } else {
+        ensureUpstashRedis({ redisConfig, target, scope, token, options });
+      }
     }
     if (blobConfig.enabled && !options.skipBlob) {
       ensurePrivateBlobStore({ blobConfig, target, scope, token, options });
@@ -93,6 +103,8 @@ function parseArgs(args) {
     skipRedis: false,
     skipEnvSync: true,
     skipEnvValidation: false,
+    forceEnvSync: false,
+    noOverwriteEnvSync: false,
     useGlobalToken: false,
     acceptMarketplaceTerms: true,
     redisIntegration: "",
@@ -163,6 +175,12 @@ function parseArgs(args) {
         break;
       case "sync-env":
         options.skipEnvSync = false;
+        break;
+      case "force-env-sync":
+        options.forceEnvSync = true;
+        break;
+      case "no-overwrite-env-sync":
+        options.noOverwriteEnvSync = true;
         break;
       case "use-global-token":
         options.useGlobalToken = true;
@@ -452,6 +470,120 @@ function ensurePrivateBlobStore({ blobConfig, target, scope, token, options }) {
   fail(`Vercel Blob setup failed.\n${redact(output, [token])}`);
 }
 
+function listTargetEnvKeys({ target, token, options }) {
+  if (options.dryRun) {
+    return new Set();
+  }
+  const keys = new Set();
+  addListedEnvKeys(keys, { environment: target.environment, branch: "", token, options });
+  if (target.branch) {
+    addListedEnvKeys(keys, { environment: target.environment, branch: target.branch, token, options });
+  }
+  return keys;
+}
+
+function addListedEnvKeys(keys, { environment, branch, token, options }) {
+  const args = [
+    "env",
+    "list",
+    environment,
+    ...(branch ? [branch] : []),
+    "--format",
+    "json"
+  ];
+  const label = `${environment}${branch ? ` branch ${branch}` : ""}`;
+  const result = runVercel(args, { token, options, allowFailure: true });
+  const output = `${result.stdout}\n${result.stderr}`.trim();
+  if (result.status !== 0) {
+    fail(`Unable to list Vercel env keys for ${label}. Env inspection is required before Redis bootstrap.\n${redact(output, [token])}`);
+  }
+
+  try {
+    const parsed = parseVercelJsonOutput(output);
+    for (const key of collectVercelEnvKeys(parsed, branch)) {
+      keys.add(key);
+    }
+  } catch (error) {
+    fail(`Unable to parse Vercel env key list for ${label}: ${error.message}`);
+  }
+}
+
+function existingRedisEnvPair(keys) {
+  return REDIS_ENV_KEY_PAIRS.find(([urlKey, tokenKey]) => keys.has(urlKey) && keys.has(tokenKey)) || null;
+}
+
+function collectVercelEnvKeys(value, desiredBranch = "", output = new Set()) {
+  const validKey = /^[A-Za-z_][A-Za-z0-9_]*$/;
+  if (Array.isArray(value)) {
+    for (const item of value) collectVercelEnvKeys(item, desiredBranch, output);
+    return output;
+  }
+  if (!value || typeof value !== "object") {
+    return output;
+  }
+
+  if (typeof value.key === "string" && validKey.test(value.key)) {
+    const gitBranch = typeof value.gitBranch === "string" ? value.gitBranch : "";
+    if ((desiredBranch && (!gitBranch || gitBranch === desiredBranch)) || (!desiredBranch && !gitBranch)) {
+      output.add(value.key);
+    }
+  }
+
+  for (const prop of ["envs", "environmentVariables", "variables", "items", "results"]) {
+    if (Object.prototype.hasOwnProperty.call(value, prop)) {
+      collectVercelEnvKeys(value[prop], desiredBranch, output);
+    }
+  }
+  return output;
+}
+
+function parseVercelJsonOutput(text) {
+  for (let start = 0; start < text.length; start += 1) {
+    const first = text[start];
+    if (first !== "{" && first !== "[") {
+      continue;
+    }
+
+    const stack = [];
+    let inString = false;
+    let escaped = false;
+
+    for (let index = start; index < text.length; index += 1) {
+      const char = text[index];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === "\\") {
+          escaped = true;
+        } else if (char === "\"") {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char === "\"") {
+        inString = true;
+      } else if (char === "{") {
+        stack.push("}");
+      } else if (char === "[") {
+        stack.push("]");
+      } else if (char === "}" || char === "]") {
+        if (stack.pop() !== char) {
+          break;
+        }
+        if (stack.length === 0) {
+          try {
+            return JSON.parse(text.slice(start, index + 1));
+          } catch {
+            break;
+          }
+        }
+      }
+    }
+  }
+  throw new Error("Vercel CLI did not return a JSON object or array.");
+}
+
 function ensureUpstashRedis({ redisConfig, target, scope, token, options }) {
   const integrationProvider = redisConfig.integration.split("/")[0];
   const listArgs = [
@@ -535,12 +667,17 @@ function ensureUpstashRedis({ redisConfig, target, scope, token, options }) {
   fail(`Upstash Redis setup failed.\n${redact(output, [token])}`);
 }
 
-function reuseRedisEnvFromTarget({ config, sourceTargetName, target, token, options }) {
+function reuseRedisEnvFromTarget({ config, sourceTargetName, target, targetEnvKeys = new Set(), token, options }) {
   const sourceTarget = resolveTarget(config, sourceTargetName, options);
   const sourceLabel = `${sourceTargetName} (${sourceTarget.environment}${sourceTarget.branch ? `/${sourceTarget.branch}` : ""})`;
   const targetLabel = `${target.environment}${target.branch ? `/${target.branch}` : ""}`;
   if (options.dryRun) {
     console.log(`Would reuse Redis env from ${sourceLabel} for ${targetLabel}: ${REDIS_ENV_KEYS.join(", ")}`);
+    return;
+  }
+  const existingPair = existingRedisEnvPair(targetEnvKeys);
+  if (existingPair) {
+    console.log(`Upstash Redis: existing ${existingPair.join("/")} found in ${targetLabel}; skipping Redis env copy.`);
     return;
   }
 
@@ -561,11 +698,15 @@ function reuseRedisEnvFromTarget({ config, sourceTargetName, target, token, opti
     const sourceVariables = parseEnv(readFileSync(envPath, "utf8"));
     const redisVariables = REDIS_ENV_KEYS
       .map((key) => [key, sourceVariables.get(key)])
-      .filter(([, value]) => typeof value === "string" && value.length > 0);
+      .filter(([key, value]) => !targetEnvKeys.has(key) && typeof value === "string" && value.length > 0);
     const hasKvPair = sourceVariables.get("KV_REST_API_URL") && sourceVariables.get("KV_REST_API_TOKEN");
     const hasUpstashPair = sourceVariables.get("UPSTASH_REDIS_REST_URL") && sourceVariables.get("UPSTASH_REDIS_REST_TOKEN");
     if (!hasKvPair && !hasUpstashPair) {
       fail(`No Redis REST env vars were found in ${sourceLabel}. Run staging bootstrap first or add KV_REST_API_URL and KV_REST_API_TOKEN manually.`);
+    }
+    if (!redisVariables.length) {
+      console.log(`Upstash Redis: Redis env keys already exist in ${targetLabel}; nothing to copy.`);
+      return;
     }
 
     for (const [key, value] of redisVariables) {
@@ -575,7 +716,6 @@ function reuseRedisEnvFromTarget({ config, sourceTargetName, target, token, opti
         key,
         target.environment,
         ...(target.branch ? [target.branch] : []),
-        "--force",
         "--yes",
         "--sensitive"
       ], { token, options, input: value, secrets: [token, value] });
@@ -647,6 +787,8 @@ function runEnvSync({ targetName, target, scope, project, token, options }) {
   const args = [
     "scripts/sync-vercel-env.mjs",
     targetName,
+    ...(options.forceEnvSync ? ["--force-all"] : []),
+    ...(options.noOverwriteEnvSync ? ["--no-overwrite"] : []),
     ...(mergedEnvFile ? ["--file", mergedEnvFile] : []),
     ...(scope ? ["--scope", scope] : []),
     ...(project ? ["--project", project] : []),
@@ -811,6 +953,8 @@ Options:
   --skip-blob              Skip Blob store creation
   --sync-env               Also sync the target env file to Vercel after storage setup
   --skip-env-sync          Do not sync env vars to Vercel (default)
+  --force-env-sync         Pass --force-all to the env sync helper
+  --no-overwrite-env-sync  Pass --no-overwrite to the env sync helper
   --skip-env-validation    Provision Vercel storage without requiring local 0G env files
   --accept-marketplace-terms
                            Accept Vercel Marketplace terms for Redis integration (default)

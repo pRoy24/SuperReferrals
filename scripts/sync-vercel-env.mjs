@@ -148,6 +148,7 @@ function parseArgs(args) {
     deleteRemoved: false,
     allowPlaceholders: false,
     allowLocalAppBaseUrl: false,
+    noOverwrite: false,
     useGlobalToken: false,
     file: "",
     environment: "",
@@ -190,6 +191,9 @@ function parseArgs(args) {
         break;
       case "delete-removed":
         options.deleteRemoved = true;
+        break;
+      case "no-overwrite":
+        options.noOverwrite = true;
         break;
       case "allow-placeholders":
         options.allowPlaceholders = true;
@@ -432,7 +436,7 @@ function runVercelEnvAdd(entry, { target, scope, token, options }) {
     entry.key,
     target.environment,
     ...targetBranchArg(target),
-    "--force",
+    ...(options.noOverwrite ? [] : ["--force"]),
     "--yes",
     "--sensitive",
     ...emptyValueArg(entry),
@@ -539,6 +543,7 @@ function usage(exitCode) {
 Options:
   --dry-run                    Print changed keys without updating Vercel
   --force-all                  Upload every key from the source file
+  --no-overwrite               Fail instead of overwriting an existing Vercel key
   --delete-removed             Remove keys omitted from the source file and tracked in local state
   --file <path>                Override source env file
   --environment <name>         Override Vercel environment, e.g. preview or production

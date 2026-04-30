@@ -2738,6 +2738,28 @@ h3 {
   text-decoration: none;
 }
 
+.landing-env-banner {
+  margin: 0 auto 22px;
+  max-width: min(1120px, calc(100vw - 40px));
+}
+
+.landing-env-banner ul {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.landing-env-banner li {
+  color: #78350f;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.landing-env-banner strong {
+  color: #5f2607;
+}
+
 .panel-header {
   display: flex;
   justify-content: space-between;
@@ -3158,6 +3180,12 @@ button.item {
   color: var(--danger);
 }
 
+.notice.warning {
+  border-color: rgba(217, 119, 6, 0.28);
+  background: #fffbeb;
+  color: #92400e;
+}
+
 .save-toast {
   position: fixed;
   right: 20px;
@@ -3186,6 +3214,12 @@ button.item {
   border-color: rgba(220, 38, 38, 0.22);
   background: rgba(254, 242, 242, 0.96);
   color: #7f1d1d;
+}
+
+.save-toast.warning {
+  border-color: rgba(217, 119, 6, 0.28);
+  background: rgba(255, 251, 235, 0.96);
+  color: #92400e;
 }
 
 .render-status {
