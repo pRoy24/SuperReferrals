@@ -44,6 +44,7 @@ const STORE_FILE = "data.json";
 const LOCAL_KV_FILE = "kv.json";
 const DEFAULT_DATA_DIR = ".superreferrals";
 const DEFAULT_REDIS_STORE_KEY_PREFIX = "superreferrals:store";
+const DEFAULT_STAGING_LEGACY_STORE_SLUGS = ["preview", "local", "development"];
 const DEFAULT_REDIS_LOCK_TTL_MS = 15_000;
 const DEFAULT_REDIS_LOCK_RETRIES = 40;
 const DEFAULT_SCOPED_LOCK_TTL_MS = 600_000;
@@ -285,18 +286,81 @@ async function readRedisStoreDocument(): Promise<SuperReferralsStore> {
   if (raw === null || raw === undefined) {
     return initializeRedisStoreDocument();
   }
-  return parseStoreDocument(raw, `Redis key ${key}`);
+  const store = parseStoreDocument(raw, `Redis key ${key}`);
+  return await promoteLegacyRedisStoreIfNeeded(key, store) || store;
 }
 
 async function initializeRedisStoreDocument(): Promise<SuperReferralsStore> {
   const key = redisStoreKey();
-  const initial = await readLegacyFileStoreForRedisSeed() || emptyStore();
+  const initial = await readLegacyRedisStoreForSeed(key) || await readLegacyFileStoreForRedisSeed() || emptyStore();
   await redisCommand<string | null>(["SET", key, JSON.stringify(initial), "NX"]);
   const current = await redisCommand<unknown>(["GET", key]);
   if (current === null || current === undefined) {
     return initial;
   }
   return parseStoreDocument(current, `Redis key ${key}`);
+}
+
+async function promoteLegacyRedisStoreIfNeeded(currentKey: string, currentStore: SuperReferralsStore) {
+  if (!isEmptyStoreDocument(currentStore)) {
+    return undefined;
+  }
+  const legacyStore = await readLegacyRedisStoreForSeed(currentKey);
+  if (!legacyStore) {
+    return undefined;
+  }
+  await redisCommand<string>(["SET", currentKey, JSON.stringify(legacyStore)]);
+  console.warn(`Promoted legacy SuperReferrals Redis store into ${currentKey}.`);
+  return legacyStore;
+}
+
+async function readLegacyRedisStoreForSeed(currentKey: string) {
+  for (const legacyKey of legacyRedisStoreKeys(currentKey)) {
+    const raw = await redisCommand<unknown>(["GET", legacyKey]).catch(() => undefined);
+    if (raw === null || raw === undefined) {
+      continue;
+    }
+    const store = parseStoreDocument(raw, `Redis key ${legacyKey}`);
+    if (!isEmptyStoreDocument(store)) {
+      console.warn(`Found legacy SuperReferrals Redis store at ${legacyKey}.`);
+      return store;
+    }
+  }
+  return undefined;
+}
+
+function legacyRedisStoreKeys(currentKey: string) {
+  const explicitKeys = env("SUPERREFERRALS_REDIS_LEGACY_STORE_KEYS")
+    .split(",")
+    .map((key) => key.trim())
+    .filter(Boolean);
+  if (explicitKeys.length) {
+    return uniqueStoreKeys(explicitKeys, currentKey);
+  }
+  if (env("SUPERREFERRALS_REDIS_STORE_KEY")) {
+    return [];
+  }
+
+  const slug = storeEnvironmentSlug();
+  if (slug !== "staging") {
+    return [];
+  }
+  const prefix = env("SUPERREFERRALS_REDIS_KEY_PREFIX", DEFAULT_REDIS_STORE_KEY_PREFIX).replace(/:+$/, "");
+  return uniqueStoreKeys(
+    DEFAULT_STAGING_LEGACY_STORE_SLUGS.map((legacySlug) => `${prefix}:${legacySlug}`),
+    currentKey
+  );
+}
+
+function uniqueStoreKeys(keys: string[], currentKey: string) {
+  return [...new Set(keys)].filter((key) => key && key !== currentKey);
+}
+
+function isEmptyStoreDocument(store: SuperReferralsStore) {
+  return store.customers.length === 0 &&
+    store.subAccounts.length === 0 &&
+    store.generations.length === 0 &&
+    store.infts.length === 0;
 }
 
 function parseStoreDocument(raw: unknown, source: string): SuperReferralsStore {
