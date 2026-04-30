@@ -164,7 +164,7 @@ export default async function Home() {
               <Sparkles size={18} /> Create Product Video
             </a>
             <a className="btn large" href="/storefronts" target="_blank" rel="noreferrer">
-              <Store size={18} /> Choose Storefront
+              <Store size={18} /> Storefront directory
             </a>
             <a className="btn large" href="/dashboard" target="_blank" rel="noreferrer">
               <Network size={18} /> Manage Storefront

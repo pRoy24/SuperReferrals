@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, Film, RefreshCw, Search, ShieldCheck, SlidersHorizontal, Star, Store, Wallet } from "lucide-react";
+import { Clapperboard, ExternalLink, Film, RefreshCw, Search, ShieldCheck, SlidersHorizontal, Star, Store, Wallet } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import BreadcrumbNav from "@/components/BreadcrumbNav";
 import LanguageSelector from "@/components/LanguageSelector";
@@ -39,6 +39,29 @@ export default function StorefrontDirectory() {
 
   return (
     <main className="public-main storefront-directory">
+      <nav className="landing-nav storefront-directory-nav" aria-label="Primary">
+        <div className="landing-nav-left">
+          <a className="landing-logo-link" href="/" aria-label="SuperReferrals home">
+            <img
+              alt="SuperReferrals"
+              className="landing-logo-image"
+              height={48}
+              src="/superreferrals-logo.png"
+              width={238}
+            />
+          </a>
+        </div>
+        <div className="landing-nav-actions">
+          <LanguageSelector />
+          <a className="btn ghost" href="/feed" target="_blank" rel="noreferrer">
+            <Clapperboard size={16} /> Feed
+          </a>
+          <a className="btn primary" href="/dashboard" target="_blank" rel="noreferrer">
+            <ExternalLink size={16} /> Open Console
+          </a>
+        </div>
+      </nav>
+
       <section className="hero-band public-hero">
         <div>
           <div className="eyebrow">Storefront Directory</div>
@@ -48,7 +71,6 @@ export default function StorefrontDirectory() {
           </p>
         </div>
         <div className="landing-hero-actions">
-          <LanguageSelector />
           <BreadcrumbNav />
           <button className="btn" onClick={() => load()} title="Refresh storefronts">
             <RefreshCw size={16} /> Refresh
