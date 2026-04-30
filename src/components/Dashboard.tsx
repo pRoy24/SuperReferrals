@@ -112,8 +112,12 @@ export default function Dashboard() {
     modelConfigurations: defaultModelPricingConfigurations
   });
 
-  async function load() {
-    const response = await fetchWithSamsarAuth("/api/bootstrap?scope=account", { cache: "no-store" });
+  async function load(customerId = activeCustomerId) {
+    const params = new URLSearchParams({ scope: "account" });
+    if (customerId) {
+      params.set("customerId", customerId);
+    }
+    const response = await fetchWithSamsarAuth(`/api/bootstrap?${params.toString()}`, { cache: "no-store" });
     const data = await response.json();
     setStore(data);
   }
@@ -293,6 +297,7 @@ export default function Dashboard() {
     setCreatingNewStorefront(false);
     setActiveCustomerId(customerId);
     setMessage("");
+    void load(customerId);
   }
 
   function startNewStorefront() {
@@ -410,7 +415,7 @@ export default function Dashboard() {
         setActiveCustomerId(data.customer.id);
       }
       setCreatingNewStorefront(false);
-      await load();
+      await load(data.customer?.id || customer?.id || customerForm.id);
       const successMessage = creatingNewStorefront
         ? "New storefront saved."
         : "Storefront pricing, allowlist, and setup saved.";
@@ -642,8 +647,11 @@ export default function Dashboard() {
 
       <main className="main">
         <div className="topbar hero-band">
-          <div>
-            <div className="eyebrow">Customer Console</div>
+          <div className="topbar-copy">
+            <div className="topbar-title-row">
+              <BreadcrumbNav />
+              <div className="eyebrow">Storefront Owner Console</div>
+            </div>
             <h1>Configure your customer store</h1>
             <p className="subtle">
               Purchase credits or sign in, define public per-second render pricing in USDC, and publish your SuperReferrals storefront.
@@ -651,7 +659,6 @@ export default function Dashboard() {
           </div>
           <div className="page-top-actions">
             <LanguageSelector />
-            <BreadcrumbNav />
             <button className="btn" onClick={() => load()} title="Refresh data">
               <RefreshCw size={16} /> Refresh
             </button>
@@ -794,7 +801,11 @@ export default function Dashboard() {
                     >
                       <div className="item-title">
                         <strong>{item.name}</strong>
-                        <span className="badge">{store.generations.filter((generation) => generation.customerId === item.id).length} renders</span>
+                        <span className="badge">
+                          {item.id === customer?.id
+                            ? `${store.generations.filter((generation) => generation.customerId === item.id).length} renders`
+                            : "Switch"}
+                        </span>
                       </div>
                       <p className="subtle">
                         {item.storefront?.category || "Customer store"} · {item.storefront?.conditions?.enabled ? "custom policies" : "default policies"}

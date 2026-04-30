@@ -55,12 +55,18 @@ export default async function Home() {
     <main className="landing-shell">
       <nav className="landing-nav" aria-label="Primary">
         <div className="landing-nav-left">
-          <a className="text-logo" href="/" aria-label="SuperReferrals home">
-            <span>Super</span>Referrals
+          <a className="landing-logo-link" href="/" aria-label="SuperReferrals home">
+            <img
+              alt="SuperReferrals"
+              className="landing-logo-image"
+              height={48}
+              src="/superreferrals-logo.png"
+              width={238}
+            />
           </a>
-          <LanguageSelector />
         </div>
         <div className="landing-nav-actions">
+          <LanguageSelector />
           <a className="btn ghost" href="/feed" target="_blank" rel="noreferrer">
             <Clapperboard size={16} /> Feed
           </a>

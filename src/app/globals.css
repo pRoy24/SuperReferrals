@@ -488,8 +488,21 @@ a:hover {
   color: var(--accent);
 }
 
+.landing-logo-link {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.landing-logo-image {
+  width: clamp(184px, 18vw, 238px);
+  height: auto;
+  display: block;
+}
+
 .landing-nav-actions {
   display: flex;
+  align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -1474,6 +1487,20 @@ a:hover {
   margin-bottom: 24px;
 }
 
+.topbar-copy,
+.public-hero-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.topbar-title-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .hero-band {
   padding: 22px;
   border: 1px solid var(--line);
@@ -1641,7 +1668,7 @@ h3 {
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   min-width: 0;
 }
 
@@ -1955,6 +1982,7 @@ h3 {
 
 .landing-hero-actions {
   justify-content: flex-end;
+  flex-wrap: nowrap;
 }
 
 .storefront-landing-meta {
@@ -3833,6 +3861,36 @@ button.item {
   transition: opacity 180ms ease, transform 180ms ease;
 }
 
+.feed-topbar-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  gap: 10px;
+}
+
+.feed-brand-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.feed-brand-title img {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  flex: 0 0 auto;
+}
+
+.feed-brand-title h1 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1;
+  color: #f7fdff;
+}
+
 .feed-shell.controls-visible .feed-topbar,
 .feed-topbar:focus-within {
   opacity: 1;
@@ -3842,9 +3900,19 @@ button.item {
 
 .feed-toolbar {
   display: flex;
+  align-items: center;
+  flex: 1 1 auto;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.feed-toolbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .icon-toggle {
@@ -4995,10 +5063,13 @@ button.item {
 
   .landing-nav {
     align-items: flex-start;
+    flex-wrap: wrap;
   }
 
   .landing-nav-actions {
-    max-width: 160px;
+    width: 100%;
+    max-width: none;
+    justify-content: flex-start;
   }
 
   .landing-hero {
@@ -5110,6 +5181,12 @@ button.item {
 
   .landing-hero-actions {
     justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .page-top-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .feed-shell {
@@ -5120,6 +5197,10 @@ button.item {
     align-items: start;
     top: 8px;
     width: calc(100vw - 16px);
+  }
+
+  .feed-topbar-left {
+    flex-wrap: wrap;
   }
 
   .feed-toolbar {

@@ -666,12 +666,14 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
   return (
     <main className={feedClass} onPointerDown={revealControls} onPointerMove={revealControls}>
       <header className="feed-topbar">
-        <div>
-          <div className="eyebrow">SuperReferrals</div>
-          <h1>Video Feed</h1>
+        <div className="feed-topbar-left">
+          <BreadcrumbNav />
+          <div className="feed-brand-title">
+            <img alt="" aria-hidden="true" height={28} src="/favicon.svg" width={28} />
+            <h1>Video feed</h1>
+          </div>
         </div>
         <div className="feed-toolbar">
-          <BreadcrumbNav />
           <LanguageSelector className="is-feed" />
           <button className={`icon-toggle ${viewMode === "mobile" ? "active" : ""}`} onClick={() => setViewMode("mobile")} title="Mobile feed">
             <Smartphone size={18} />

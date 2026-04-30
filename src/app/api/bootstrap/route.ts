@@ -22,6 +22,7 @@ import type { Customer, SuperReferralsStore } from "@/lib/types";
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const accountScope = url.searchParams.get("scope") === "account";
+  const requestedCustomerId = url.searchParams.get("customerId")?.trim();
   const cookieHeader = request.headers.get("cookie");
   const accountSession = readProcessorAccountSessionCookie(cookieHeader);
   const pendingCheckout = readPendingCreditCheckoutCookie(cookieHeader);
@@ -38,7 +39,8 @@ export async function GET(request: Request) {
     ? sessionCustomer
       ? accountScopedStore(
         await bootstrap(sessionCustomer.id),
-        sessionCustomer
+        sessionCustomer,
+        requestedCustomerId
       )
       : emptyStore()
     : orderActiveCustomerFirst(
@@ -66,8 +68,12 @@ export async function GET(request: Request) {
   return response;
 }
 
-function accountScopedStore(store: SuperReferralsStore, activeCustomer?: Customer) {
-  if (!activeCustomer) {
+function accountScopedStore(
+  store: SuperReferralsStore,
+  accountCustomer?: Customer,
+  requestedCustomerId?: string
+) {
+  if (!accountCustomer) {
     return {
       ...store,
       customers: [],
@@ -81,49 +87,57 @@ function accountScopedStore(store: SuperReferralsStore, activeCustomer?: Custome
       feedViews: [],
       agents: [],
       agentJobs: [],
-      agentTownEvents: []
+      agentTownEvents: [],
+      deletedVideoReferences: []
     } satisfies SuperReferralsStore;
   }
+  const requestedCustomer = requestedCustomerId
+    ? store.customers.find((customer) =>
+      customer.id === requestedCustomerId &&
+      (customer.id === accountCustomer.id || customersShareProcessorAccount(customer, accountCustomer))
+    )
+    : undefined;
+  const activeCustomer = requestedCustomer || store.customers.find((customer) => customer.id === accountCustomer.id) || accountCustomer;
   const customers = orderActiveCustomerFirst({
     ...store,
     customers: store.customers.filter((customer) =>
-      customer.id === activeCustomer.id || customersShareProcessorAccount(customer, activeCustomer)
+      customer.id === accountCustomer.id || customersShareProcessorAccount(customer, accountCustomer)
     )
   }, activeCustomer.id).customers;
-  const customerIds = new Set(customers.map((customer) => customer.id));
+  const activeCustomerIds = new Set([activeCustomer.id]);
   const generationIds = new Set(
     store.generations
-      .filter((generation) => customerIds.has(generation.customerId))
+      .filter((generation) => activeCustomerIds.has(generation.customerId))
       .map((generation) => generation.id)
   );
   const inftIds = new Set(
     store.infts
-      .filter((inft) => customerIds.has(inft.customerId))
+      .filter((inft) => activeCustomerIds.has(inft.customerId))
       .map((inft) => inft.id)
   );
   const agentIds = new Set(
     store.agents
-      .filter((agent) => agent.customerId && customerIds.has(agent.customerId))
+      .filter((agent) => agent.customerId && activeCustomerIds.has(agent.customerId))
       .map((agent) => agent.id)
   );
   const jobIds = new Set(
     store.agentJobs
-      .filter((job) => customerIds.has(job.customerId))
+      .filter((job) => activeCustomerIds.has(job.customerId))
       .map((job) => job.id)
   );
   return {
     ...store,
     customers,
-    subAccounts: store.subAccounts.filter((account) => customerIds.has(account.customerId)),
-    quotes: store.quotes.filter((quote) => customerIds.has(quote.customerId)),
-    generations: store.generations.filter((generation) => customerIds.has(generation.customerId)),
-    infts: store.infts.filter((inft) => customerIds.has(inft.customerId)),
-    storefrontRatings: store.storefrontRatings.filter((rating) => customerIds.has(rating.customerId)),
+    subAccounts: store.subAccounts.filter((account) => activeCustomerIds.has(account.customerId)),
+    quotes: store.quotes.filter((quote) => activeCustomerIds.has(quote.customerId)),
+    generations: store.generations.filter((generation) => activeCustomerIds.has(generation.customerId)),
+    infts: store.infts.filter((inft) => activeCustomerIds.has(inft.customerId)),
+    storefrontRatings: store.storefrontRatings.filter((rating) => activeCustomerIds.has(rating.customerId)),
     feedLikes: store.feedLikes.filter((like) => generationIds.has(like.generationId)),
     feedComments: store.feedComments.filter((comment) => generationIds.has(comment.generationId)),
     feedViews: store.feedViews.filter((view) => generationIds.has(view.generationId)),
-    agents: store.agents.filter((agent) => agent.customerId && customerIds.has(agent.customerId)),
-    agentJobs: store.agentJobs.filter((job) => customerIds.has(job.customerId)),
+    agents: store.agents.filter((agent) => agent.customerId && activeCustomerIds.has(agent.customerId)),
+    agentJobs: store.agentJobs.filter((job) => activeCustomerIds.has(job.customerId)),
     agentTownEvents: store.agentTownEvents.filter((event) =>
       Boolean(
         (event.jobId && jobIds.has(event.jobId)) ||

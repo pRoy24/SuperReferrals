@@ -1359,8 +1359,11 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   return (
     <main className="public-main storefront-user-main">
       <section className="hero-band public-hero">
-        <div>
-          <div className="eyebrow">{customer.name}</div>
+        <div className="public-hero-copy">
+          <div className="topbar-title-row">
+            <BreadcrumbNav />
+            <div className="eyebrow">{customer.name}</div>
+          </div>
           <h1>Generate a product video</h1>
           <p className="subtle">
             {customer.storefront?.description || "Connect your wallet, choose a render configuration, pay the store price, and track your previous render tasks."}
@@ -1373,7 +1376,6 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
         </div>
         <div className="landing-hero-actions">
           <LanguageSelector />
-          <BreadcrumbNav />
           <a className="btn" href="/storefronts">
             <Store size={16} /> Directory
           </a>
