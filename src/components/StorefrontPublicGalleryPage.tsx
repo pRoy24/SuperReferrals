@@ -11,7 +11,7 @@ import {
 import { storefrontThemeStyle } from "@/lib/storefront-themes";
 import type { Customer, PublicFeedItem } from "@/lib/types";
 
-export default function StorefrontPublicMosaicPage({
+export default function StorefrontPublicGalleryPage({
   customer,
   items
 }: {
@@ -20,7 +20,7 @@ export default function StorefrontPublicMosaicPage({
 }) {
   const storefrontHref = customer ? storefrontPublicHref(customer, "storefront") : "/storefronts";
   const feedHref = customer ? storefrontPublicHref(customer, "feed") : "/feed";
-  const title = customer ? `${customer.name} video mosaic` : "Video mosaic";
+  const title = customer ? `${customer.name} video gallery` : "Video gallery";
   const description = customer?.storefront?.description || "Published SuperReferrals videos arranged for scanning and playback.";
 
   return (

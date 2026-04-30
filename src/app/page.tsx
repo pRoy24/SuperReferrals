@@ -1,5 +1,8 @@
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import LandingPageClient from "@/components/LandingPageClient";
+import FeedPage from "@/components/FeedPage";
+import StorefrontPublicGalleryPage from "@/components/StorefrontPublicGalleryPage";
 import UserLandingPage from "@/components/UserLandingPage";
 import { getLandingEnvDiagnostics } from "@/lib/env-diagnostics";
 import { listPublicFeedItems } from "@/lib/feed";
@@ -9,7 +12,13 @@ import {
   normalizeAppLanguage
 } from "@/lib/localization";
 import { readStore } from "@/lib/store";
-import { findStorefrontByEnsHost, requestHostFromHeaders } from "@/lib/storefront-routing";
+import {
+  findStorefrontEnsHostMatch,
+  requestHostFromHeaders,
+  resolveStorefrontEnsPathMatch,
+  storefrontFeedPageProps,
+  storefrontProxyPath
+} from "@/lib/storefront-routing";
 
 export const dynamic = "force-dynamic";
 
@@ -20,9 +29,21 @@ export default async function Home() {
     appLanguageFromCookieHeader(requestHeaders.get("cookie")) ||
     DEFAULT_APP_LANGUAGE;
   const store = await readStore();
-  const customHostCustomer = findStorefrontByEnsHost(store.customers, requestHostFromHeaders(requestHeaders));
-  if (customHostCustomer) {
-    return <UserLandingPage customerId={customHostCustomer.id} />;
+  const requestHost = requestHostFromHeaders(requestHeaders);
+  const customHostMatch = resolveStorefrontEnsPathMatch(store.customers, requestHost, "/");
+  if (customHostMatch?.surface === "feed") {
+    return <FeedPage {...storefrontFeedPageProps(customHostMatch.customer)} />;
+  }
+  if (customHostMatch?.surface === "mosaic") {
+    const feed = await listPublicFeedItems({ customerId: customHostMatch.customer.id, sort: "newest", limit: 100 });
+    return <StorefrontPublicGalleryPage customer={customHostMatch.customer} items={feed.items} />;
+  }
+  if (customHostMatch?.customer) {
+    return <UserLandingPage customerId={customHostMatch.customer.id} />;
+  }
+  const ensHostMatch = findStorefrontEnsHostMatch(store.customers, requestHost);
+  if (ensHostMatch) {
+    redirect(storefrontProxyPath(ensHostMatch.customer, "storefront"));
   }
   const featuredFeed = await listPublicFeedItems({ sort: "newest", limit: 100 });
   const customer = store.customers[0];

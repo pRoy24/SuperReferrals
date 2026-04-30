@@ -156,7 +156,7 @@ Use `/dashboard` to:
 - Buy or refresh Samsar-backed SuperReferrals credits.
 - Connect the owner payout wallet.
 - Create multiple storefronts under one account.
-- Set public name, category, tags, support email, website, logo, storefront theme, ENS name, ENS proxy host, and referral base URL.
+- Set public name, category, tags, support email, website, logo, storefront theme, ENS name, ENS proxy host/subdomain, ENS base path, and referral base URL.
 - Configure render pricing through model-specific USDC-per-second settings.
 - Set prices for iNFT operations such as translation, joins, subtitle changes, outro changes, and footer updates.
 - Restrict render access by model, aspect ratio, max images, daily wallet limit, and wallet allowlist.
@@ -164,7 +164,22 @@ Use `/dashboard` to:
 - Review generated videos, publish/unpublish them, and inspect recent render tasks.
 - Run Agent Town for agent-planned campaign operations and 0G receipts.
 
-Public storefront video surfaces are available at `/storefronts/:customerId/feed` and `/storefronts/:customerId/mosaic`. When an owner enables an ENS proxy host, `/feed`, `/feed/:generationId/:viewMode`, and `/mosaic` requests on that host are filtered to that storefront, while `/` renders the storefront page.
+Public storefront video surfaces are available at `/storefronts/:customerId/feed` and `/storefronts/:customerId/gallery`. When an owner enables an ENS proxy host or subdomain, the configured storefront base path renders the public storefront and the feed/gallery/video routes follow underneath it. For example, `shop.example.eth/store` renders the storefront, `shop.example.eth/store/feed` renders the filtered feed, `shop.example.eth/store/gallery` renders the gallery, and `shop.example.eth/store/feed/:generationId/:viewMode` opens a filtered focused video.
+
+### ENS Storefront Routing
+
+Each storefront can be mapped to one owner-controlled ENS host or subdomain plus one storefront base path. The remaining public surfaces are child paths of that base path, so one ENS name is enough:
+
+| Surface | Example |
+| --- | --- |
+| Storefront | `https://shop.example.eth/store` |
+| Published feed | `https://shop.example.eth/store/feed` |
+| Published gallery | `https://shop.example.eth/store/gallery` |
+| Published focused video | `https://shop.example.eth/store/feed/:generationId/:viewMode` |
+
+For staging, use a Sepolia ENS name/subname and configure `ENS_CHAIN_ID=11155111` with a Sepolia RPC URL. For production, use Ethereum mainnet ENS records with `ENS_CHAIN_ID=1`; Base can remain the payment/runtime chain, but standard `.eth` resolver reads still begin on Ethereum mainnet unless an L2/offchain resolver is introduced. Add the selected ENS host or subdomain as a deployment domain alias so requests for that host reach the Next.js app.
+
+The storefront owner UI can verify the selected ENS name and write the required text records through the connected browser wallet. The one-step wallet write uses the name's current resolver `multicall` to set `url`, `com.superreferrals.storefront`, `com.superreferrals.feed`, `com.superreferrals.gallery`, and `com.superreferrals.proxy`. The wallet must be the manager for the selected name or subname; if the name has no resolver or the owner wants to create a new subname, use ENS Manager first and then write the SuperReferrals records.
 
 ## For Creators and Users
 
@@ -213,20 +228,40 @@ SuperReferrals is a Next.js app using the App Router, React client components, l
 | `src/lib/zero-g.ts`, `src/lib/zero-g-chain.ts` | 0G storage/chain helpers. |
 | `src/lib/agent-framework.ts` | Agent Town plan, receipts, settlement context, and AXL timeline. |
 
-## Install
+## Run Locally
 
-Use the local example env for development. It is mock-first, so the app boots without provider keys and shows an admin setup notice for missing live values.
+Run the guided local script:
 
 ```bash
-npm install
 ./run.sh
 ```
 
-Open `http://localhost:3000`.
+Then open `http://localhost:3000`.
 
-`./run.sh` creates `.env.local` from `.env.example` when missing, checks the local env file, prompts only for missing local values, installs dependencies if needed, frees the configured port, and starts `npm run dev`. By default it keeps live-provider prompts off while `SUPERREFERRALS_MOCKS=true`; set `LOCAL_CONFIGURE_LIVE=true` or `SUPERREFERRALS_MOCKS=false` in `.env.local` to configure local live-provider values.
+`./run.sh` creates `.env.local` from `.env.example` when missing, prompts for required local secrets, installs dependencies if `node_modules` is missing, frees `PORT` when needed, and starts `npm run dev`. Press Enter at the session/admin secret prompts to generate secure local values.
 
-Before deploying, run:
+For a no-key local demo, keep the default mock mode in `.env.local`:
+
+```bash
+SUPERREFERRALS_MOCKS=true
+```
+
+To configure live providers locally, run:
+
+```bash
+LOCAL_CONFIGURE_LIVE=true ./run.sh
+```
+
+or set `SUPERREFERRALS_MOCKS=false` in `.env.local` and rerun `./run.sh`.
+
+If `.env.local` does not exist yet, seed it from another template:
+
+```bash
+LOCAL_ENV_EXAMPLE=.env.staging.example ./run.sh
+LOCAL_ENV_EXAMPLE=.env.production.example ./run.sh
+```
+
+Useful checks:
 
 ```bash
 npm run typecheck
@@ -262,7 +297,7 @@ Key env groups:
 | Payment chain | `TRANSACTION_NETWORK`, `TRANSACTION_CHAIN_ID`, `TRANSACTION_RPC_URL`, `TRANSACTION_EXPLORER_URL`, `NEXT_PUBLIC_TRANSACTION_*` |
 | Settlement and swaps | `KEEPERHUB_API_KEY`, `KEEPERHUB_WALLET_ADDRESS`, `KEEPERHUB_PAYMENT_WORKFLOW_ID*`, `UNISWAP_API_KEY` |
 | 0G | `OG_NETWORK`, `OG_CHAIN_ID`, `OG_RPC_URL`, `OG_BLOCK_EXPLORER_URL`, `OG_STORAGE_INDEXER_RPC`, `OG_STORAGE_GATEWAY_URL`, `OG_PRIVATE_KEY`, `OG_DA_URL`, `OG_COMPUTE_*` |
-| Contracts and agent services | `USER_REGISTRY_*`, `AGENT_REGISTRY_*`, `INFT_*`, `OG_SERVICE_MARKETPLACE_URL`, `AXL_BASE_URL`, `ENS_CHAIN_ID`, `ENS_RPC_URL` |
+| Contracts, agent services, and ENS | `USER_REGISTRY_*`, `AGENT_REGISTRY_*`, `INFT_*`, `OG_SERVICE_MARKETPLACE_URL`, `AXL_BASE_URL`, `ENS_CHAIN_ID`, `ENS_RPC_URL` |
 | Admin | `ADMIN_SECRET` |
 
 `SAMSAR_APP_SECRET` is the Samsar platform secret used to create/authenticate generated APP_KEY credentials and encrypt stored APP_KEYs. Get it from the Samsar credentials for the target environment; leave it blank only when live storefront APP_KEY provisioning is intentionally disabled.

@@ -38,7 +38,7 @@ type FeedPageProps = {
   storefrontHref?: string;
   storefrontLogoUrl?: string;
   storefrontName?: string;
-  mosaicHref?: string;
+  galleryHref?: string;
 };
 type VideoProgress = {
   currentTime: number;
@@ -89,7 +89,7 @@ export default function FeedPage({
   storefrontHref = "",
   storefrontLogoUrl = "",
   storefrontName = "",
-  mosaicHref = ""
+  galleryHref = ""
 }: FeedPageProps = {}) {
   const [items, setItems] = useState<PublicFeedItem[]>([]);
   const [query, setQuery] = useState("");
@@ -747,8 +747,8 @@ export default function FeedPage({
               <Store size={18} />
             </a>
           )}
-          {mosaicHref && (
-            <a className="icon-toggle" href={mosaicHref} title="Open mosaic">
+          {galleryHref && (
+            <a className="icon-toggle" href={galleryHref} title="Open gallery">
               <LayoutGrid size={18} />
             </a>
           )}

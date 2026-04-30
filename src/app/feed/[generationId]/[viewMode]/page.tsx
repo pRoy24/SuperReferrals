@@ -1,8 +1,14 @@
 import { headers } from "next/headers";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import FeedPage from "@/components/FeedPage";
 import { readStore } from "@/lib/store";
-import { findStorefrontByEnsHost, requestHostFromHeaders, storefrontFeedPageProps } from "@/lib/storefront-routing";
+import {
+  findStorefrontEnsHostMatch,
+  requestHostFromHeaders,
+  resolveStorefrontEnsPathMatch,
+  storefrontFeedPageProps,
+  storefrontProxyPath
+} from "@/lib/storefront-routing";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +23,26 @@ export default async function FocusedDeviceFeedPage({
   }
   const store = await readStore();
   const requestHeaders = await headers();
-  const customer = findStorefrontByEnsHost(store.customers, requestHostFromHeaders(requestHeaders));
-  return <FeedPage initialGenerationId={decodeURIComponent(generationId)} initialViewMode={viewMode} {...storefrontFeedPageProps(customer)} />;
+  const requestHost = requestHostFromHeaders(requestHeaders);
+  const decodedGenerationId = decodeURIComponent(generationId);
+  const match = resolveStorefrontEnsPathMatch(
+    store.customers,
+    requestHost,
+    `/feed/${encodeURIComponent(decodedGenerationId)}/${viewMode}`
+  );
+  const hostMatch = findStorefrontEnsHostMatch(store.customers, requestHost);
+  if (hostMatch && match?.surface !== "video") {
+    redirect(storefrontProxyPath(hostMatch.customer, "video", {
+      generationId: decodedGenerationId,
+      viewMode
+    }));
+  }
+  const customer = match?.surface === "video" ? match.customer : undefined;
+  return (
+    <FeedPage
+      initialGenerationId={decodedGenerationId}
+      initialViewMode={viewMode}
+      {...storefrontFeedPageProps(customer)}
+    />
+  );
 }

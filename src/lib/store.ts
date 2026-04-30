@@ -19,6 +19,7 @@ import {
 import {
   normalizeStorefrontEnsName,
   normalizeStorefrontEnsNetwork,
+  normalizeStorefrontGalleryPath,
   normalizeStorefrontProxyPath
 } from "./storefront-routing";
 import {
@@ -26,6 +27,7 @@ import {
   normalizeSamsarVideoSessionId
 } from "./samsar";
 import { normalizeWalletList } from "./storefront-access";
+import { normalizeStorefrontLayoutId } from "./storefront-customization";
 import { normalizeStorefrontThemeId } from "./storefront-themes";
 import { isUsableEvmAddress } from "./wallet-address";
 import type {
@@ -1657,12 +1659,15 @@ function normalizeStorefrontDetails(
   }
   return {
     description: cleanOptionalString(input?.description ?? existing?.description),
+    heroTitle: cleanOptionalString(input?.heroTitle ?? existing?.heroTitle),
+    heroSubtitle: cleanOptionalString(input?.heroSubtitle ?? existing?.heroSubtitle),
     websiteUrl: cleanOptionalString(input?.websiteUrl ?? existing?.websiteUrl),
     supportEmail: cleanOptionalString(input?.supportEmail ?? existing?.supportEmail),
     category: cleanOptionalString(input?.category ?? existing?.category),
     tags: normalizeStorefrontTags(input?.tags ?? existing?.tags),
     logoUrl: cleanOptionalUrl(input?.logoUrl ?? existing?.logoUrl),
     themeId: normalizeStorefrontThemeId(input?.themeId ?? existing?.themeId),
+    layoutId: normalizeStorefrontLayoutId(input?.layoutId ?? existing?.layoutId),
     ens: normalizeStorefrontEnsProxy(input?.ens, existing?.ens),
     conditions: normalizeStorefrontConditions(input?.conditions, existing?.conditions)
   };
@@ -1716,7 +1721,7 @@ function normalizeStorefrontEnsProxy(
     network: normalizeStorefrontEnsNetwork(input?.network ?? existing?.network),
     storefrontPath: normalizeStorefrontProxyPath(input?.storefrontPath ?? existing?.storefrontPath, "/"),
     feedPath: normalizeStorefrontProxyPath(input?.feedPath ?? existing?.feedPath, "/feed"),
-    mosaicPath: normalizeStorefrontProxyPath(input?.mosaicPath ?? existing?.mosaicPath, "/mosaic"),
+    mosaicPath: normalizeStorefrontGalleryPath(input?.mosaicPath ?? existing?.mosaicPath),
     videoPath: normalizeStorefrontProxyPath(input?.videoPath ?? existing?.videoPath, "/feed"),
     contentHash
   };

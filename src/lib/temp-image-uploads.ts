@@ -45,6 +45,7 @@ export async function createTempImageUpload(input: {
   contentType: string;
   fileName?: string;
   baseUrl?: string;
+  ttlSeconds?: number | null;
 }): Promise<TempImageUploadResult> {
   const contentType = normalizeImageContentType(input.contentType);
   if (!contentType) {
@@ -58,10 +59,12 @@ export async function createTempImageUpload(input: {
   }
   assertImageSignature(input.bytes, contentType);
 
-  const ttlSeconds = tempImageTtlSeconds();
+  const ttlSeconds = normalizeUploadTtlSeconds(input.ttlSeconds);
   const id = createId("img");
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + ttlSeconds * 1000).toISOString();
+  const expiresAt = ttlSeconds
+    ? new Date(now.getTime() + ttlSeconds * 1000).toISOString()
+    : "";
   const extension = allowedImageTypes.get(contentType) || "img";
   const fileName = sanitizeFileName(input.fileName, `upload.${extension}`);
   const document: TempImageUploadDocument = {
@@ -73,7 +76,10 @@ export async function createTempImageUpload(input: {
     createdAt: nowIso(),
     expiresAt
   };
-  await redisCommand<string>(["SET", tempImageKey(id), JSON.stringify(document), "EX", String(ttlSeconds)]);
+  const command = ttlSeconds
+    ? ["SET", tempImageKey(id), JSON.stringify(document), "EX", String(ttlSeconds)]
+    : ["SET", tempImageKey(id), JSON.stringify(document)];
+  await redisCommand<string>(command);
   return {
     id,
     url: `${normalizeBaseUrl(input.baseUrl)}/api/uploads/images/${id}`,
@@ -179,6 +185,16 @@ function storeEnvironmentSlug() {
 function tempImageTtlSeconds() {
   const value = Number(env("SUPERREFERRALS_TEMP_IMAGE_TTL_SECONDS"));
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_TEMP_IMAGE_TTL_SECONDS;
+}
+
+function normalizeUploadTtlSeconds(value: number | null | undefined) {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.floor(value);
+  }
+  return tempImageTtlSeconds();
 }
 
 function normalizeBaseUrl(baseUrl?: string) {

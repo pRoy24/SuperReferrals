@@ -18,14 +18,16 @@ import {
   Sparkles,
   Store,
   Undo2,
+  Upload,
   Users,
   Wallet,
   Zap
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { encodeFunctionData, namehash, parseAbi } from "viem";
 import { CustomerStoreCreatorSkeleton } from "@/components/FormLoadingSkeletons";
-import { requestWalletAccounts, subscribeToBrowserWalletProviders, type BrowserWalletProvider } from "@/lib/browser-wallets";
-import { getPaymentTokens, getTransactionChainConfig, settlementTokenForCurrency } from "@/lib/payment-tokens";
+import { requestWalletAccounts, subscribeToBrowserWalletProviders, type BrowserWalletProvider, type EthereumProvider } from "@/lib/browser-wallets";
+import { getPaymentTokens, getTransactionChainConfig, settlementTokenForCurrency, type TransactionChainConfig } from "@/lib/payment-tokens";
 import {
   CREDIT_UNIT_USD,
   DEFAULT_CUSTOMER_MULTIPLIER,
@@ -50,18 +52,29 @@ import LanguageSelector from "@/components/LanguageSelector";
 import StorefrontVideoGrid from "@/components/StorefrontVideoGrid";
 import { syncStoredAppLanguagePreference } from "@/lib/app-language-client";
 import {
+  DEFAULT_STOREFRONT_HERO_SUBTITLE,
+  DEFAULT_STOREFRONT_HERO_TITLE,
+  DEFAULT_STOREFRONT_LAYOUT_ID,
+  STOREFRONT_LAYOUT_OPTIONS,
+  normalizeStorefrontLayoutId
+} from "@/lib/storefront-customization";
+import {
   normalizeStorefrontEnsName,
+  normalizeStorefrontGalleryPath,
   normalizeStorefrontProxyPath,
-  storefrontInternalPath,
   storefrontPublicHref
 } from "@/lib/storefront-routing";
 import { DEFAULT_STOREFRONT_THEME_ID, STOREFRONT_THEMES } from "@/lib/storefront-themes";
 import { isUsableEvmAddress } from "@/lib/wallet-address";
-import type { Customer, INFTPaidAction, ModelPricingConfiguration, PaymentCurrencySymbol, StorefrontEnsNetwork, StorefrontThemeId, SuperReferralsStore, VideoAspectRatio, VideoModel } from "@/lib/types";
+import type { Customer, INFTPaidAction, ModelPricingConfiguration, PaymentCurrencySymbol, StorefrontEnsNetwork, StorefrontLayoutId, StorefrontThemeId, SuperReferralsStore, VideoAspectRatio, VideoModel } from "@/lib/types";
 
 const processorCreditAmounts = [10, 25, 50, 100];
 const conditionModelOptions: VideoModel[] = ["RUNWAYML", "VEO3.1I2V", "SEEDANCEI2V", "KLING3.0"];
 const conditionAspectOptions: VideoAspectRatio[] = ["9:16", "16:9"];
+const ENS_RESOLVER_ABI = parseAbi([
+  "function multicall(bytes[] data) returns (bytes[])",
+  "function setText(bytes32 node, string key, string value)"
+]);
 type ToastState = { id: number; kind: "success" | "error" | "warning"; message: string } | null;
 const deploymentEnvironment = (
   process.env.NEXT_PUBLIC_DEPLOYMENT_ENV ||
@@ -76,9 +89,11 @@ export default function Dashboard() {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [toast, setToast] = useState<ToastState>(null);
+  const [logoUploadError, setLogoUploadError] = useState("");
   const [activeCustomerId, setActiveCustomerId] = useState("");
   const [creatingNewStorefront, setCreatingNewStorefront] = useState(false);
   const [ensSettingsOpen, setEnsSettingsOpen] = useState(false);
+  const [ensConfigTxHash, setEnsConfigTxHash] = useState("");
   const [appOrigin, setAppOrigin] = useState("");
   const [processorAmountUsd, setProcessorAmountUsd] = useState(25);
   const [processorAccountForm, setProcessorAccountForm] = useState({
@@ -109,18 +124,21 @@ export default function Dashboard() {
     referrerBaseUrl: "",
     ensName: "",
     storefrontDescription: "",
+    storefrontHeroTitle: DEFAULT_STOREFRONT_HERO_TITLE,
+    storefrontHeroSubtitle: DEFAULT_STOREFRONT_HERO_SUBTITLE,
     storefrontWebsiteUrl: "",
     storefrontSupportEmail: "",
     storefrontCategory: "",
     storefrontTags: "",
     storefrontLogoUrl: "",
     storefrontThemeId: DEFAULT_STOREFRONT_THEME_ID as StorefrontThemeId,
+    storefrontLayoutId: DEFAULT_STOREFRONT_LAYOUT_ID as StorefrontLayoutId,
     ensProxyEnabled: false,
     ensProxyName: "",
     ensProxyNetwork: "sepolia" as StorefrontEnsNetwork,
     ensStorefrontPath: "/",
     ensFeedPath: "/feed",
-    ensMosaicPath: "/mosaic",
+    ensMosaicPath: "/gallery",
     ensVideoPath: "/feed",
     ensContentHash: "",
     conditionalsEnabled: false,
@@ -231,18 +249,21 @@ export default function Dashboard() {
       referrerBaseUrl: customer.referrerBaseUrl,
       ensName: customer.ensName || "",
       storefrontDescription: customer.storefront?.description || "",
+      storefrontHeroTitle: customer.storefront?.heroTitle || DEFAULT_STOREFRONT_HERO_TITLE,
+      storefrontHeroSubtitle: customer.storefront?.heroSubtitle || customer.storefront?.description || DEFAULT_STOREFRONT_HERO_SUBTITLE,
       storefrontWebsiteUrl: customer.storefront?.websiteUrl || "",
       storefrontSupportEmail: customer.storefront?.supportEmail || "",
       storefrontCategory: customer.storefront?.category || "",
       storefrontTags: customer.storefront?.tags?.join(", ") || "",
       storefrontLogoUrl: customer.storefront?.logoUrl || "",
       storefrontThemeId: customer.storefront?.themeId || DEFAULT_STOREFRONT_THEME_ID,
+      storefrontLayoutId: normalizeStorefrontLayoutId(customer.storefront?.layoutId),
       ensProxyEnabled: customer.storefront?.ens?.enabled || false,
       ensProxyName: customer.storefront?.ens?.name || "",
       ensProxyNetwork: customer.storefront?.ens?.network || defaultEnsProxyNetwork,
       ensStorefrontPath: customer.storefront?.ens?.storefrontPath || "/",
       ensFeedPath: customer.storefront?.ens?.feedPath || "/feed",
-      ensMosaicPath: customer.storefront?.ens?.mosaicPath || "/mosaic",
+      ensMosaicPath: normalizeStorefrontGalleryPath(customer.storefront?.ens?.mosaicPath),
       ensVideoPath: customer.storefront?.ens?.videoPath || "/feed",
       ensContentHash: customer.storefront?.ens?.contentHash || "",
       conditionalsEnabled: customer.storefront?.conditions?.enabled || false,
@@ -297,14 +318,35 @@ export default function Dashboard() {
   const publicStorefrontLinks = customer ? [
     { label: "Storefront", href: storefrontPublicHref(customer, "storefront") },
     { label: "Feed", href: storefrontPublicHref(customer, "feed") },
-    { label: "Mosaic", href: storefrontPublicHref(customer, "mosaic") }
+    { label: "Gallery", href: storefrontPublicHref(customer, "mosaic") }
   ] : [];
-  const ensProxyRecordRows = customer ? [
-    { key: "url", value: `${appOrigin}${storefrontInternalPath(customer.id, "storefront")}` },
-    { key: "com.superreferrals.storefront", value: `${appOrigin}${storefrontInternalPath(customer.id, "storefront")}` },
-    { key: "com.superreferrals.feed", value: `${appOrigin}${storefrontInternalPath(customer.id, "feed")}` },
-    { key: "com.superreferrals.mosaic", value: `${appOrigin}${storefrontInternalPath(customer.id, "mosaic")}` }
-  ] : [];
+  const ensProxyName = normalizeStorefrontEnsName(customerForm.ensProxyName);
+  const ensProxyPreviewCustomer: Customer | undefined = customer && ensProxyName ? {
+    ...customer,
+    storefront: {
+      ...customer.storefront,
+      ens: {
+        enabled: true,
+        name: ensProxyName,
+        network: customerForm.ensProxyNetwork,
+        storefrontPath: customerForm.ensStorefrontPath,
+        feedPath: customerForm.ensFeedPath,
+        mosaicPath: customerForm.ensMosaicPath,
+        videoPath: customerForm.ensVideoPath,
+        contentHash: customerForm.ensContentHash
+      }
+    }
+  } : undefined;
+  const ensProxyRecordRows = ensProxyPreviewCustomer ? [
+    { key: "url", value: storefrontPublicHref(ensProxyPreviewCustomer, "storefront") },
+    { key: "com.superreferrals.storefront", value: storefrontPublicHref(ensProxyPreviewCustomer, "storefront") },
+    { key: "com.superreferrals.feed", value: storefrontPublicHref(ensProxyPreviewCustomer, "feed") },
+    { key: "com.superreferrals.gallery", value: storefrontPublicHref(ensProxyPreviewCustomer, "mosaic") },
+    { key: "com.superreferrals.proxy", value: appOrigin }
+  ].filter((row) => row.value) : [];
+  const ensConfigExplorerUrl = ensConfigTxHash
+    ? `${ensWalletChainConfig(customerForm.ensProxyNetwork).blockExplorerUrls[0]}/tx/${ensConfigTxHash}`
+    : "";
 
   function updatePricingRow(id: string, patch: Partial<ModelPricingConfiguration>) {
     setCustomerForm((current) => ({
@@ -346,6 +388,44 @@ export default function Dashboard() {
     }));
   }
 
+  async function uploadStorefrontLogo(file: File) {
+    if (!file.type.startsWith("image/")) {
+      setLogoUploadError("Upload a JPEG, PNG, or WebP logo image.");
+      return;
+    }
+    setBusy("storefront-logo");
+    setLogoUploadError("");
+    try {
+      const formData = new FormData();
+      formData.set("image", file);
+      const response = await fetchWithSamsarAuth("/api/uploads/storefront-logo", {
+        method: "POST",
+        body: formData
+      });
+      const data = await assertOk(response);
+      const upload = data.upload as { url?: string };
+      if (!upload?.url) {
+        throw new Error("Upload did not return a logo URL.");
+      }
+      setCustomerForm((current) => ({ ...current, storefrontLogoUrl: upload.url || "" }));
+      showToast("Storefront logo uploaded. Save setup to publish it.");
+    } catch (error) {
+      const uploadError = error instanceof Error ? error.message : "Logo upload failed.";
+      setLogoUploadError(uploadError);
+      showToast(uploadError, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function handleStorefrontLogoInput(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (file) {
+      uploadStorefrontLogo(file).catch(() => undefined);
+    }
+  }
+
   function showToast(message: string, kind: "success" | "error" | "warning" = "success") {
     setToast({ id: Date.now(), kind, message });
   }
@@ -377,18 +457,21 @@ export default function Dashboard() {
       referrerBaseUrl: base?.referrerBaseUrl || customerForm.referrerBaseUrl,
       ensName: base?.ensName || "",
       storefrontDescription: "",
+      storefrontHeroTitle: DEFAULT_STOREFRONT_HERO_TITLE,
+      storefrontHeroSubtitle: DEFAULT_STOREFRONT_HERO_SUBTITLE,
       storefrontWebsiteUrl: "",
       storefrontSupportEmail: base?.storefront?.supportEmail || "",
       storefrontCategory: "",
       storefrontTags: "",
       storefrontLogoUrl: "",
       storefrontThemeId: DEFAULT_STOREFRONT_THEME_ID,
+      storefrontLayoutId: DEFAULT_STOREFRONT_LAYOUT_ID,
       ensProxyEnabled: false,
       ensProxyName: "",
       ensProxyNetwork: defaultEnsProxyNetwork,
       ensStorefrontPath: "/",
       ensFeedPath: "/feed",
-      ensMosaicPath: "/mosaic",
+      ensMosaicPath: "/gallery",
       ensVideoPath: "/feed",
       ensContentHash: "",
       conditionalsEnabled: false,
@@ -438,12 +521,15 @@ export default function Dashboard() {
           ensName: customerForm.ensName,
           storefront: {
             description: customerForm.storefrontDescription,
+            heroTitle: customerForm.storefrontHeroTitle,
+            heroSubtitle: customerForm.storefrontHeroSubtitle,
             websiteUrl: customerForm.storefrontWebsiteUrl,
             supportEmail: customerForm.storefrontSupportEmail,
             category: customerForm.storefrontCategory,
             tags: customerForm.storefrontTags,
             logoUrl: customerForm.storefrontLogoUrl,
             themeId: customerForm.storefrontThemeId,
+            layoutId: customerForm.storefrontLayoutId,
             ens: {
               enabled: customerForm.ensProxyEnabled,
               name: customerForm.ensProxyName,
@@ -524,29 +610,109 @@ export default function Dashboard() {
       const response = await fetch("/api/ens/resolve", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: ensName })
+        body: JSON.stringify({ name: ensName, network: customerForm.ensProxyNetwork })
       });
       const data = await assertOk(response);
       const texts = data.result?.texts || {};
-      const expectedStorefrontPath = customer?.id
-        ? storefrontInternalPath(customer.id, "storefront")
-        : "/dashboard";
-      const expectedStorefrontUrl = appOrigin ? `${appOrigin}${expectedStorefrontPath}` : expectedStorefrontPath;
-      const matchingRecord = [
-        texts.url,
-        texts["com.superreferrals.storefront"],
-        texts["com.superreferrals.proxy"]
-      ].some((value) => typeof value === "string" && (
-        value === expectedStorefrontUrl ||
-        value.endsWith(expectedStorefrontPath)
-      ));
-      const successMessage = matchingRecord
-        ? `${ensName} resolves with a storefront URL record.`
-        : `${ensName} resolves, but no storefront URL record matched ${expectedStorefrontPath}.`;
+      const missingRows = ensProxyRecordRows.filter((row) => texts[row.key] !== row.value);
+      const successMessage = missingRows.length === 0
+        ? `${ensName} resolves with the storefront proxy records.`
+        : `${ensName} resolves, but ${missingRows.map((row) => row.key).join(", ")} must be updated.`;
       setMessage(successMessage);
-      showToast(successMessage, matchingRecord ? "success" : "warning");
+      showToast(successMessage, missingRows.length === 0 ? "success" : "warning");
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "ENS verification failed";
+      setMessage(errorMessage);
+      showToast(errorMessage, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function configureEnsProxyRecords(walletProvider?: BrowserWalletProvider) {
+    const ensName = normalizeStorefrontEnsName(customerForm.ensProxyName);
+    if (!customer?.id) {
+      const warning = "Save the storefront before writing ENS records.";
+      setMessage(warning);
+      showToast(warning, "warning");
+      return;
+    }
+    if (!ensName) {
+      const warning = "Enter an ENS name before writing records.";
+      setMessage(warning);
+      showToast(warning, "warning");
+      return;
+    }
+    if (ensProxyRecordRows.length === 0) {
+      const warning = "No ENS records are ready to write.";
+      setMessage(warning);
+      showToast(warning, "warning");
+      return;
+    }
+    setBusy("ens-configure");
+    setEnsConfigTxHash("");
+    setMessage("");
+    try {
+      const provider = walletProvider?.provider || walletProviders[0]?.provider || window.ethereum;
+      if (!provider) {
+        throw new Error("No browser wallet detected. Install MetaMask, Coinbase Wallet, Rabby, Brave Wallet, or another EIP-1193 wallet.");
+      }
+      const accounts = await requestWalletAccounts(provider, { forceAccountSelection: true });
+      const from = accounts[0];
+      if (!from) {
+        throw new Error("Wallet did not return an account.");
+      }
+      const resolveResponse = await fetch("/api/ens/resolve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: ensName, network: customerForm.ensProxyNetwork })
+      });
+      const resolveData = await assertOk(resolveResponse);
+      const resolverAddress = String(resolveData.result?.resolverAddress || "");
+      if (!isUsableEvmAddress(resolverAddress)) {
+        throw new Error(`${ensName} does not have a resolver. Set a resolver in the ENS manager before writing SuperReferrals records.`);
+      }
+      const chain = ensWalletChainConfig(customerForm.ensProxyNetwork);
+      await ensureWalletNetwork(provider, chain);
+      const node = (resolveData.result?.node || namehash(ensName)) as `0x${string}`;
+      const calls = ensProxyRecordRows.map((row) => encodeFunctionData({
+        abi: ENS_RESOLVER_ABI,
+        functionName: "setText",
+        args: [node, row.key, row.value]
+      }));
+      const data = encodeFunctionData({
+        abi: ENS_RESOLVER_ABI,
+        functionName: "multicall",
+        args: [calls]
+      });
+      const transaction = {
+        from,
+        to: resolverAddress,
+        data,
+        value: "0x0"
+      };
+      const gas = await estimateWalletGas(provider, transaction, {
+        label: "ENS record update",
+        chainName: chain.name,
+        recovery: "Confirm that the connected wallet is the ENS name manager and that the resolver supports text records."
+      });
+      const txHash = await sendWalletTransaction(provider, { ...transaction, gas }, {
+        label: "ENS record update",
+        chainName: chain.name,
+        recovery: "Confirm that the connected wallet is the ENS name manager and that the resolver supports text records."
+      });
+      setEnsConfigTxHash(txHash);
+      const receipt = await waitForWalletReceipt(provider, txHash, 90000);
+      if (receipt && !isSuccessfulReceipt(receipt)) {
+        throw new Error(`ENS record transaction ${txHash} failed on ${chain.name}.`);
+      }
+      const successMessage = receipt
+        ? `ENS records updated for ${ensName}.`
+        : `ENS record transaction submitted for ${ensName}: ${txHash}`;
+      setMessage(successMessage);
+      showToast(successMessage);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "ENS record update failed";
       setMessage(errorMessage);
       showToast(errorMessage, "error");
     } finally {
@@ -956,11 +1122,66 @@ export default function Dashboard() {
               <div className="form-grid">
                 <TextField label="Store name" value={customerForm.name} onChange={(name) => setCustomerForm({ ...customerForm, name })} />
                 <TextField label="Storefront category" value={customerForm.storefrontCategory} onChange={(storefrontCategory) => setCustomerForm({ ...customerForm, storefrontCategory })} />
+                <TextField label="Storefront header" value={customerForm.storefrontHeroTitle} onChange={(storefrontHeroTitle) => setCustomerForm({ ...customerForm, storefrontHeroTitle })} />
                 <TextField label="Storefront website URL" value={customerForm.storefrontWebsiteUrl} onChange={(storefrontWebsiteUrl) => setCustomerForm({ ...customerForm, storefrontWebsiteUrl })} />
-                <TextField label="Storefront logo URL" value={customerForm.storefrontLogoUrl} onChange={(storefrontLogoUrl) => setCustomerForm({ ...customerForm, storefrontLogoUrl })} />
+                <div className="field full storefront-logo-edit">
+                  <label>Storefront logo</label>
+                  <div className="storefront-logo-edit-row">
+                    <span className="storefront-logo-preview">
+                      <img alt="" src={customerForm.storefrontLogoUrl || "/superreferrals-logo.svg"} />
+                    </span>
+                    <div className="storefront-logo-controls">
+                      <input
+                        value={customerForm.storefrontLogoUrl}
+                        onChange={(event) => setCustomerForm({ ...customerForm, storefrontLogoUrl: event.target.value })}
+                        placeholder="https://..."
+                      />
+                      <label className={`btn small ${busy === "storefront-logo" ? "disabled" : ""}`}>
+                        <Upload size={15} /> {busy === "storefront-logo" ? "Uploading..." : "Upload image"}
+                        <input
+                          accept="image/jpeg,image/png,image/webp"
+                          disabled={busy === "storefront-logo"}
+                          hidden
+                          onChange={handleStorefrontLogoInput}
+                          type="file"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                  <p className="subtle">Recommended logo: 320 x 120 PNG or WebP, transparent background, 4 MB max. If empty, the public navbar uses the SuperReferrals logo.</p>
+                  {logoUploadError && <p className="notice warning compact">{logoUploadError}</p>}
+                </div>
                 <div className="field full">
-                  <label>Storefront description</label>
+                  <label>Storefront subheader</label>
+                  <textarea value={customerForm.storefrontHeroSubtitle} onChange={(event) => setCustomerForm({ ...customerForm, storefrontHeroSubtitle: event.target.value })} />
+                </div>
+                <div className="field full">
+                  <label>Directory description</label>
                   <textarea value={customerForm.storefrontDescription} onChange={(event) => setCustomerForm({ ...customerForm, storefrontDescription: event.target.value })} />
+                </div>
+              </div>
+              <div className="theme-picker-section">
+                <div className="item-title">
+                  <div>
+                    <strong>Public storefront layout</strong>
+                    <p className="subtle">Choose how wallet, pricing, and render controls are arranged on public routes.</p>
+                  </div>
+                  <ImageIcon size={17} />
+                </div>
+                <div className="storefront-layout-picker" role="radiogroup" aria-label="Public storefront layout">
+                  {STOREFRONT_LAYOUT_OPTIONS.map((layout) => (
+                    <button
+                      aria-checked={customerForm.storefrontLayoutId === layout.id}
+                      className={`layout-choice ${customerForm.storefrontLayoutId === layout.id ? "active" : ""}`}
+                      key={layout.id}
+                      onClick={() => setCustomerForm({ ...customerForm, storefrontLayoutId: layout.id })}
+                      role="radio"
+                      type="button"
+                    >
+                      <strong>{layout.label}</strong>
+                      <small>{layout.description}</small>
+                    </button>
+                  ))}
                 </div>
               </div>
               <div className="theme-picker-section">
@@ -1046,9 +1267,12 @@ export default function Dashboard() {
                   <button className="btn small" onClick={verifyEnsProxyRecords} disabled={busy === "ens-verify" || !customerForm.ensProxyName} type="button">
                     <Globe2 size={15} /> Verify ENS
                   </button>
+                  <button className="btn small" onClick={() => configureEnsProxyRecords()} disabled={busy === "ens-configure" || !customerForm.ensProxyName || !customer} type="button">
+                    <Wallet size={15} /> Write ENS records
+                  </button>
                 </div>
                 <div className="form-grid">
-                  <TextField label="ENS host" value={customerForm.ensProxyName} onChange={(ensProxyName) => setCustomerForm({ ...customerForm, ensProxyName })} />
+                  <TextField label="ENS host or subdomain" value={customerForm.ensProxyName} onChange={(ensProxyName) => setCustomerForm({ ...customerForm, ensProxyName })} />
                   <div className="field">
                     <label>ENS network</label>
                     <select
@@ -1057,13 +1281,13 @@ export default function Dashboard() {
                     >
                       <option value="sepolia">Sepolia testnet</option>
                       <option value="mainnet">Ethereum mainnet</option>
-                      <option value="base">Base mainnet</option>
+                      <option value="base">Base production, Ethereum ENS</option>
                     </select>
                   </div>
-                  <TextField label="Storefront path" value={customerForm.ensStorefrontPath} onChange={(ensStorefrontPath) => setCustomerForm({ ...customerForm, ensStorefrontPath: normalizeStorefrontProxyPath(ensStorefrontPath, "/") })} />
-                  <TextField label="Feed path" value={customerForm.ensFeedPath} onChange={(ensFeedPath) => setCustomerForm({ ...customerForm, ensFeedPath: normalizeStorefrontProxyPath(ensFeedPath, "/feed") })} />
-                  <TextField label="Mosaic path" value={customerForm.ensMosaicPath} onChange={(ensMosaicPath) => setCustomerForm({ ...customerForm, ensMosaicPath: normalizeStorefrontProxyPath(ensMosaicPath, "/mosaic") })} />
-                  <TextField label="Video path prefix" value={customerForm.ensVideoPath} onChange={(ensVideoPath) => setCustomerForm({ ...customerForm, ensVideoPath: normalizeStorefrontProxyPath(ensVideoPath, "/feed") })} />
+                  <TextField label="Storefront base path" value={customerForm.ensStorefrontPath} onChange={(ensStorefrontPath) => setCustomerForm({ ...customerForm, ensStorefrontPath: normalizeStorefrontProxyPath(ensStorefrontPath, "/") })} />
+                  <TextField label="Feed relative path" value={customerForm.ensFeedPath} onChange={(ensFeedPath) => setCustomerForm({ ...customerForm, ensFeedPath: normalizeStorefrontProxyPath(ensFeedPath, "/feed") })} />
+                  <TextField label="Gallery relative path" value={customerForm.ensMosaicPath} onChange={(ensMosaicPath) => setCustomerForm({ ...customerForm, ensMosaicPath: normalizeStorefrontGalleryPath(ensMosaicPath) })} />
+                  <TextField label="Video relative path prefix" value={customerForm.ensVideoPath} onChange={(ensVideoPath) => setCustomerForm({ ...customerForm, ensVideoPath: normalizeStorefrontProxyPath(ensVideoPath, "/feed") })} />
                   <TextField label="Content hash" value={customerForm.ensContentHash} onChange={(ensContentHash) => setCustomerForm({ ...customerForm, ensContentHash })} full />
                 </div>
                 {customer && (
@@ -1078,6 +1302,11 @@ export default function Dashboard() {
                         <span>{row.value}</span>
                       </div>
                     ))}
+                    {ensConfigExplorerUrl && (
+                      <a className="btn small" href={ensConfigExplorerUrl} target="_blank" rel="noreferrer">
+                        <ExternalLink size={15} /> ENS transaction
+                      </a>
+                    )}
                   </div>
                 )}
               </details>
@@ -1531,4 +1760,143 @@ function shortWallet(value = "") {
 
 function isEmailLike(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function ensWalletChainConfig(network: StorefrontEnsNetwork): TransactionChainConfig {
+  return getTransactionChainConfig(network === "sepolia" ? 11155111 : 1);
+}
+
+async function ensureWalletNetwork(provider: EthereumProvider, chain: TransactionChainConfig) {
+  const currentChainId = await provider.request({ method: "eth_chainId" }).catch(() => "");
+  if (String(currentChainId).toLowerCase() === chain.hexChainId.toLowerCase()) {
+    return;
+  }
+  try {
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: chain.hexChainId }]
+    });
+  } catch (error) {
+    if (walletErrorCode(error) !== 4902) {
+      throw new Error(`Switch wallet to ${chain.name} to continue.`);
+    }
+    await provider.request({
+      method: "wallet_addEthereumChain",
+      params: [{
+        chainId: chain.hexChainId,
+        chainName: chain.name,
+        nativeCurrency: chain.nativeCurrency,
+        rpcUrls: chain.rpcUrls,
+        blockExplorerUrls: chain.blockExplorerUrls
+      }]
+    });
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: chain.hexChainId }]
+    });
+  }
+}
+
+async function sendWalletTransaction(
+  provider: EthereumProvider,
+  transaction: Record<string, unknown>,
+  context: { label: string; chainName: string; recovery?: string }
+) {
+  try {
+    return String(await provider.request({
+      method: "eth_sendTransaction",
+      params: [compactTransaction(transaction)]
+    }));
+  } catch (error) {
+    throw new Error(formatWalletTransactionError(error, context));
+  }
+}
+
+async function estimateWalletGas(
+  provider: EthereumProvider,
+  transaction: Record<string, unknown>,
+  context: { label: string; chainName: string; recovery?: string }
+) {
+  try {
+    const gas = BigInt(String(await provider.request({
+      method: "eth_estimateGas",
+      params: [compactTransaction(transaction)]
+    })));
+    return toRpcQuantity((gas * 12n) / 10n + 1n);
+  } catch (error) {
+    throw new Error(formatWalletTransactionError(error, context));
+  }
+}
+
+async function waitForWalletReceipt(provider: EthereumProvider, txHash: string, timeoutMs = 60000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const receipt = await provider.request({
+      method: "eth_getTransactionReceipt",
+      params: [txHash]
+    }).catch(() => null);
+    if (receipt) {
+      return receipt;
+    }
+    await delay(3000);
+  }
+  return null;
+}
+
+function isSuccessfulReceipt(receipt: unknown) {
+  if (!receipt || typeof receipt !== "object") {
+    return false;
+  }
+  const status = (receipt as { status?: unknown }).status;
+  if (typeof status === "string") {
+    return status.toLowerCase() === "0x1" || status === "1";
+  }
+  if (typeof status === "number") {
+    return status === 1;
+  }
+  if (typeof status === "boolean") {
+    return status;
+  }
+  return false;
+}
+
+function compactTransaction(transaction: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(transaction).filter(([, value]) => value !== undefined && value !== null && value !== "")
+  );
+}
+
+function toRpcQuantity(value: bigint) {
+  return `0x${value.toString(16)}`;
+}
+
+function walletErrorCode(error: unknown) {
+  return typeof error === "object" && error && "code" in error
+    ? Number((error as { code?: unknown }).code)
+    : 0;
+}
+
+function formatWalletTransactionError(
+  error: unknown,
+  context: { label: string; chainName: string; recovery?: string }
+) {
+  if (walletErrorCode(error) === 4001) {
+    return `${context.label} was rejected in the wallet.`;
+  }
+  const recovery = context.recovery ? ` ${context.recovery}` : "";
+  return `${context.label} failed on ${context.chainName}: ${formatErrorMessage(error, "wallet transaction failed")}.${recovery}`;
+}
+
+function formatErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "object" && error && "message" in error) {
+    return String((error as { message?: unknown }).message || fallback);
+  }
+  return fallback;
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

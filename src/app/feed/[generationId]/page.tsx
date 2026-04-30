@@ -1,7 +1,12 @@
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import FeedPage from "@/components/FeedPage";
 import { readStore } from "@/lib/store";
-import { findStorefrontByEnsHost, requestHostFromHeaders, storefrontFeedPageProps } from "@/lib/storefront-routing";
+import {
+  findStorefrontEnsHostMatch,
+  requestHostFromHeaders,
+  storefrontProxyPath
+} from "@/lib/storefront-routing";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +14,14 @@ export default async function FocusedFeedPage({ params }: { params: Promise<{ ge
   const { generationId } = await params;
   const store = await readStore();
   const requestHeaders = await headers();
-  const customer = findStorefrontByEnsHost(store.customers, requestHostFromHeaders(requestHeaders));
-  return <FeedPage initialGenerationId={decodeURIComponent(generationId)} {...storefrontFeedPageProps(customer)} />;
+  const requestHost = requestHostFromHeaders(requestHeaders);
+  const hostMatch = findStorefrontEnsHostMatch(store.customers, requestHost);
+  const decodedGenerationId = decodeURIComponent(generationId);
+  if (hostMatch) {
+    redirect(storefrontProxyPath(hostMatch.customer, "video", {
+      generationId: decodedGenerationId,
+      viewMode: "mobile"
+    }));
+  }
+  return <FeedPage initialGenerationId={decodedGenerationId} />;
 }

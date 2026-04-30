@@ -21,6 +21,7 @@ export type StorefrontThemeId =
   | "theme-4"
   | "theme-5"
   | "theme-6";
+export type StorefrontLayoutId = "classic" | "studio" | "sidebar";
 export type StorefrontEnsNetwork = "sepolia" | "mainnet" | "base";
 export type INFTPaidAction =
   | "translate"
@@ -60,12 +61,15 @@ export interface CustomerPricing {
 
 export interface CustomerStorefrontDetails {
   description?: string;
+  heroTitle?: string;
+  heroSubtitle?: string;
   websiteUrl?: string;
   supportEmail?: string;
   category?: string;
   tags?: string[];
   logoUrl?: string;
   themeId?: StorefrontThemeId;
+  layoutId?: StorefrontLayoutId;
   ens?: CustomerStorefrontEnsProxy;
   conditions?: CustomerStorefrontConditions;
 }

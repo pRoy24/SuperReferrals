@@ -46,6 +46,11 @@ import {
 } from "@/lib/pricing";
 import { appLanguageToRenderFormLanguage } from "@/lib/localization";
 import { getStorefrontAccessError } from "@/lib/storefront-access";
+import {
+  DEFAULT_STOREFRONT_HERO_SUBTITLE,
+  DEFAULT_STOREFRONT_HERO_TITLE,
+  normalizeStorefrontLayoutId
+} from "@/lib/storefront-customization";
 import { storefrontPublicHref } from "@/lib/storefront-routing";
 import { storefrontThemeStyle } from "@/lib/storefront-themes";
 import { isUsableEvmAddress } from "@/lib/wallet-address";
@@ -1551,45 +1556,49 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     return <main className="public-main storefront-user-main"><div className="notice">Customer store was not found.</div></main>;
   }
   const storefrontFeedHref = storefrontPublicHref(customer, "feed");
-  const storefrontMosaicHref = storefrontPublicHref(customer, "mosaic");
+  const storefrontGalleryHref = storefrontPublicHref(customer, "mosaic");
+  const storefrontLogoUrl = customer.storefront?.logoUrl || "/superreferrals-logo.svg";
+  const storefrontHeroTitle = customer.storefront?.heroTitle || DEFAULT_STOREFRONT_HERO_TITLE;
+  const storefrontHeroSubtitle = customer.storefront?.heroSubtitle || customer.storefront?.description || DEFAULT_STOREFRONT_HERO_SUBTITLE;
+  const storefrontLayoutId = normalizeStorefrontLayoutId(customer.storefront?.layoutId);
 
   return (
-    <main className="public-main storefront-user-main storefront-theme" style={storefrontThemeStyle(customer.storefront?.themeId)}>
+    <main className={`public-main storefront-user-main storefront-theme storefront-layout-${storefrontLayoutId}`} style={storefrontThemeStyle(customer.storefront?.themeId)}>
       <section className="hero-band public-hero storefront-branded-hero">
-        <div className="public-hero-copy">
-          <div className="topbar-title-row">
+        <nav className="storefront-top-nav" aria-label="Storefront navigation">
+          <div className="storefront-nav-left">
+            <a className="storefront-nav-logo" href={storefrontPublicHref(customer, "storefront")} aria-label={`${customer.name} storefront`}>
+              <img alt="" src={storefrontLogoUrl} />
+            </a>
             <BreadcrumbNav />
-            <div className="eyebrow">{customer.name}</div>
           </div>
-          <div className="storefront-hero-title-row">
-            {customer.storefront?.logoUrl && (
-              <span className="storefront-logo-frame">
-                <img alt="" src={customer.storefront.logoUrl} />
-              </span>
-            )}
-            <h1>Generate a product video</h1>
+          <div className="storefront-nav-right">
+            <div className="storefront-landing-meta storefront-nav-meta">
+              <span><Wallet size={15} /> payout {isUsableEvmAddress(customer.ownerWallet) ? shortWallet(customer.ownerWallet) : "wallet required"}</span>
+              {customer.storefront?.category && <span><Store size={15} /> {customer.storefront.category}</span>}
+              {customer.ensName && <span>{customer.ensName}</span>}
+              {customer.storefront?.ens?.enabled && customer.storefront.ens.name && <span>{customer.storefront.ens.name}</span>}
+            </div>
+            <div className="landing-hero-actions storefront-nav-actions">
+              <LanguageSelector />
+              <a className="btn compact" href="/storefronts">
+                <Store size={16} /> Directory
+              </a>
+              <a className="btn compact" href={storefrontGalleryHref}>
+                <ExternalLink size={16} /> Mosaic
+              </a>
+              <button className="btn compact" onClick={() => load()} title="Refresh data">
+                <RefreshCw size={16} /> Refresh
+              </button>
+            </div>
           </div>
+        </nav>
+        <div className="public-hero-copy">
+          <div className="eyebrow">{customer.name}</div>
+          <h1>{storefrontHeroTitle}</h1>
           <p className="subtle">
-            {customer.storefront?.description || "Connect your wallet, choose a render configuration, pay the store price, and track your previous render tasks."}
+            {storefrontHeroSubtitle}
           </p>
-          <div className="storefront-landing-meta">
-            <span><Wallet size={15} /> payout {isUsableEvmAddress(customer.ownerWallet) ? shortWallet(customer.ownerWallet) : "wallet required"}</span>
-            {customer.storefront?.category && <span><Store size={15} /> {customer.storefront.category}</span>}
-            {customer.ensName && <span>{customer.ensName}</span>}
-            {customer.storefront?.ens?.enabled && customer.storefront.ens.name && <span>{customer.storefront.ens.name}</span>}
-          </div>
-        </div>
-        <div className="landing-hero-actions">
-          <LanguageSelector />
-          <a className="btn" href="/storefronts">
-            <Store size={16} /> Directory
-          </a>
-          <a className="btn" href={storefrontMosaicHref}>
-            <ExternalLink size={16} /> Mosaic
-          </a>
-          <button className="btn" onClick={() => load()} title="Refresh data">
-            <RefreshCw size={16} /> Refresh
-          </button>
         </div>
       </section>
 
