@@ -156,6 +156,7 @@ export interface SubAccount {
 export interface SubAccountPreferences {
   renderForm?: Record<string, unknown>;
   renderFormMode?: "simple" | "advanced";
+  paymentCurrency?: PaymentCurrencySymbol;
   language?: AppLanguageCode;
   updatedAt: string;
 }
@@ -333,6 +334,7 @@ export interface Generation {
   languageCode?: string;
   resultUrl?: string;
   feed?: GenerationFeedSettings;
+  copyListing?: INFTCopyListing;
   storage?: {
     video?: ZeroGArtifact;
     metadata?: ZeroGArtifact;
@@ -408,6 +410,14 @@ export interface INFTAttribute {
   value: string | number | boolean;
 }
 
+export interface INFTCopyListing {
+  enabled: boolean;
+  priceUsd: number;
+  currency?: PaymentCurrencySymbol;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface INFTRecord {
   id: string;
   generationId: string;
@@ -427,6 +437,7 @@ export interface INFTRecord {
   mintTxHash?: string;
   agentWalletAddress: string;
   axlPeerId?: string;
+  copyListing?: INFTCopyListing;
   referrer: {
     code: string;
     url: string;

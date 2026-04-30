@@ -1,6 +1,6 @@
 "use client";
 
-import { Cable, Captions, ChevronDown, Copy, Download, ExternalLink, ImagePlus, Languages, Link2, Loader2, PanelBottom, RefreshCw, Send, Share2, Trash2, UploadCloud, Wallet } from "lucide-react";
+import { Cable, Captions, ChevronDown, Copy, Download, ExternalLink, ImagePlus, Languages, Link2, Loader2, PanelBottom, RefreshCw, Send, Share2, ShoppingCart, Trash2, UploadCloud, Wallet } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import BreadcrumbNav from "@/components/BreadcrumbNav";
 import LanguageSelector from "@/components/LanguageSelector";
@@ -16,6 +16,7 @@ import {
   getPaymentTokens,
   getTransactionChainConfig,
   normalizeTransactionChainIdForEnvironment,
+  resolveSupportedPaymentCurrency,
   settlementTokenForCurrency,
   type PaymentToken,
   type TransactionChainConfig
@@ -43,8 +44,10 @@ type ActionPaymentFlow = {
 };
 
 type VideoEditAction = "translate" | "add_subtitles" | "update_outro" | "update_footer";
+type PaidINFTOperation = INFTPaidAction | "copy_inft";
 
 const terminalActionStatuses = new Set(["COMPLETED", "FAILED", "CANCELLED", "REFUNDED"]);
+const INFT_COPY_OPERATION = "copy_inft";
 
 export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [activeInft, setActiveInft] = useState(inft);
@@ -79,11 +82,12 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const [renderActionBusy, setRenderActionBusy] = useState<"publish" | "delete" | "">("");
   const [renderActionMessage, setRenderActionMessage] = useState("");
   const [store, setStore] = useState<SuperReferralsStore | null>(null);
-  const [walletAddress, setWalletAddress] = useState(activeInft.ownerWallet || "");
+  const [walletAddress, setWalletAddress] = useState("");
   const [walletProviders, setWalletProviders] = useState<BrowserWalletProvider[]>([]);
   const [activeWalletProvider, setActiveWalletProvider] = useState<BrowserWalletProvider | null>(null);
   const [walletConnectedOnTransactionChain, setWalletConnectedOnTransactionChain] = useState(false);
   const [paymentCurrency, setPaymentCurrency] = useState<PaymentCurrencySymbol>("USDC");
+  const [paymentCurrencyHydratedKey, setPaymentCurrencyHydratedKey] = useState("");
   const [actionQuote, setActionQuote] = useState<PaymentQuote | null>(null);
   const [actionPaymentFlow, setActionPaymentFlow] = useState<ActionPaymentFlow>({ status: "idle", message: "" });
   const publicInftPath = `/inft/${activeInft.id}`;
@@ -116,6 +120,17 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     () => store?.customers.find((item) => item.id === activeInft.customerId) || null,
     [store, activeInft.customerId]
   );
+  const connectedSubAccount = useMemo(
+    () => store?.subAccounts.find((account) =>
+      customer &&
+      account.customerId === customer.id &&
+      sameWallet(account.wallet, walletAddress)
+    ) || null,
+    [store, customer, walletAddress]
+  );
+  const subAccountPreferenceKey = connectedSubAccount
+    ? `${connectedSubAccount.id}:${connectedSubAccount.preferences?.updatedAt || connectedSubAccount.updatedAt}`
+    : "";
   const transactionChain = useMemo(
     () => getTransactionChainConfig(normalizeTransactionChainIdForEnvironment(customer?.pricing.chainId)),
     [customer?.pricing.chainId]
@@ -134,10 +149,20 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     () => selectedPaymentToken && settlementToken ? resolveUserPaymentRail(selectedPaymentToken, settlementToken) : "direct",
     [selectedPaymentToken, settlementToken]
   );
+  const copyListing = activeInft.copyListing?.enabled && Number(activeInft.copyListing.priceUsd) > 0
+    ? activeInft.copyListing
+    : null;
+  const connectedWalletIsOwner = sameWallet(walletAddress, activeInft.ownerWallet);
+  const editUnavailableReason = !isUsableEvmAddress(walletAddress)
+    ? "Connect the owner wallet to edit this INFT."
+    : !connectedWalletIsOwner
+    ? "Only the wallet that owns this INFT can run edit operations."
+    : "";
   const actionRenderPending = Boolean(actionPoll && !terminalActionStatuses.has(actionPoll.status.toUpperCase()));
   const actionFlowPending = ["payment", "confirming", "starting", "started"].includes(actionPaymentFlow.status);
   const videoOperationPending = actionRenderPending || actionFlowPending;
-  const videoActionDisabled = Boolean(busy) || videoOperationPending;
+  const videoActionDisabled = Boolean(busy) || videoOperationPending || Boolean(editUnavailableReason);
+  const copyPurchaseDisabled = Boolean(busy) || videoOperationPending || !copyListing || !selectedPaymentToken || !settlementToken || !isUsableEvmAddress(walletAddress) || connectedWalletIsOwner;
   const walletActionLabel = walletConnectedOnTransactionChain ? "Switch wallet" : "Connect wallet";
   const metadataItems = useMemo(() => buildINFTMetadataItems(activeInft), [activeInft]);
   const showActionReview = Boolean(lastVideoOperation && actionPoll?.status.toUpperCase() === "COMPLETED");
@@ -149,6 +174,27 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       setActionQuote(null);
     }
   }, [paymentCurrency, selectablePaymentTokens]);
+
+  useEffect(() => {
+    if (!connectedSubAccount || !subAccountPreferenceKey || paymentCurrencyHydratedKey === subAccountPreferenceKey) {
+      return;
+    }
+    const preferredCurrency = resolveSupportedPaymentCurrency(
+      connectedSubAccount.preferences?.paymentCurrency,
+      selectablePaymentTokens
+    );
+    if (preferredCurrency && preferredCurrency !== paymentCurrency) {
+      setPaymentCurrency(preferredCurrency);
+      setActionQuote(null);
+    }
+    setPaymentCurrencyHydratedKey(subAccountPreferenceKey);
+  }, [
+    connectedSubAccount,
+    paymentCurrency,
+    paymentCurrencyHydratedKey,
+    selectablePaymentTokens,
+    subAccountPreferenceKey
+  ]);
 
   useEffect(() => {
     if (!actionPoll?.requestId || terminalActionStatuses.has(actionPoll.status.toUpperCase())) {
@@ -366,6 +412,34 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     showActionResult("");
   }
 
+  function selectPaymentCurrency(symbol: PaymentCurrencySymbol) {
+    const supportedCurrency = resolveSupportedPaymentCurrency(symbol, selectablePaymentTokens);
+    if (!supportedCurrency) {
+      return;
+    }
+    setPaymentCurrency(supportedCurrency);
+    setActionQuote(null);
+    persistPaymentCurrencyPreference(supportedCurrency).catch(() => undefined);
+  }
+
+  async function persistPaymentCurrencyPreference(symbol: PaymentCurrencySymbol) {
+    if (!customer || !connectedSubAccount || connectedSubAccount.preferences?.paymentCurrency === symbol) {
+      return;
+    }
+    await fetch("/api/subaccounts", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        subAccountId: connectedSubAccount.id,
+        customerId: customer.id,
+        wallet: connectedSubAccount.wallet,
+        preferences: {
+          paymentCurrency: symbol
+        }
+      })
+    });
+  }
+
   async function connectWallet(walletProvider?: BrowserWalletProvider) {
     setBusy("wallet");
     setActionPaymentFlow({ status: "idle", message: "" });
@@ -463,7 +537,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     }
   }
 
-  function quoteMatchesAction(activeQuote: PaymentQuote | null, action: INFTPaidAction, paymentToken: PaymentToken) {
+  function quoteMatchesAction(activeQuote: PaymentQuote | null, action: PaidINFTOperation, paymentToken: PaymentToken) {
     return Boolean(
       activeQuote &&
       activeQuote.inftId === activeInft.id &&
@@ -478,7 +552,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     return selectablePaymentTokens.find((token) => token.symbol === currency) || selectedPaymentToken;
   }
 
-  async function requestActionQuote(action: INFTPaidAction, paymentToken: PaymentToken) {
+  async function requestActionQuote(action: PaidINFTOperation, paymentToken: PaymentToken) {
     if (!customer || !settlementToken) {
       throw new Error("Storefront payment settings are not available.");
     }
@@ -491,7 +565,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         customerId: customer.id,
-        subAccountId: activeInft.subAccountId,
+        subAccountId: action === INFT_COPY_OPERATION ? connectedSubAccount?.id : activeInft.subAccountId,
         inftId: activeInft.id,
         action,
         tokenIn: paymentToken.address,
@@ -607,13 +681,36 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
     return txHash;
   }
 
-  async function runPaidAction(action: INFTPaidAction, payload: Record<string, unknown> = {}) {
+  async function runPaidAction(action: PaidINFTOperation, payload: Record<string, unknown> = {}) {
     if (videoOperationPending) {
       setActionPaymentFlow({
         status: "started",
         message: "Wait for the current video operation to finish before starting another one."
       });
       return;
+    }
+    if (action !== INFT_COPY_OPERATION && editUnavailableReason) {
+      setActionPaymentFlow({
+        status: "failed",
+        message: editUnavailableReason
+      });
+      return;
+    }
+    if (action === INFT_COPY_OPERATION) {
+      if (!copyListing) {
+        setActionPaymentFlow({
+          status: "failed",
+          message: "This INFT is not available for paid copy purchase."
+        });
+        return;
+      }
+      if (connectedWalletIsOwner) {
+        setActionPaymentFlow({
+          status: "failed",
+          message: "Connect a different wallet to purchase a copy of this INFT."
+        });
+        return;
+      }
     }
     setBusy(action);
     setActionPoll(null);
@@ -631,6 +728,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
         throw new Error("No supported payment token is available.");
       }
       setPaymentCurrency(paymentToken.symbol);
+      await persistPaymentCurrencyPreference(paymentToken.symbol).catch(() => undefined);
       const activeQuote = quoteMatchesAction(actionQuote, action, paymentToken)
         ? actionQuote as PaymentQuote
         : await requestActionQuote(action, paymentToken);
@@ -907,6 +1005,36 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                 {actionPaymentFlow.message}
               </p>
             )}
+            {editUnavailableReason && <p className="notice">{editUnavailableReason}</p>}
+            {copyListing && selectedPaymentToken && settlementToken && (
+              <div className="item inft-copy-purchase">
+                <div className="item-title">
+                  <div>
+                    <span className="subtle">Copy purchase</span>
+                    <strong>Buy an editable copy</strong>
+                  </div>
+                  <span className="badge ok">{formatCopyPurchasePrice(copyListing.priceUsd, copyListing.currency || settlementToken.symbol)}</span>
+                </div>
+                <p className="subtle">
+                  Payment creates a new INFT cloned from this video for the connected wallet. The original INFT stays with its owner.
+                </p>
+                <INFTActionPayControl
+                  icon={<ShoppingCart size={16} />}
+                  label="Purchase Copy"
+                  price={formatCopyPurchasePrice(copyListing.priceUsd, copyListing.currency || settlementToken.symbol)}
+                  tokens={selectablePaymentTokens}
+                  selectedSymbol={paymentCurrency}
+                  settlementToken={settlementToken}
+                  disabled={copyPurchaseDisabled}
+                  busy={busy === INFT_COPY_OPERATION}
+                  primary={!connectedWalletIsOwner}
+                  onSelect={selectPaymentCurrency}
+                  onPay={() => runPaidAction(INFT_COPY_OPERATION)}
+                />
+                {!isUsableEvmAddress(walletAddress) && <p className="subtle compact">Connect a wallet to purchase a copy.</p>}
+                {connectedWalletIsOwner && <p className="subtle compact">This wallet already owns the original INFT.</p>}
+              </div>
+            )}
             <div className="inft-action-picker" role="tablist" aria-label="INFT edit video actions">
               <button
                 className={`inft-action-choice ${expandedVideoAction === "translate" ? "active" : ""}`}
@@ -1001,10 +1129,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                       disabled={videoActionDisabled}
                       busy={busy === "translate"}
                       primary
-                      onSelect={(symbol) => {
-                        setPaymentCurrency(symbol);
-                        setActionQuote(null);
-                      }}
+                      onSelect={selectPaymentCurrency}
                       onPay={() => runPaidAction("translate", {
                         languageCode: language,
                         enable_subtitles: translateEnableSubtitles,
@@ -1027,10 +1152,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                       disabled={videoActionDisabled}
                       busy={busy === "add_subtitles"}
                       primary
-                      onSelect={(symbol) => {
-                        setPaymentCurrency(symbol);
-                        setActionQuote(null);
-                      }}
+                      onSelect={selectPaymentCurrency}
                       onPay={addSubtitles}
                     />
                   </div>
@@ -1101,10 +1223,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                       disabled={videoActionDisabled || !updateOutroRequiredValue}
                       busy={busy === "update_outro"}
                       primary
-                      onSelect={(symbol) => {
-                        setPaymentCurrency(symbol);
-                        setActionQuote(null);
-                      }}
+                      onSelect={selectPaymentCurrency}
                       onPay={updateOutro}
                     />
                   </div>
@@ -1137,10 +1256,7 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                       disabled={videoActionDisabled || !updateFooterRequiredValue}
                       busy={busy === "update_footer"}
                       primary
-                      onSelect={(symbol) => {
-                        setPaymentCurrency(symbol);
-                        setActionQuote(null);
-                      }}
+                      onSelect={selectPaymentCurrency}
                       onPay={updateFooter}
                     />
                   </div>
@@ -1664,7 +1780,14 @@ function formatActionPrice(customer: Customer | null, action: INFTPaidAction, cu
   return `${(Math.round((basePrice + platformFee) * 100) / 100).toFixed(2)} ${currency}`;
 }
 
+function formatCopyPurchasePrice(priceUsd: number, currency = "USDC") {
+  return `${(Math.round(Number(priceUsd || 0) * 100) / 100).toFixed(2)} ${currency}`;
+}
+
 function formatActionLabel(action: string) {
+  if (action === INFT_COPY_OPERATION) {
+    return "Purchase Copy";
+  }
   return action
     .replaceAll("_", " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -1964,6 +2087,14 @@ function formatErrorMessage(error: unknown, fallback: string) {
     return String(record.message || nested?.message || fallback);
   }
   return fallback;
+}
+
+function sameWallet(left?: string, right?: string) {
+  return normalizeWallet(left) === normalizeWallet(right);
+}
+
+function normalizeWallet(value = "") {
+  return value.trim().toLowerCase();
 }
 
 function shortHash(value?: string) {

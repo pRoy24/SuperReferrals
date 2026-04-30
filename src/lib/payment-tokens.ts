@@ -1,5 +1,6 @@
 export type PaymentRail = "direct" | "uniswap" | "keeperhub";
 export type PaymentCurrencySymbol = "USD" | "USDC" | "USDT" | "ETH" | "WETH";
+export type PaymentTokenCurrencySymbol = Exclude<PaymentCurrencySymbol, "USD">;
 
 export interface TransactionChainConfig {
   id: number;
@@ -18,7 +19,7 @@ export interface TransactionChainConfig {
 }
 
 export interface PaymentToken {
-  symbol: Exclude<PaymentCurrencySymbol, "USD">;
+  symbol: PaymentTokenCurrencySymbol;
   name: string;
   chainId: number;
   address: string;
@@ -178,6 +179,18 @@ export function normalizeTransactionChainIdForEnvironment(chainId = getTransacti
 
 export function getPaymentTokens(chainId = getTransactionChainId()) {
   return PAYMENT_TOKENS.filter((token) => token.chainId === chainId);
+}
+
+export function normalizePaymentCurrencySymbol(value: unknown): PaymentTokenCurrencySymbol | undefined {
+  const normalized = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return normalized === "USDC" || normalized === "USDT" || normalized === "ETH" || normalized === "WETH"
+    ? normalized
+    : undefined;
+}
+
+export function resolveSupportedPaymentCurrency(value: unknown, tokens: PaymentToken[]): PaymentTokenCurrencySymbol | undefined {
+  const symbol = normalizePaymentCurrencySymbol(value);
+  return symbol && tokens.some((token) => token.symbol === symbol) ? symbol : undefined;
 }
 
 export function findPaymentToken(symbolOrAddress = "USDC", chainId = getTransactionChainId()) {

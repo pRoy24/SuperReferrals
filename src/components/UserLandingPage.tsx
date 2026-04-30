@@ -24,6 +24,7 @@ import {
   getPaymentTokens,
   getTransactionChainConfig,
   normalizeTransactionChainIdForEnvironment,
+  resolveSupportedPaymentCurrency,
   settlementTokenForCurrency,
   type PaymentToken,
   type TransactionChainConfig
@@ -74,6 +75,8 @@ type GenerationFormState = {
   addFooterAnimation: boolean;
   publishToFeed: boolean;
   publishToSamsarGallery: boolean;
+  allowCopyPurchase: boolean;
+  copyPurchasePriceUsd: string;
   feedTags: string;
   txHash: string;
 };
@@ -204,6 +207,8 @@ const renderFormTooltips = {
   outroFocusAnimation: "Uses an explicit focus area when animating the generated outro image.",
   footerAnimation: "Adds a CTA footer animation to individual scenes using the CTA URL.",
   outroFocusArea: "Optional pixel rectangle that guides where the outro animation should focus.",
+  copyPurchase: "Allows other users to buy a deep-cloned copy they own. The sale does not transfer this INFT; it creates a new INFT they can edit with API operations or in Studio.",
+  copyPurchasePrice: "USDC price other users pay to create their own deep-cloned copy. Leave the field empty to match this render's USDC price.",
   paymentTxHash: "Optional transaction hash to use when payment was completed outside the wallet flow.",
   imageJson: "Advanced JSON array of image URL strings or image objects.",
   metadataJson: "Advanced JSON object stored with the generated render and INFT.",
@@ -233,6 +238,8 @@ function createDefaultGenerationForm(
     addFooterAnimation: true,
     publishToFeed: true,
     publishToSamsarGallery: true,
+    allowCopyPurchase: true,
+    copyPurchasePriceUsd: "",
     feedTags: "",
     txHash: ""
   };
@@ -276,6 +283,12 @@ function restorePersistedGenerationForm(
     if (typeof persistedRecord.add_footer_animation === "boolean") next.addFooterAnimation = persistedRecord.add_footer_animation;
     if (typeof persisted.publishToFeed === "boolean") next.publishToFeed = persisted.publishToFeed;
     if (typeof persisted.publishToSamsarGallery === "boolean") next.publishToSamsarGallery = persisted.publishToSamsarGallery;
+    if (typeof persisted.allowCopyPurchase === "boolean") next.allowCopyPurchase = persisted.allowCopyPurchase;
+    if (typeof persistedRecord.allow_copy_purchase === "boolean") next.allowCopyPurchase = persistedRecord.allow_copy_purchase;
+    if (typeof persisted.copyPurchasePriceUsd === "string") next.copyPurchasePriceUsd = persisted.copyPurchasePriceUsd;
+    if (typeof persistedRecord.copy_purchase_price_usd === "string" || typeof persistedRecord.copy_purchase_price_usd === "number") {
+      next.copyPurchasePriceUsd = String(persistedRecord.copy_purchase_price_usd);
+    }
     if (typeof persisted.feedTags === "string") next.feedTags = persisted.feedTags;
     if (typeof persisted.txHash === "string") next.txHash = persisted.txHash;
     if (!restoredInftTitle) {
@@ -382,6 +395,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const hydratedWalletSessionKey = useRef("");
   const [renderFormHydratedKey, setRenderFormHydratedKey] = useState("");
   const [serverRenderFormHydratedKey, setServerRenderFormHydratedKey] = useState("");
+  const [paymentCurrencyHydratedKey, setPaymentCurrencyHydratedKey] = useState("");
   const [profileForm, setProfileForm] = useState({
     email: "",
     username: ""
@@ -481,6 +495,11 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const renderGateError = renderConditionError || renderAccessError;
   const selectedPricingDetails = resolveModelPriceDetails(customer, selectedPricing);
   const estimatedDurationSeconds = estimateDurationSeconds(imageCount, selectedPricing);
+  const defaultCopyPurchasePriceUsd = estimateRenderTotalUsd(
+    selectedPricingDetails.pricePerSecondUsd,
+    estimatedDurationSeconds,
+    customer?.pricing.platformFeeBps
+  );
   const userGenerations = connectedSubAccount
     ? store?.generations.filter((generation) => generation.subAccountId === connectedSubAccount.id) || []
     : [];
@@ -536,10 +555,10 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     [customer?.pricing.chainId]
   );
   const paymentTokens = useMemo(() => getPaymentTokens(transactionChain.id), [transactionChain.id]);
-  const selectablePaymentTokens = useMemo(() => {
-    const ethOrUsdc = paymentTokens.filter((token) => token.symbol === "USDC" || token.symbol === "ETH");
-    return ethOrUsdc.length ? ethOrUsdc : paymentTokens;
-  }, [paymentTokens]);
+  const selectablePaymentTokens = useMemo(
+    () => [...paymentTokens].sort((left, right) => paymentTokenRank(left) - paymentTokenRank(right)),
+    [paymentTokens]
+  );
   const selectedPaymentToken = selectablePaymentTokens.find((token) => token.symbol === paymentCurrency) || selectablePaymentTokens[0]!;
   const settlementToken =
     findPaymentToken(customer?.pricing.settlementTokenAddress || "", transactionChain.id) ||
@@ -562,6 +581,34 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       ...(typeof patch.imageUrls === "string" ? { imageUrls: sanitizeImageUrlsForForm(patch.imageUrls) } : {})
     };
     setGenerationForm((current) => ({ ...current, ...nextPatch }));
+  }
+
+  function selectPaymentCurrency(symbol: PaymentCurrencySymbol) {
+    const supportedCurrency = resolveSupportedPaymentCurrency(symbol, selectablePaymentTokens);
+    if (!supportedCurrency) {
+      return;
+    }
+    setPaymentCurrency(supportedCurrency);
+    setQuote(null);
+    persistPaymentCurrencyPreference(supportedCurrency).catch(() => undefined);
+  }
+
+  async function persistPaymentCurrencyPreference(symbol: PaymentCurrencySymbol, account: SubAccount | null | undefined = connectedSubAccount) {
+    if (!customer || !account || account.preferences?.paymentCurrency === symbol) {
+      return;
+    }
+    await fetch("/api/subaccounts", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        subAccountId: account.id,
+        customerId: customer.id,
+        wallet: account.wallet,
+        preferences: {
+          paymentCurrency: symbol
+        }
+      })
+    });
   }
 
   function syncRenderWizardState(form: GenerationFormState) {
@@ -717,6 +764,27 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   }, [connectedSubAccount?.preferences?.language]);
 
   useEffect(() => {
+    if (!connectedSubAccount || !subAccountPreferenceKey || paymentCurrencyHydratedKey === subAccountPreferenceKey) {
+      return;
+    }
+    const preferredCurrency = resolveSupportedPaymentCurrency(
+      connectedSubAccount.preferences?.paymentCurrency,
+      selectablePaymentTokens
+    );
+    if (preferredCurrency && preferredCurrency !== paymentCurrency) {
+      setPaymentCurrency(preferredCurrency);
+      setQuote(null);
+    }
+    setPaymentCurrencyHydratedKey(subAccountPreferenceKey);
+  }, [
+    connectedSubAccount,
+    paymentCurrency,
+    paymentCurrencyHydratedKey,
+    selectablePaymentTokens,
+    subAccountPreferenceKey
+  ]);
+
+  useEffect(() => {
     if (!customer || !connectedSubAccount || !appLanguage || connectedSubAccount.preferences?.language === appLanguage) {
       return;
     }
@@ -798,6 +866,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     const firstToken = selectablePaymentTokens[0];
     if (firstToken && !selectablePaymentTokens.some((token) => token.symbol === paymentCurrency)) {
       setPaymentCurrency(firstToken.symbol);
+      setQuote(null);
     }
   }, [paymentCurrency, selectablePaymentTokens]);
 
@@ -992,7 +1061,8 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
         wallet: effectiveWallet,
         email: profileOverride.email || undefined,
         username: profileOverride.username || `wallet-${shortWallet(effectiveWallet)}`,
-        language: readStoredAppLanguage() || appLanguage || undefined
+        language: readStoredAppLanguage() || appLanguage || undefined,
+        paymentCurrency: resolveSupportedPaymentCurrency(paymentCurrency, selectablePaymentTokens)
       })
     });
     const data = await assertOk(response);
@@ -1055,6 +1125,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       const paymentToken = paymentTokenForCurrency(paymentCurrency);
       setPaymentCurrency(paymentToken.symbol);
       const account = await ensureWalletSubAccount();
+      await persistPaymentCurrencyPreference(paymentToken.symbol, account).catch(() => undefined);
       const quoted = await requestQuote(account, paymentToken);
       setMessage(`${quoted.totalUsd.toFixed(2)} ${quoted.settlementCurrency || "USDC"} quote created for payment in ${quoted.paymentCurrency || paymentToken.symbol} on ${transactionChain.name}.`);
     } catch (error) {
@@ -1215,6 +1286,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       const paymentToken = paymentTokenForCurrency(currency);
       setPaymentCurrency(paymentToken.symbol);
       const account = await ensureWalletSubAccount();
+      await persistPaymentCurrencyPreference(paymentToken.symbol, account).catch(() => undefined);
       const activeQuote = quoteMatchesPaymentToken(quote, paymentToken)
         ? quote as PaymentQuote
         : await requestQuote(account, paymentToken);
@@ -1232,6 +1304,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
           customerId: customer.id,
           subAccountId: account.id,
           generation: generationPayload,
+          copyListing: buildINFTCopyListingPayload(generationForm, defaultCopyPurchasePriceUsd),
           feed: {
             published: generationForm.publishToFeed,
             samsarGalleryPublished: generationForm.publishToSamsarGallery,
@@ -1493,6 +1566,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
                 metadataWizardItems={metadataWizardItems}
                 outroFocusAreaWizard={outroFocusAreaWizard}
                 imageCount={imageCount}
+                defaultCopyPurchasePriceUsd={defaultCopyPurchasePriceUsd}
                 onPatch={updateGenerationForm}
                 onImageChange={updateImageWizardItem}
                 onImageAdd={addImageWizardItem}
@@ -1507,6 +1581,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
               <AdvancedRenderForm
                 form={generationForm}
                 generationPayloadPreview={generationPayloadPreview}
+                defaultCopyPurchasePriceUsd={defaultCopyPurchasePriceUsd}
                 onPatch={updateGenerationForm}
               />
             )}
@@ -1531,7 +1606,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
                 disabled={renderSubmitDisabled}
                 busy={busy === "generation" || busy === "orientation"}
                 locked={renderSessionLocked}
-                onSelect={setPaymentCurrency}
+                onSelect={selectPaymentCurrency}
                 onPay={() => startRenderWithOrientationCheck(paymentCurrency)}
                 busyLabel={busy === "orientation" ? "Checking..." : undefined}
               />
@@ -1630,6 +1705,7 @@ function SimpleRenderForm({
   metadataWizardItems,
   outroFocusAreaWizard,
   imageCount,
+  defaultCopyPurchasePriceUsd,
   onPatch,
   onImageChange,
   onImageAdd,
@@ -1645,6 +1721,7 @@ function SimpleRenderForm({
   metadataWizardItems: MetadataWizardItem[];
   outroFocusAreaWizard: OutroFocusAreaWizard;
   imageCount: number;
+  defaultCopyPurchasePriceUsd: number;
   onPatch: (patch: RenderFormPatch) => void;
   onImageChange: (index: number, patch: Partial<ImageWizardItem>) => void;
   onImageAdd: () => void;
@@ -1904,6 +1981,11 @@ function SimpleRenderForm({
 
       <PublishTargets form={form} onPatch={onPatch} />
       <TextField label="Feed tags" tooltip={renderFormTooltips.feedTags} value={form.feedTags} onChange={(feedTags) => onPatch({ feedTags })} />
+      <CopyPurchaseControls
+        form={form}
+        defaultCopyPurchasePriceUsd={defaultCopyPurchasePriceUsd}
+        onPatch={onPatch}
+      />
 
       <WizardSection
         title="Server-side outro image from URL"
@@ -2169,13 +2251,53 @@ function PublishTargets({
   );
 }
 
+function CopyPurchaseControls({
+  form,
+  defaultCopyPurchasePriceUsd,
+  onPatch
+}: {
+  form: GenerationFormState;
+  defaultCopyPurchasePriceUsd: number;
+  onPatch: (patch: RenderFormPatch) => void;
+}) {
+  return (
+    <div className="field full copy-purchase-controls">
+      <label className="toggle-row" title={renderFormTooltips.copyPurchase}>
+        <input
+          type="checkbox"
+          checked={form.allowCopyPurchase}
+          onChange={(event) => onPatch({ allowCopyPurchase: event.target.checked })}
+        />
+        <LabelWithTooltip label="Allow others to purchase and copy this INFT" tooltip={renderFormTooltips.copyPurchase} />
+      </label>
+      {form.allowCopyPurchase && (
+        <TextField
+          label="Purchase price"
+          tooltip={renderFormTooltips.copyPurchasePrice}
+          type="number"
+          value={form.copyPurchasePriceUsd}
+          onChange={(copyPurchasePriceUsd) => onPatch({ copyPurchasePriceUsd })}
+          full
+        />
+      )}
+      {form.allowCopyPurchase && (
+        <p className="subtle compact">
+          Default: {defaultCopyPurchasePriceUsd.toFixed(2)} USDC.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function AdvancedRenderForm({
   form,
   generationPayloadPreview,
+  defaultCopyPurchasePriceUsd,
   onPatch
 }: {
   form: GenerationFormState;
   generationPayloadPreview: string;
+  defaultCopyPurchasePriceUsd: number;
   onPatch: (patch: RenderFormPatch) => void;
 }) {
   return (
@@ -2191,6 +2313,11 @@ function AdvancedRenderForm({
       </div>
       <PublishTargets form={form} onPatch={onPatch} />
       <TextField label="Feed tags" tooltip={renderFormTooltips.feedTags} value={form.feedTags} onChange={(feedTags) => onPatch({ feedTags })} />
+      <CopyPurchaseControls
+        form={form}
+        defaultCopyPurchasePriceUsd={defaultCopyPurchasePriceUsd}
+        onPatch={onPatch}
+      />
       <div className="field full">
         <label><LabelWithTooltip label="Prompt" tooltip={renderFormTooltips.prompt} /></label>
         <textarea value={form.prompt} onChange={(event) => onPatch({ prompt: event.target.value })} />
@@ -3234,6 +3361,36 @@ function buildGenerationPayload(form: GenerationFormState): GenerationInput {
     payload.outro_focust_area = parseOutroFocusArea(form.outroFocusArea);
   }
   return payload;
+}
+
+function buildINFTCopyListingPayload(form: GenerationFormState, defaultCopyPurchasePriceUsd: number) {
+  if (!form.allowCopyPurchase) {
+    return { enabled: false };
+  }
+  const priceUsd = parseCopyPurchasePriceUsd(form.copyPurchasePriceUsd, defaultCopyPurchasePriceUsd);
+  return {
+    enabled: true,
+    priceUsd,
+    currency: "USDC"
+  };
+}
+
+function parseCopyPurchasePriceUsd(raw: string, fallback: number) {
+  const value = raw.trim() ? Number(raw) : fallback;
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error("Purchase copy price must be greater than zero.");
+  }
+  return roundMoney(value);
+}
+
+function estimateRenderTotalUsd(pricePerSecondUsd: number, durationSeconds: number, platformFeeBps = 0) {
+  const amountUsd = roundMoney(pricePerSecondUsd * durationSeconds);
+  const platformFeeUsd = roundMoney((amountUsd * Number(platformFeeBps || 0)) / 10_000);
+  return roundMoney(amountUsd + platformFeeUsd);
+}
+
+function roundMoney(value: number) {
+  return Math.round((Number(value) || 0) * 100) / 100;
 }
 
 function buildFooterMetadata(imageInputs: Array<string | Record<string, unknown>>, ctaUrl: string): NonNullable<GenerationInput["footer_metadata"]> {

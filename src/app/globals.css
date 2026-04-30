@@ -1108,8 +1108,10 @@ a:hover {
   z-index: 6;
   width: 36px;
   height: 118px;
+  box-sizing: border-box;
   display: grid;
   place-items: center;
+  padding: 14px 0;
   border: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: 999px;
   background: rgba(5, 12, 12, 0.72);
@@ -1119,15 +1121,17 @@ a:hover {
 }
 
 .video-mosaic-volume-slider {
-  width: 90px;
-  height: 22px;
+  width: 22px;
+  height: 100%;
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  -webkit-appearance: none;
   appearance: none;
   background: transparent;
   cursor: pointer;
-  transform: rotate(-90deg);
+  writing-mode: vertical-lr;
+  direction: rtl;
   touch-action: none;
 }
 
@@ -1158,8 +1162,7 @@ a:hover {
   opacity: 0.52;
 }
 
-.video-mosaic-scrubber input::-webkit-slider-runnable-track,
-.video-mosaic-volume-slider::-webkit-slider-runnable-track {
+.video-mosaic-scrubber input::-webkit-slider-runnable-track {
   height: 4px;
   border: 0;
   border-radius: 999px;
@@ -1171,20 +1174,36 @@ a:hover {
 }
 
 .video-mosaic-volume-slider::-webkit-slider-runnable-track {
-  background: linear-gradient(90deg, rgba(61, 214, 198, 0.96) var(--mosaic-volume-progress, 0%), rgba(255, 255, 255, 0.3) var(--mosaic-volume-progress, 0%));
+  width: 4px;
+  height: 100%;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(0deg, rgba(61, 214, 198, 0.96) var(--mosaic-volume-progress, 0%), rgba(255, 255, 255, 0.3) var(--mosaic-volume-progress, 0%));
 }
 
-.video-mosaic-scrubber input::-moz-range-track,
-.video-mosaic-volume-slider::-moz-range-track {
+.video-mosaic-scrubber input::-moz-range-track {
   height: 4px;
   border: 0;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.3);
 }
 
-.video-mosaic-scrubber input::-moz-range-progress,
-.video-mosaic-volume-slider::-moz-range-progress {
+.video-mosaic-volume-slider::-moz-range-track {
+  width: 4px;
+  height: 100%;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.video-mosaic-scrubber input::-moz-range-progress {
   height: 4px;
+  border-radius: 999px;
+  background: rgba(61, 214, 198, 0.96);
+}
+
+.video-mosaic-volume-slider::-moz-range-progress {
+  width: 4px;
   border-radius: 999px;
   background: rgba(61, 214, 198, 0.96);
 }
@@ -1193,12 +1212,20 @@ a:hover {
 .video-mosaic-volume-slider::-webkit-slider-thumb {
   width: 12px;
   height: 12px;
-  margin-top: -4px;
   appearance: none;
   border: 2px solid rgba(2, 8, 10, 0.82);
   border-radius: 999px;
   background: #f8fbff;
   box-shadow: 0 0 0 4px rgba(248, 251, 255, 0.12);
+}
+
+.video-mosaic-scrubber input::-webkit-slider-thumb {
+  margin-top: -4px;
+}
+
+.video-mosaic-volume-slider::-webkit-slider-thumb {
+  margin-left: -4px;
+  -webkit-appearance: none;
 }
 
 .video-mosaic-scrubber input::-moz-range-thumb,
@@ -4427,8 +4454,10 @@ button.item {
   z-index: 8;
   width: 46px;
   height: 138px;
+  box-sizing: border-box;
   display: grid;
   place-items: center;
+  padding: 14px 0;
   border: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: 999px;
   background: rgba(5, 12, 12, 0.58);
@@ -4450,34 +4479,38 @@ button.item {
 }
 
 .feed-volume-slider {
-  width: 108px;
-  height: 22px;
+  width: 22px;
+  height: 100%;
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  -webkit-appearance: none;
   appearance: none;
   background: transparent;
   cursor: pointer;
-  transform: rotate(-90deg);
+  writing-mode: vertical-lr;
+  direction: rtl;
   touch-action: none;
 }
 
 .feed-volume-slider::-webkit-slider-runnable-track {
-  height: 4px;
+  width: 4px;
+  height: 100%;
   border: 0;
   border-radius: 999px;
-  background: linear-gradient(90deg, rgba(248, 251, 255, 0.96) var(--feed-volume-progress, 0%), rgba(255, 255, 255, 0.32) var(--feed-volume-progress, 0%));
+  background: linear-gradient(0deg, rgba(248, 251, 255, 0.96) var(--feed-volume-progress, 0%), rgba(255, 255, 255, 0.32) var(--feed-volume-progress, 0%));
 }
 
 .feed-volume-slider::-moz-range-track {
-  height: 4px;
+  width: 4px;
+  height: 100%;
   border: 0;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.32);
 }
 
 .feed-volume-slider::-moz-range-progress {
-  height: 4px;
+  width: 4px;
   border-radius: 999px;
   background: rgba(248, 251, 255, 0.96);
 }
@@ -4485,7 +4518,8 @@ button.item {
 .feed-volume-slider::-webkit-slider-thumb {
   width: 14px;
   height: 14px;
-  margin-top: -5px;
+  margin-left: -5px;
+  -webkit-appearance: none;
   appearance: none;
   border: 2px solid rgba(2, 8, 10, 0.82);
   border-radius: 999px;

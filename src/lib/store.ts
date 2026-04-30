@@ -5,7 +5,12 @@ import { appBaseUrl, env } from "./env";
 import { createId, makeReferrerCode, nowIso, normalizeWallet } from "./ids";
 import { isINFTTokenMissing, recoverINFTFromChain } from "./inft";
 import { normalizeAppLanguage } from "./localization";
-import { findPaymentToken, getTransactionChainId, settlementTokenForCurrency } from "./payment-tokens";
+import {
+  findPaymentToken,
+  getTransactionChainId,
+  normalizePaymentCurrencySymbol,
+  settlementTokenForCurrency
+} from "./payment-tokens";
 import { defaultINFTActionPricesUsd, defaultModelPricingConfigurations, defaultPricing } from "./pricing";
 import {
   DEFAULT_RENDITION_LANGUAGE_CODE,
@@ -1655,18 +1660,23 @@ function normalizeSubAccountPreferences(
   existing?: SubAccountPreferences
 ): SubAccountPreferences {
   const inputHasLanguage = Object.prototype.hasOwnProperty.call(input, "language");
+  const inputHasPaymentCurrency = Object.prototype.hasOwnProperty.call(input, "paymentCurrency");
   const renderForm = input.renderForm && typeof input.renderForm === "object" && !Array.isArray(input.renderForm)
     ? input.renderForm
     : existing?.renderForm;
   const renderFormMode = input.renderFormMode === "simple" || input.renderFormMode === "advanced"
     ? input.renderFormMode
     : existing?.renderFormMode;
+  const paymentCurrency = inputHasPaymentCurrency
+    ? normalizePaymentCurrencySymbol(input.paymentCurrency)
+    : existing?.paymentCurrency;
   const language = inputHasLanguage
     ? normalizeAppLanguage(input.language)
     : existing?.language;
   return {
     renderForm,
     renderFormMode,
+    paymentCurrency,
     language,
     updatedAt: nowIso()
   };

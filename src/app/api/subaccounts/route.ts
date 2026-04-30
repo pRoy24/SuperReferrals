@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSubAccountForCustomer } from "@/lib/orchestrator";
 import { normalizeAppLanguage } from "@/lib/localization";
+import { normalizePaymentCurrencySymbol } from "@/lib/payment-tokens";
 import { mutateStore, publicSubAccount, readStore, updateSubAccountPreferences } from "@/lib/store";
 
 export async function GET() {
@@ -33,6 +34,10 @@ export async function PATCH(request: Request) {
     const language = normalizeAppLanguage(body.preferences?.language || body.language);
     if (language) {
       preferences.language = language;
+    }
+    const paymentCurrency = normalizePaymentCurrencySymbol(body.preferences?.paymentCurrency || body.paymentCurrency);
+    if (paymentCurrency) {
+      preferences.paymentCurrency = paymentCurrency;
     }
     const account = await mutateStore((store) => updateSubAccountPreferences(store, {
       id: cleanOptionalString(body.subAccountId) || cleanOptionalString(body.id),

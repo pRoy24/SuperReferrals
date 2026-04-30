@@ -18,6 +18,7 @@ import {
   findPaymentToken,
   getTransactionChainConfig,
   getTransactionChainId,
+  normalizePaymentCurrencySymbol,
   normalizeTransactionChainIdForEnvironment,
   settlementTokenForCurrency,
   type PaymentToken
@@ -80,6 +81,7 @@ import type {
   Generation,
   GenerationInput,
   GenerationPayment,
+  INFTCopyListing,
   INFTPaidAction,
   INFTAttribute,
   INFTRecord,
@@ -96,6 +98,8 @@ const sampleImageUrlBases = new Set([
   "https://images.unsplash.com/photo-1460353581641-37baddab0fa2",
   "https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77"
 ]);
+
+const INFT_COPY_OPERATION = "copy_inft";
 
 export async function bootstrap(customerId?: string) {
   await getAgentConsoleSnapshot(customerId);
@@ -314,6 +318,7 @@ export async function createSubAccountForCustomer(input: {
   email?: string;
   username?: string;
   language?: string;
+  paymentCurrency?: string;
 }) {
   const existingStore = await readStore();
   const customer = existingStore.customers.find((item) => item.id === input.customerId);
@@ -326,6 +331,11 @@ export async function createSubAccountForCustomer(input: {
     item.customerId === input.customerId && normalizeWallet(item.wallet) === normalizedWallet
   );
   const language = normalizeAppLanguage(input.language);
+  const paymentCurrency = normalizePaymentCurrencySymbol(input.paymentCurrency);
+  const preferences = {
+    ...(language ? { language } : {}),
+    ...(paymentCurrency ? { paymentCurrency } : {})
+  };
   if (existingAccount) {
     const blockchainRegistration = existingAccount.blockchainRegistration ||
       await tryCreateZeroGUserRegistration(customer, existingAccount);
@@ -335,10 +345,10 @@ export async function createSubAccountForCustomer(input: {
         throw new Error("wallet user record disappeared while provisioning");
       }
       current.blockchainRegistration = blockchainRegistration;
-      if (language) {
+      if (Object.keys(preferences).length > 0) {
         current.preferences = updateSubAccountPreferences(store, {
           id: current.id,
-          preferences: { language }
+          preferences
         })?.preferences;
       }
       current.updatedAt = nowIso();
@@ -347,7 +357,7 @@ export async function createSubAccountForCustomer(input: {
   }
   const account = await mutateStore((store) => addSubAccount(store, {
     ...input,
-    preferences: language ? { language } : undefined
+    preferences: Object.keys(preferences).length > 0 ? preferences : undefined
   }));
   const blockchainRegistration = await tryCreateZeroGUserRegistration(customer, account);
   return mutateStore((store) => {
@@ -429,14 +439,16 @@ export async function quotePayment(input: {
     throw new Error("customerId was not found");
   }
   await ensureCustomerSamsarAppCredentials(customer);
-  const inftAction = normalizeINFTPaidAction(input.action || input.operation || "");
+  const requestedINFTOperation = String(input.action || input.operation || "").trim().toLowerCase();
+  const isCopyOperation = requestedINFTOperation === INFT_COPY_OPERATION;
+  const inftAction = isCopyOperation ? "" : normalizeINFTPaidAction(requestedINFTOperation);
   const quoteINFT = input.inftId
     ? store.infts.find((item) => item.id === input.inftId && item.customerId === customer.id)
     : undefined;
   if (input.inftId && !quoteINFT) {
     throw new Error("INFT does not belong to this storefront.");
   }
-  if ((input.inftId || input.action || input.operation) && !inftAction) {
+  if ((input.inftId || input.action || input.operation) && !inftAction && !isCopyOperation) {
     throw new Error("Unsupported paid INFT action.");
   }
   const quoteSubAccount = input.subAccountId
@@ -446,11 +458,22 @@ export async function quotePayment(input: {
   if (!isUsableEvmAddress(quoteWallet)) {
     throw new Error("Connect a valid wallet before requesting a payment quote.");
   }
+  const payerSubAccount = store.subAccounts.find((item) =>
+    item.customerId === customer.id && normalizeWallet(item.wallet).toLowerCase() === normalizeWallet(quoteWallet).toLowerCase()
+  );
+  if (quoteINFT && inftAction) {
+    assertINFTWalletOwner(quoteINFT, quoteWallet);
+  }
+  const preferredPaymentCurrency =
+    payerSubAccount?.preferences?.paymentCurrency ||
+    quoteSubAccount?.preferences?.paymentCurrency;
   assertStorefrontRenderAccess(customer, store, {
     wallet: quoteWallet
   });
   const imageCount = Number(input.imageCount || 0);
-  const pricing = inftAction
+  const pricing = isCopyOperation
+    ? priceINFTCopy(customer, quoteINFT)
+    : inftAction
     ? priceINFTAction(customer, inftAction)
     : (() => {
       if (!imageCount || imageCount < 1) {
@@ -478,7 +501,7 @@ export async function quotePayment(input: {
     settlementTokenForCurrency(input.settlementCurrency || customer.pricing.currency, chainId);
   const paymentToken =
     findPaymentToken(input.tokenIn || "", chainId) ||
-    findPaymentToken(input.paymentCurrency || settlementToken?.symbol || "USDC", chainId);
+    findPaymentToken(input.paymentCurrency || preferredPaymentCurrency || settlementToken?.symbol || "USDC", chainId);
   if (!settlementToken || !paymentToken) {
     throw new Error("Unsupported payment or settlement token");
   }
@@ -547,6 +570,8 @@ export async function quotePayment(input: {
       chainId,
       reason: inftAction
         ? `SuperReferrals INFT ${inftAction.replaceAll("_", " ")} action`
+        : isCopyOperation
+        ? "SuperReferrals INFT copy purchase"
         : `SuperReferrals quote for ${pricing.durationSeconds} second render`
     })
     : undefined;
@@ -570,9 +595,9 @@ export async function quotePayment(input: {
   const quote: PaymentQuote = {
     id: createId("quote"),
     customerId: customer.id,
-    subAccountId: input.subAccountId || quoteINFT?.subAccountId,
+    subAccountId: input.subAccountId || (isCopyOperation ? payerSubAccount?.id : quoteINFT?.subAccountId),
     inftId: quoteINFT?.id,
-    operation: inftAction || undefined,
+    operation: inftAction || (isCopyOperation ? INFT_COPY_OPERATION : undefined),
     imageCount,
     durationSeconds: pricing.durationSeconds,
     amountUsd: pricing.amountUsd,
@@ -602,7 +627,72 @@ export async function quotePayment(input: {
     route,
     createdAt: nowIso()
   };
-  return mutateStore((mutableStore) => addQuote(mutableStore, quote));
+  const preferenceSubAccount = payerSubAccount || quoteSubAccount;
+  return mutateStore((mutableStore) => {
+    const savedQuote = addQuote(mutableStore, quote);
+    if (preferenceSubAccount && preferenceSubAccount.preferences?.paymentCurrency !== paymentToken.symbol) {
+      updateSubAccountPreferences(mutableStore, {
+        id: preferenceSubAccount.id,
+        preferences: { paymentCurrency: paymentToken.symbol }
+      });
+    }
+    return savedQuote;
+  });
+}
+
+function priceINFTCopy(customer: Customer, inft?: INFTRecord) {
+  const listing = assertINFTCopyListing(inft);
+  const totalUsd = roundUsd(listing.priceUsd);
+  const platformFeeUsd = roundUsd((totalUsd * customer.pricing.platformFeeBps) / (10_000 + customer.pricing.platformFeeBps));
+  const amountUsd = roundUsd(totalUsd - platformFeeUsd);
+  return {
+    action: INFT_COPY_OPERATION,
+    amountUsd,
+    platformFeeUsd,
+    totalUsd,
+    durationSeconds: undefined,
+    pricePerSecondUsd: undefined,
+    baseCreditsPerSecond: undefined,
+    creditUnitUsd: undefined,
+    customerMultiplier: undefined,
+    pricingConfigurationId: INFT_COPY_OPERATION
+  };
+}
+
+function assertINFTCopyListing(inft?: INFTRecord): INFTCopyListing {
+  const listing = normalizeINFTCopyListing(inft?.copyListing);
+  if (!listing) {
+    throw new Error("This INFT is not available for paid copy purchase.");
+  }
+  return listing;
+}
+
+function normalizeINFTCopyListing(input?: Partial<INFTCopyListing> | null): INFTCopyListing | undefined {
+  if (!input?.enabled) {
+    return undefined;
+  }
+  const priceUsd = roundUsd(input.priceUsd);
+  if (!Number.isFinite(priceUsd) || priceUsd <= 0) {
+    throw new Error("INFT copy purchase price must be greater than zero.");
+  }
+  return {
+    enabled: true,
+    priceUsd,
+    currency: input.currency || "USDC",
+    createdAt: input.createdAt || nowIso(),
+    updatedAt: nowIso()
+  };
+}
+
+function assertINFTWalletOwner(inft: INFTRecord, wallet?: string) {
+  if (!wallet || normalizeWallet(wallet) !== normalizeWallet(inft.ownerWallet)) {
+    throw new Error("Only the wallet that owns this INFT can run edit operations.");
+  }
+}
+
+function roundUsd(value: unknown) {
+  const parsed = Number(value);
+  return Math.round((Number.isFinite(parsed) ? parsed : 0) * 100) / 100;
 }
 
 function withKeeperConversionMetadata(
@@ -688,6 +778,7 @@ export async function createGeneration(input: {
     samsarGalleryPublished?: boolean;
     tags?: unknown;
   };
+  copyListing?: Partial<INFTCopyListing>;
   payment?: Partial<GenerationPayment>;
 }) {
   const store = await readStore();
@@ -733,6 +824,7 @@ export async function createGeneration(input: {
   validateGenerationAssetUrls(input.generation);
   const priced = priceGeneration(customer, imageCount, input.generation);
   const normalizedInput = normalizeGenerationInput(input.generation);
+  const copyListing = normalizeINFTCopyListing(input.copyListing);
   const initialLanguageCode = resolveRenditionLanguageCode(normalizedInput.language);
   const quote = input.payment?.quoteId
     ? store.quotes.find((item) => item.id === input.payment?.quoteId)
@@ -840,6 +932,7 @@ export async function createGeneration(input: {
     status: paymentConfirmation.status === "pending" ? "PAYMENT_PENDING" : "QUEUED",
     input: normalizedInput,
     feed: buildGenerationFeedSettings(input.feed, normalizedInput.metadata),
+    ...(copyListing ? { copyListing } : {}),
     payment,
     ...(initialLanguageCode ? { languageCode: initialLanguageCode } : {}),
     createdAt: timestamp,
@@ -1211,6 +1304,7 @@ async function finalizeGenerationUnlocked(
   };
   const attributes = buildINFTAttributes(generationWithSamsarMetadata, customer, subAccount);
   const inftTitle = resolveINFTTitle(generationForMetadata, subAccount);
+  const copyListing = normalizeINFTCopyListing(generationForMetadata.copyListing);
   const metadata = {
     name: inftTitle,
     description: "Marketing video INFT generated from a referrer image-list-to-video request.",
@@ -1232,9 +1326,11 @@ async function finalizeGenerationUnlocked(
       ownerWallet: subAccount.wallet,
       userProfile: subAccount.blockchainRegistration,
       samsarVideoMetadata,
+      copyListing,
       metadata: generationForMetadata.input.metadata || {}
     },
     samsar_video_metadata: samsarVideoMetadata,
+    ...(copyListing ? { copy_listing: copyListing } : {}),
     storage: {
       video: videoArtifact
     }
@@ -1275,6 +1371,7 @@ async function finalizeGenerationUnlocked(
     contractAddress: mint.contractAddress,
     mintTxHash: mint.txHash,
     agentWalletAddress: agentWallet,
+    ...(copyListing ? { copyListing } : {}),
     referrer: {
       code: subAccount.referrerCode,
       url: `${customer.referrerBaseUrl}/r/${subAccount.referrerCode}`,
@@ -1624,6 +1721,100 @@ export async function runINFTAction(id: string, action: string, payload: Record<
     };
   }
 
+  if (action === INFT_COPY_OPERATION || action === "clone") {
+    const listing = assertINFTCopyListing(inft);
+    const copyPaymentPayload = paymentPayloadFromINFTAction(payload);
+    if (!firstString(copyPaymentPayload, ["payerWallet", "payer_wallet"])) {
+      throw new Error("Copy purchaser wallet is required.");
+    }
+    const payment = await confirmINFTOperationPayment({
+      inft,
+      customer,
+      operation: INFT_COPY_OPERATION,
+      paymentPayload: copyPaymentPayload,
+      requireOwner: false
+    });
+    if (payment.status === "pending") {
+      return {
+        status: "PAYMENT_PENDING",
+        action: INFT_COPY_OPERATION,
+        payment
+      };
+    }
+
+    assertPaidRenderProviderCanFulfill(payment.status);
+    const buyerWallet = assertUsableEvmAddress(payment.payerWallet, "Copy purchaser wallet");
+    const buyerSubAccount = await createSubAccountForCustomer({
+      customerId: customer.id,
+      wallet: buyerWallet,
+      username: firstString(payload, ["username", "buyerUsername", "buyer_username"])
+    });
+    const videoSessionId = resolveGenerationVideoActionSessionId(generation, inft);
+    if (!videoSessionId) {
+      throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
+    }
+    const samsarSession = await ensureCustomerSamsarActionSession(customer);
+    const result = await runSamsarSessionAction(INFT_COPY_OPERATION, {
+      videoSessionId,
+      source_inft_id: inft.id,
+      source_generation_id: generation.id,
+      source_token_id: inft.tokenId
+    }, {
+      appKey: samsarSession.appKey,
+      appSecret: samsarSession.appSecret,
+      idempotencyKey: `superreferrals:${inft.id}:${INFT_COPY_OPERATION}:${payment.quoteId || payment.txHash || buyerSubAccount.id}`
+    });
+    const remainingCredits = actionCreditsRemaining(result);
+    if (remainingCredits !== null) {
+      await updateCustomerSamsarCreditBalance(customer.id, remainingCredits);
+    }
+    const requestId = extractActionRequestIdFromResult(result);
+    if (!requestId) {
+      throw new Error("SuperReferrals clone did not return a request id.");
+    }
+    const cloneSessionId = firstInternalSamsarSessionId(
+      firstString(result, ["upstream_session_id", "upstreamSessionId", "session_id", "sessionId", "sessionID", "video_session_id", "videoSessionId"]),
+      requestId
+    );
+    const timestamp = nowIso();
+    const cloneGenerationId = createId("gen");
+    const cloneGeneration: Generation = {
+      id: cloneGenerationId,
+      customerId: customer.id,
+      subAccountId: buyerSubAccount.id,
+      referrerCode: buyerSubAccount.referrerCode,
+      status: "PROCESSING",
+      input: {
+        ...generation.input,
+        metadata: {
+          ...(isRecord(generation.input.metadata) ? generation.input.metadata : {}),
+          sourceInftId: inft.id,
+          sourceGenerationId: generation.id,
+          sourceTokenId: inft.tokenId,
+          sourceVideoUrl: inft.videoUrl,
+          derivedFromAction: INFT_COPY_OPERATION,
+          copyPurchasePriceUsd: listing.priceUsd,
+          samsarActionRequestId: requestId,
+          samsarActionSessionId: cloneSessionId || requestId
+        }
+      },
+      payment,
+      samsarRequestId: requestId,
+      samsarSessionId: cloneSessionId || requestId,
+      samsarVideoMetadata: inft.samsarVideoMetadata || generation.samsarVideoMetadata,
+      languageCode: resolveCompletedGenerationLanguageCode(generation, inft.samsarVideoMetadata, inft),
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    await mutateStore((mutableStore) => addGeneration(mutableStore, cloneGeneration));
+    return {
+      ...result,
+      action: INFT_COPY_OPERATION,
+      payment,
+      generation: cloneGeneration
+    };
+  }
+
   if (action === "update_outro") {
     const videoSessionId = resolveGenerationVideoActionSessionId(generation, inft);
     if (!videoSessionId) {
@@ -1737,6 +1928,11 @@ export async function runINFTAction(id: string, action: string, payload: Record<
   }
 
   if (action === "cancel_render") {
+    const actorWallet = firstString(payload, ["payerWallet", "payer_wallet", "wallet", "ownerWallet", "owner_wallet"]);
+    if (!actorWallet) {
+      throw new Error("Owner wallet is required to cancel an INFT render.");
+    }
+    assertINFTWalletOwner(inft, actorWallet);
     const videoSessionId = resolveGenerationVideoActionSessionId(generation, inft);
     if (!videoSessionId) {
       throw new Error("Current INFT generation does not have a SuperReferrals video session id.");
@@ -1870,6 +2066,9 @@ async function finalizeINFTActionResult({
         generation: existingGeneration
       };
     }
+    const targetSubAccount = existingGeneration
+      ? latestStore.subAccounts.find((item) => item.id === existingGeneration.subAccountId) || subAccount
+      : subAccount;
 
     const actionSessionId = firstInternalSamsarSessionId(
       extractSamsarInternalSessionId(status),
@@ -1894,11 +2093,13 @@ async function finalizeINFTActionResult({
     const samsarVideoMetadata = buildSamsarVideoRenderMetadata(statusForMetadata, languageContext);
     const languageCode = resolveCompletedGenerationLanguageCode(languageContext, samsarVideoMetadata, latestInft);
     const sourceMetadata = isRecord(latestGeneration.input.metadata) ? latestGeneration.input.metadata : {};
+    const existingDerivativeMetadata = isRecord(existingGeneration?.input.metadata) ? existingGeneration.input.metadata : {};
     const derivativeInput: GenerationInput = {
       ...latestGeneration.input,
       ...(requestedLanguageCode ? { language: requestedLanguageCode.toLowerCase() } : {}),
       metadata: {
         ...sourceMetadata,
+        ...existingDerivativeMetadata,
         sourceInftId: latestInft.id,
         sourceGenerationId: latestGeneration.id,
         sourceTokenId: latestInft.tokenId,
@@ -1913,11 +2114,11 @@ async function finalizeINFTActionResult({
     const derivativeGeneration: Generation = {
       id: derivativeGenerationId,
       customerId: latestGeneration.customerId,
-      subAccountId: latestGeneration.subAccountId,
-      referrerCode: latestGeneration.referrerCode,
+      subAccountId: targetSubAccount.id,
+      referrerCode: existingGeneration?.referrerCode || targetSubAccount.referrerCode,
       status: "COMPLETED",
       input: derivativeInput,
-      payment: buildDerivativeActionPayment(latestGeneration.payment, customer, actionName),
+      payment: existingGeneration?.payment || buildDerivativeActionPayment(latestGeneration.payment, customer, actionName),
       samsarRequestId: requestId,
       samsarSessionId: actionSessionId || requestId,
       samsarVideoMetadata,
@@ -1928,7 +2129,7 @@ async function finalizeINFTActionResult({
       updatedAt: timestamp
     };
     const attributes = [
-      ...buildINFTAttributes(derivativeGeneration, customer, subAccount),
+      ...buildINFTAttributes(derivativeGeneration, customer, targetSubAccount),
       { trait_type: "source_inft_id", value: latestInft.id },
       { trait_type: "source_generation_id", value: latestGeneration.id },
       { trait_type: "video_action", value: actionName }
@@ -1944,7 +2145,7 @@ async function finalizeINFTActionResult({
       superreferrals: {
         generationId: derivativeGenerationId,
         customerId: customer.id,
-        subAccountId: subAccount.id,
+        subAccountId: targetSubAccount.id,
         ...languageCodeMetadata(languageCode),
         title: metadataTitle,
         samsarRequestId: requestId,
@@ -1953,10 +2154,10 @@ async function finalizeINFTActionResult({
         sourceGenerationId: latestGeneration.id,
         sourceTokenId: latestInft.tokenId,
         action: actionName,
-        referrerCode: subAccount.referrerCode,
-        referrerUrl: `${customer.referrerBaseUrl}/r/${subAccount.referrerCode}`,
-        ownerWallet: subAccount.wallet,
-        userProfile: subAccount.blockchainRegistration,
+        referrerCode: targetSubAccount.referrerCode,
+        referrerUrl: `${customer.referrerBaseUrl}/r/${targetSubAccount.referrerCode}`,
+        ownerWallet: targetSubAccount.wallet,
+        userProfile: targetSubAccount.blockchainRegistration,
         samsarVideoMetadata,
         metadata: derivativeInput.metadata || {}
       },
@@ -1990,7 +2191,7 @@ async function finalizeINFTActionResult({
       return addGeneration(mutableStore, derivativeGenerationWithStorage);
     });
     const agentWallet = deriveAgentWallet(derivativeGenerationId);
-    const ownerWallet = normalizeWallet(subAccount.wallet) as `0x${string}`;
+    const ownerWallet = normalizeWallet(targetSubAccount.wallet) as `0x${string}`;
     const mint = await mintINFT({
       ownerWallet,
       metadataUri: tokenMetadataUri,
@@ -2035,8 +2236,8 @@ async function finalizeINFTActionResult({
       mintTxHash: mint.txHash,
       agentWalletAddress: agentWallet,
       referrer: {
-        code: subAccount.referrerCode,
-        url: `${customer.referrerBaseUrl}/r/${subAccount.referrerCode}`,
+        code: targetSubAccount.referrerCode,
+        url: `${customer.referrerBaseUrl}/r/${targetSubAccount.referrerCode}`,
         ensName: customer.ensName
       },
       attributes,
@@ -2209,10 +2410,10 @@ async function runPaidINFTSamsarAction({
   actionInput: Record<string, unknown>;
   paymentPayload: Record<string, unknown>;
 }) {
-  const payment = await confirmINFTActionPayment({
+  const payment = await confirmINFTOperationPayment({
     inft,
     customer,
-    action,
+    operation: action,
     paymentPayload
   });
   if (payment.status === "pending") {
@@ -2245,16 +2446,18 @@ async function runPaidINFTSamsarAction({
   };
 }
 
-async function confirmINFTActionPayment({
+async function confirmINFTOperationPayment({
   inft,
   customer,
-  action,
-  paymentPayload
+  operation,
+  paymentPayload,
+  requireOwner = true
 }: {
   inft: INFTRecord;
   customer: Customer;
-  action: INFTPaidAction;
+  operation: string;
   paymentPayload: Record<string, unknown>;
+  requireOwner?: boolean;
 }) {
   const store = await readStore();
   const quoteId = firstString(paymentPayload, ["quoteId", "quote_id"]);
@@ -2262,7 +2465,7 @@ async function confirmINFTActionPayment({
   if (!quote) {
     throw new Error("Create and pay an INFT action quote before running this operation.");
   }
-  if (quote.customerId !== customer.id || quote.inftId !== inft.id || quote.operation !== action) {
+  if (quote.customerId !== customer.id || quote.inftId !== inft.id || quote.operation !== operation) {
     throw new Error("Payment quote does not match this INFT operation.");
   }
   const paymentChainId = normalizeTransactionChainIdForEnvironment(customer.pricing.chainId || quote.chainId || getTransactionChainId());
@@ -2282,10 +2485,14 @@ async function confirmINFTActionPayment({
     quote.paymentRecipientAddress || resolveRenderPaymentRecipientWallet(customer),
     "Payment recipient wallet"
   );
-  const payerWallet = assertUsableEvmAddress(
-    firstString(paymentPayload, ["payerWallet", "payer_wallet"]) || inft.ownerWallet,
-    "Action payer wallet"
-  );
+  const payerWalletInput = firstString(paymentPayload, ["payerWallet", "payer_wallet"]);
+  if (!payerWalletInput) {
+    throw new Error("Action payer wallet is required.");
+  }
+  const payerWallet = assertUsableEvmAddress(payerWalletInput, "Action payer wallet");
+  if (requireOwner) {
+    assertINFTWalletOwner(inft, payerWallet);
+  }
   const paymentRail = (firstString(paymentPayload, ["paymentRail", "payment_rail"]) || quote.paymentRail || "keeperhub") as GenerationPayment["paymentRail"];
   const paymentConfirmation = await resolvePaymentConfirmation({
     paymentRail,
@@ -2321,13 +2528,13 @@ async function confirmINFTActionPayment({
       chainId: paymentChainId,
       quoteId: quote.id,
       generationId: inft.generationId,
-      reason: `Settle SuperReferrals INFT ${action.replaceAll("_", " ")} action`,
+      reason: `Settle SuperReferrals INFT ${operation.replaceAll("_", " ")} operation`,
       metadata: {
         verification: paymentConfirmation.verification,
         customerId: customer.id,
         subAccountId: inft.subAccountId,
         inftId: inft.id,
-        action
+        operation
       }
     })
     : undefined;
@@ -2387,6 +2594,23 @@ async function updateCustomerSamsarCreditBalance(customerId: string, creditsRema
 
 function actionCreditsRemaining(result: Record<string, unknown>) {
   return firstNumber(result, ["remainingCredits", "remaining_credits", "creditsRemaining"]);
+}
+
+function extractActionRequestIdFromResult(result: Record<string, unknown>) {
+  return firstString(result, [
+    "request_id",
+    "requestId",
+    "global_status_id",
+    "globalStatusId",
+    "session_id",
+    "sessionId",
+    "sessionID",
+    "video_session_id",
+    "videoSessionId",
+    "external_request_id",
+    "externalRequestId",
+    "id"
+  ]);
 }
 
 function resolveGenerationVideoSessionId(generation: Pick<Generation, "samsarRequestId" | "samsarSessionId" | "resultUrl">) {
@@ -3092,6 +3316,11 @@ function buildINFTAttributes(
     if (Array.isArray(samsarVideoMetadata.languages) && samsarVideoMetadata.languages.length > 0) {
       attributes.push({ trait_type: "languages", value: samsarVideoMetadata.languages.join(",") });
     }
+  }
+  const copyListing = normalizeINFTCopyListing(generation.copyListing);
+  if (copyListing) {
+    attributes.push({ trait_type: "copy_allowed", value: true });
+    attributes.push({ trait_type: "copy_price_usd", value: copyListing.priceUsd });
   }
   return attributes;
 }

@@ -31,6 +31,7 @@ type SamsarSessionActionOptions = {
 type SamsarVideoActionClient = {
   createV2VideoFromImageList(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
   translateV2Video(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
+  cloneV2Video(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
   updateV2VideoOutroImage(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
   updateV2VideoFooterImage(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
   addV2VideoOutroImage(input: Record<string, unknown>, options?: Record<string, unknown>): Promise<SamsarClientResult>;
@@ -259,6 +260,12 @@ export async function runSamsarSessionAction(
       input: sessionActionPayload,
       webhookUrl: `${appBaseUrl()}/api/webhooks/samsar`
     }, videoOptions));
+  }
+  if (action === "copy_inft" || action === "clone") {
+    return samsarClientActionResult(await videoClient.cloneV2Video(
+      sessionActionPayload,
+      videoOptions
+    ));
   }
   if (action === "add_subtitles") {
     return samsarClientActionResult(await videoClient.postV2("add_subtitles", {
