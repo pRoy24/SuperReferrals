@@ -209,12 +209,12 @@ export default async function Home() {
         </div>
       </section>
 
-      <section className="landing-section landing-split">
+      <section className="landing-section landing-two-row">
         <div>
           <div className="eyebrow">Use Case</div>
           <h2>Referrals that show the product and lead to purchase.</h2>
         </div>
-        <div className="value-list">
+        <div className="value-list value-list-grid">
           {valuePoints.map((point) => (
             <div className="value-item" key={point}>
               <ShieldCheck size={16} />
@@ -252,13 +252,13 @@ export default async function Home() {
         </div>
       </section>
 
-      <section className="landing-section landing-split blockchain-section">
+      <section className="landing-section landing-two-row blockchain-section">
         <div>
           <div className="eyebrow">Powered by blockchain</div>
-          <h2>Programmable storefronts for crypto-native video referrals.</h2>
+          <h2>Programmable storefronts for crypto-native video creation.</h2>
           <p className="blockchain-note">0G blockchain · KeeperHub · Auditable iNFT lineage</p>
         </div>
-        <div className="value-list">
+        <div className="value-list blockchain-list">
           {blockchainPoints.map((point) => {
             const Icon = point.icon;
             return (

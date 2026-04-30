@@ -680,9 +680,22 @@ a:hover {
   align-items: start;
 }
 
+.landing-two-row {
+  display: grid;
+  gap: 18px;
+}
+
+.landing-two-row > div:first-child {
+  max-width: min(980px, 100%);
+}
+
 .value-list {
   display: grid;
   gap: 10px;
+}
+
+.value-list-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .value-item {
@@ -791,6 +804,10 @@ a:hover {
   gap: 18px;
 }
 
+.blockchain-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .blockchain-note {
   margin: 14px 0 0;
   color: var(--muted);
@@ -811,6 +828,20 @@ a:hover {
 .how-section {
   display: grid;
   gap: 18px;
+  border-color: rgba(255, 255, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(7, 18, 24, 0.96), rgba(13, 23, 36, 0.98)),
+    #071218;
+  color: #e8fbff;
+  box-shadow: 0 24px 70px rgba(2, 8, 10, 0.32);
+}
+
+.how-section .eyebrow {
+  color: #3dd6c6;
+}
+
+.how-section h2 {
+  color: #f7fdff;
 }
 
 .how-section-header {
@@ -822,7 +853,7 @@ a:hover {
 
 .how-section-header p {
   margin: 0;
-  color: var(--muted);
+  color: rgba(232, 251, 255, 0.68);
   line-height: 1.72;
 }
 
@@ -837,9 +868,9 @@ a:hover {
   align-content: start;
   gap: 12px;
   min-height: 214px;
-  border: 1px solid rgba(31, 91, 160, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 14px;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.075);
   padding: 16px;
 }
 
@@ -863,14 +894,14 @@ a:hover {
 
 .how-step h3 {
   margin: 0;
-  color: var(--ink);
+  color: #f7fdff;
   font-size: 17px;
   line-height: 1.25;
 }
 
 .how-step p {
   margin: 0;
-  color: var(--muted);
+  color: rgba(232, 251, 255, 0.72);
   line-height: 1.64;
 }
 
@@ -5600,6 +5631,14 @@ button.item {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .value-list-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .blockchain-list {
+    grid-template-columns: 1fr;
+  }
+
   .how-section-header {
     grid-template-columns: 1fr;
   }
@@ -5736,6 +5775,8 @@ button.item {
 
   .landing-card-grid,
   .how-grid,
+  .value-list-grid,
+  .blockchain-list,
   .route-grid,
   .showcase-flow {
     grid-template-columns: 1fr;
