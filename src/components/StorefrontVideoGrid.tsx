@@ -423,7 +423,24 @@ function buildStorefrontVideoItems(
     )
     .map((generation) => buildStorefrontVideoItem(store, generation))
     .filter((item): item is StorefrontVideoItem => Boolean(item))
-    .sort((left, right) => videoTime(right) - videoTime(left));
+    .sort(compareStorefrontVideoItems);
+}
+
+function compareStorefrontVideoItems(left: StorefrontVideoItem, right: StorefrontVideoItem) {
+  if (left.published && right.published) {
+    const leftAdminOrder = normalizeAdminOrder(left.adminOrder);
+    const rightAdminOrder = normalizeAdminOrder(right.adminOrder);
+    if (leftAdminOrder !== undefined || rightAdminOrder !== undefined) {
+      if (leftAdminOrder === undefined) {
+        return 1;
+      }
+      if (rightAdminOrder === undefined) {
+        return -1;
+      }
+      return leftAdminOrder - rightAdminOrder || videoTime(right) - videoTime(left);
+    }
+  }
+  return videoTime(right) - videoTime(left);
 }
 
 function buildStorefrontVideoItem(store: SuperReferralsStore, generation: Generation): StorefrontVideoItem | null {
@@ -478,6 +495,7 @@ function buildStorefrontVideoItem(store: SuperReferralsStore, generation: Genera
     },
     comments,
     likedByViewer: false,
+    adminOrder: normalizeAdminOrder(generation.feed?.adminOrder),
     createdAt: generation.createdAt,
     publishedAt,
     published: generation.feed?.published === true
@@ -536,5 +554,15 @@ function cleanText(value: unknown) {
 }
 
 function videoTime(item: StorefrontVideoItem) {
-  return Date.parse(item.publishedAt || item.createdAt) || 0;
+  const createdAt = Date.parse(item.createdAt);
+  if (Number.isFinite(createdAt)) {
+    return createdAt;
+  }
+  const publishedAt = Date.parse(item.publishedAt);
+  return Number.isFinite(publishedAt) ? publishedAt : 0;
+}
+
+function normalizeAdminOrder(value: unknown) {
+  const order = Number(value);
+  return Number.isFinite(order) && order >= 0 ? order : undefined;
 }

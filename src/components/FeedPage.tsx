@@ -14,7 +14,6 @@ import {
   RefreshCw,
   Search,
   Send,
-  SlidersHorizontal,
   Smartphone,
   Volume2,
   VolumeX,
@@ -27,7 +26,7 @@ import { readStoredAppLanguage, subscribeAppLanguage } from "@/lib/app-language-
 import { DEFAULT_FEED_VIDEO_VOLUME, persistFeedVideoVolume, readFeedVideoVolume, subscribeFeedVideoVolume } from "@/lib/feed-video-preferences";
 import { DEFAULT_APP_LANGUAGE } from "@/lib/localization";
 import { samsarAuthHeaders } from "@/lib/storefront-auth-client";
-import type { AppLanguageCode, FeedSortOption, PublicFeedItem } from "@/lib/types";
+import type { AppLanguageCode, PublicFeedItem } from "@/lib/types";
 
 type FeedViewMode = "mobile" | "desktop";
 type FeedPageProps = {
@@ -68,13 +67,6 @@ type FeedAssistantThread = {
   updatedAt: string;
 };
 
-const sortOptions: Array<{ value: FeedSortOption; label: string }> = [
-  { value: "newest", label: "Newest" },
-  { value: "ranked", label: "Ranked" },
-  { value: "most_liked", label: "Most liked" },
-  { value: "most_commented", label: "Most commented" },
-  { value: "most_viewed", label: "Most viewed" }
-];
 const ASSISTANT_USER_STORAGE_KEY = "superreferrals:page-assistant-user";
 const WHEEL_SEEK_PIXELS_PER_SECOND = 42;
 const MAX_WHEEL_SEEK_SECONDS = 12;
@@ -84,7 +76,6 @@ const DESKTOP_SWIPE_NAV_LOCK_MS = 620;
 export default function FeedPage({ initialGenerationId = "", initialViewMode }: FeedPageProps = {}) {
   const [items, setItems] = useState<PublicFeedItem[]>([]);
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<FeedSortOption>("newest");
   const [appLanguage, setAppLanguage] = useState<AppLanguageCode>(DEFAULT_APP_LANGUAGE);
   const [viewMode, setViewMode] = useState<FeedViewMode>("mobile");
   const [viewerId, setViewerId] = useState("");
@@ -154,7 +145,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
       loadFeed().catch((error) => setMessage(error.message));
     }, 180);
     return () => window.clearTimeout(timeout);
-  }, [viewerId, query, sort, appLanguage, initialGenerationId]);
+  }, [viewerId, query, appLanguage, initialGenerationId]);
 
   useEffect(() => {
     if (visibleItems.length > 0 && activeIndex >= visibleItems.length) {
@@ -266,7 +257,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
     try {
       const params = new URLSearchParams({
         viewerId,
-        sort,
+        sort: "newest",
         language: appLanguage,
         limit: "80"
       });
@@ -703,7 +694,6 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
                 activeItem={activeItem}
                 itemCount={visibleItems.length}
                 onClose={() => setAssistantOpen(false)}
-                sort={sort}
                 viewMode={viewMode}
               />
             )}
@@ -715,14 +705,6 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
         <label className="feed-search">
           <Search size={16} />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search videos or creators" />
-        </label>
-        <label className="feed-select">
-          <SlidersHorizontal size={16} />
-          <select value={sort} onChange={(event) => setSort(event.target.value as FeedSortOption)}>
-            {sortOptions.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
         </label>
       </section>
 
@@ -837,13 +819,11 @@ function FeedAssistantPopdown({
   activeItem,
   itemCount,
   onClose,
-  sort,
   viewMode
 }: {
   activeItem?: PublicFeedItem;
   itemCount: number;
   onClose: () => void;
-  sort: FeedSortOption;
   viewMode: FeedViewMode;
 }) {
   const [thread, setThread] = useState<FeedAssistantThread | null>(null);
@@ -921,7 +901,7 @@ function FeedAssistantPopdown({
           pagePath: "/feed",
           message,
           userId: assistantUserIdRef.current,
-          context: feedAssistantContext({ activeItem, itemCount, sort, viewMode })
+          context: feedAssistantContext({ activeItem, itemCount, viewMode })
         })
       }).then(parseResponse<{ thread: FeedAssistantThread }>);
       setThread(data.thread);
@@ -949,7 +929,7 @@ function FeedAssistantPopdown({
           <span><Bot size={17} /></span>
           <div>
             <strong>Video Assistant</strong>
-            <small>{viewMode} · {sort.replace(/_/g, " ")}</small>
+            <small>{viewMode} · newest</small>
           </div>
         </div>
         <button className="feed-assistant-close" onClick={onClose} title="Close assistant" type="button">
@@ -1503,17 +1483,15 @@ function assistantHeaders(userId: string, init?: HeadersInit) {
 function feedAssistantContext({
   activeItem,
   itemCount,
-  sort,
   viewMode
 }: {
   activeItem?: PublicFeedItem;
   itemCount: number;
-  sort: FeedSortOption;
   viewMode: FeedViewMode;
 }) {
   return [
     `Current feed mode: ${viewMode}`,
-    `Current sort option: ${sort}`,
+    "Current sort option: newest",
     `Visible video count: ${itemCount}`,
     activeItem
       ? [

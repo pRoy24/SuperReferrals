@@ -44,7 +44,7 @@ const valuePoints = [
 
 export default async function Home() {
   const store = await readStore();
-  const featuredFeed = await listPublicFeedItems({ sort: "ranked", limit: 100 });
+  const featuredFeed = await listPublicFeedItems({ sort: "newest", limit: 100 });
   const customer = store.customers[0];
   const demoReferrer = customer ? store.subAccounts.find((account) => account.customerId === customer.id) : null;
   const latestInft = store.infts[0];
@@ -187,7 +187,7 @@ export default async function Home() {
         <div className="landing-video-header">
           <div>
             <div className="eyebrow">Featured Renditions</div>
-            <h2>Recent and popular storefront videos.</h2>
+            <h2>Latest storefront videos.</h2>
           </div>
           <a className="btn" href="/feed" target="_blank" rel="noreferrer">
             <Film size={16} /> Open feed

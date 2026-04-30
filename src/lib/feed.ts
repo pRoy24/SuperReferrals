@@ -87,7 +87,7 @@ export async function listPublicFeedItems(filters: {
     items = items.filter((item) => videoLanguageMatchesAppLanguage(item.languageCode, filters.language));
   }
 
-  items.sort((left, right) => compareFeedItems(left, right, sort));
+  items.sort(compareFeedItems);
   const focusId = normalizeFocusId(filters.focusId);
   const focusedItem = focusId
     ? items.find((item) => matchesFeedItemId(item, focusId))
@@ -248,6 +248,7 @@ function buildPublicFeedItem(
     likedByViewer: Boolean(viewerId && store.feedLikes.some((like) =>
       like.generationId === generation.id && like.viewerId === viewerId
     )),
+    adminOrder: normalizeAdminOrder(generation.feed.adminOrder),
     createdAt: generation.createdAt,
     publishedAt
   };
@@ -280,20 +281,24 @@ function buildMetrics(store: SuperReferralsStore, generation: Generation): FeedM
   };
 }
 
-function compareFeedItems(left: PublicFeedItem, right: PublicFeedItem, sort: FeedSortOption) {
-  if (sort === "newest") {
-    return feedCreatedTime(right) - feedCreatedTime(left);
+function compareFeedItems(left: PublicFeedItem, right: PublicFeedItem) {
+  const leftAdminOrder = normalizeAdminOrder(left.adminOrder);
+  const rightAdminOrder = normalizeAdminOrder(right.adminOrder);
+  if (leftAdminOrder !== undefined || rightAdminOrder !== undefined) {
+    if (leftAdminOrder === undefined) {
+      return 1;
+    }
+    if (rightAdminOrder === undefined) {
+      return -1;
+    }
+    return leftAdminOrder - rightAdminOrder || feedCreatedTime(right) - feedCreatedTime(left);
   }
-  if (sort === "most_liked") {
-    return right.metrics.likes - left.metrics.likes || feedCreatedTime(right) - feedCreatedTime(left);
-  }
-  if (sort === "most_commented") {
-    return right.metrics.comments - left.metrics.comments || feedCreatedTime(right) - feedCreatedTime(left);
-  }
-  if (sort === "most_viewed") {
-    return right.metrics.views - left.metrics.views || feedCreatedTime(right) - feedCreatedTime(left);
-  }
-  return right.metrics.score - left.metrics.score || feedCreatedTime(right) - feedCreatedTime(left);
+  return feedCreatedTime(right) - feedCreatedTime(left);
+}
+
+function normalizeAdminOrder(value: unknown) {
+  const order = Number(value);
+  return Number.isFinite(order) && order >= 0 ? order : undefined;
 }
 
 function feedCreatedTime(item: PublicFeedItem) {
@@ -387,10 +392,7 @@ function uniqueTags(tags: string[]) {
   return normalizeFeedTags(tags);
 }
 
-function normalizeSort(sort?: string): FeedSortOption {
-  if (sort === "ranked" || sort === "newest" || sort === "most_liked" || sort === "most_commented" || sort === "most_viewed") {
-    return sort;
-  }
+function normalizeSort(_sort?: string): FeedSortOption {
   return "newest";
 }
 

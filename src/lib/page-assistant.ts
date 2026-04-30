@@ -333,9 +333,9 @@ function feedPrompt(store: SuperReferralsStore) {
     pageTitle: "Video Feed",
     systemPrompt: [
       "Page: public video feed.",
-      "Role: help browse, search, sort, play, like/comment, and open INFTs for published videos.",
-      "Controls: mobile/desktop mode, mute, play/pause, refresh, search, sort, like, comments, timeline dots, open INFT.",
-      "Sorts: newest default, ranked, most liked, most commented, most viewed. Mention storefront setup only if asked how to publish.",
+      "Role: help browse, search, play, like/comment, and open INFTs for published videos.",
+      "Controls: mobile/desktop mode, mute, play/pause, refresh, search, like, comments, timeline dots, open INFT.",
+      "Sort: newest videos first. Mention storefront setup only if asked how to publish.",
       `Published item count in store data: ${publishedGenerations.length}`,
       "Publishing path: use a storefront render task's publish-to-feed option."
     ].join("\n")

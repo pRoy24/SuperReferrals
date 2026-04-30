@@ -243,6 +243,7 @@ export interface GenerationFeedSettings {
   published: boolean;
   tags: string[];
   publishedAt?: string;
+  adminOrder?: number;
   samsarGalleryPublished?: boolean;
   samsarPublication?: SamsarPublicationRecord;
 }
@@ -346,7 +347,7 @@ export interface Generation {
   updatedAt: string;
 }
 
-export type FeedSortOption = "ranked" | "newest" | "most_liked" | "most_commented" | "most_viewed";
+export type FeedSortOption = "newest";
 
 export interface FeedLike {
   id: string;
@@ -401,6 +402,7 @@ export interface PublicFeedItem {
   metrics: FeedMetrics;
   comments: FeedComment[];
   likedByViewer: boolean;
+  adminOrder?: number;
   createdAt: string;
   publishedAt: string;
 }
