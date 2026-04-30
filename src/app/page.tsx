@@ -73,6 +73,39 @@ const blockchainPoints = [
   }
 ];
 
+const howItWorksSteps = [
+  {
+    icon: Store,
+    title: "Storefront owner",
+    copy: "Set up a samsar-js account at saamsar.one or buy in-app credits from Create storefront, then choose models, prices, accepted crypto, and render policy for your users."
+  },
+  {
+    icon: Sparkles,
+    title: "Video creator",
+    copy: "Creators choose a storefront, pay in the store currency, and generate product videos from catalog links, listing metadata, images, prompts, CTAs, and selected formats."
+  },
+  {
+    icon: GitBranch,
+    title: "Purchaser",
+    copy: "Purchasers receive a deep-cloned iNFT they can edit, retranslate, replace scenes, update outros and CTA URLs, or join with other videos they own while the audit trail remains intact."
+  },
+  {
+    icon: Coins,
+    title: "Payments and refunds",
+    copy: "KeeperHub coordinates decentralized payments and refunds users when a render fails or a transaction reverts. Internally, render operations consume samsar-js credits."
+  },
+  {
+    icon: Database,
+    title: "Storage and audit",
+    copy: "Video renditions are saved in 0G blockchain storage, with edit and purchase trails guaranteed through 0G DA for durable provenance."
+  },
+  {
+    icon: Cpu,
+    title: "Page assistants",
+    copy: "Every storefront, video, and referral page can include an LLM assistant powered by 0G compute for page-aware guidance and follow-up actions."
+  }
+];
+
 export default async function Home() {
   const store = await readStore();
   const featuredFeed = await listPublicFeedItems({ sort: "newest", limit: 100 });
@@ -228,6 +261,33 @@ export default async function Home() {
                 <Icon size={16} />
                 <span>{point.copy}</span>
               </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="landing-section how-section">
+        <div className="how-section-header">
+          <div>
+            <div className="eyebrow">How it works</div>
+            <h2>From storefront setup to editable onchain video ownership.</h2>
+          </div>
+          <p>
+            Storefront owners configure the business rules, creators generate the media, and purchasers
+            receive editable iNFT clones with payments, storage, and audit handled by the network layer.
+          </p>
+        </div>
+        <div className="how-grid">
+          {howItWorksSteps.map((step) => {
+            const Icon = step.icon;
+            return (
+              <article className="how-step" key={step.title}>
+                <div className="how-step-heading">
+                  <span className="how-step-icon"><Icon size={18} /></span>
+                  <h3>{step.title}</h3>
+                </div>
+                <p>{step.copy}</p>
+              </article>
             );
           })}
         </div>
