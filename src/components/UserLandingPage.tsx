@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowDown, ArrowUp, Bot, ChevronDown, CircleDollarSign, CircleHelp, Code2, ExternalLink, GripVertical, ListChecks, Play, Plus, RefreshCw, Store, Trash2, Undo2, Upload, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Bot, Check, ChevronDown, CircleDollarSign, CircleHelp, Clipboard, Code2, ExternalLink, GripVertical, ListChecks, Play, Plus, RefreshCw, Store, Trash2, Undo2, Upload, Wallet } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from "react";
 import BreadcrumbNav from "@/components/BreadcrumbNav";
 import { UserStoreCreatorSkeleton } from "@/components/FormLoadingSkeletons";
@@ -60,6 +60,7 @@ type GenerationFormState = {
   imageUrls: string;
   inftTitle: string;
   metadata: string;
+  footerMetadata: string;
   prompt: string;
   videoModel: VideoModel;
   aspectRatio: VideoAspectRatio;
@@ -95,18 +96,16 @@ type MetadataWizardItem = {
   value: string;
 };
 
-type OutroFocusAreaWizard = {
-  x: string;
-  y: string;
-  width: string;
-  height: string;
-};
-
 type RenderFlowState = {
   status: "idle" | "payment" | "confirming" | "starting" | "started" | "completed" | "failed";
   message: string;
   txHash?: string;
   generationId?: string;
+};
+
+type GenerationPayloadPreviewState = {
+  json: string;
+  error: string;
 };
 
 type ImageOrientation = "portrait" | "landscape";
@@ -212,6 +211,7 @@ const renderFormTooltips = {
   paymentTxHash: "Optional transaction hash to use when payment was completed outside the wallet flow.",
   imageJson: "Advanced JSON array of image URL strings or image objects.",
   metadataJson: "Advanced JSON object stored with the generated render and INFT.",
+  footerMetadataJson: "Advanced JSON array for per-scene footer CTA cards. Items support url, title, and cta_logo.",
   payloadPreview: "Read-only preview of the SuperReferrals generation payload assembled from this form."
 };
 
@@ -223,6 +223,7 @@ function createDefaultGenerationForm(
     imageUrls: "",
     inftTitle: "",
     metadata: "",
+    footerMetadata: "",
     prompt: "",
     videoModel: modelSelection?.videoModel || ("RUNWAYML" as VideoModel),
     aspectRatio: modelSelection?.aspectRatio || ("9:16" as VideoAspectRatio),
@@ -259,6 +260,12 @@ function restorePersistedGenerationForm(
       restoredInftTitle = true;
     }
     if (typeof persisted.metadata === "string") next.metadata = persisted.metadata;
+    const persistedFooterMetadata = persistedRecord.footer_metadata ?? persistedRecord.footerMetadata;
+    if (typeof persisted.footerMetadata === "string") next.footerMetadata = persisted.footerMetadata;
+    if (typeof persistedFooterMetadata === "string" && !persisted.footerMetadata) next.footerMetadata = persistedFooterMetadata;
+    if (Array.isArray(persistedFooterMetadata) && !persisted.footerMetadata) {
+      next.footerMetadata = JSON.stringify(persistedFooterMetadata, null, 2);
+    }
     if (typeof persisted.prompt === "string") next.prompt = persisted.prompt;
     if (typeof persisted.videoModel === "string") next.videoModel = persisted.videoModel as VideoModel;
     if (typeof persisted.aspectRatio === "string") next.aspectRatio = persisted.aspectRatio as VideoAspectRatio;
@@ -404,12 +411,12 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   const [renderFormMode, setRenderFormMode] = useState<RenderFormMode>("simple");
   const [imageWizardItems, setImageWizardItems] = useState<ImageWizardItem[]>(() => parseImageWizardItems(""));
   const [metadataWizardItems, setMetadataWizardItems] = useState<MetadataWizardItem[]>(() => parseMetadataWizardItems(""));
-  const [outroFocusAreaWizard, setOutroFocusAreaWizard] = useState<OutroFocusAreaWizard>(() => parseOutroFocusAreaWizard(""));
   const [paymentCurrency, setPaymentCurrency] = useState<PaymentCurrencySymbol>("USDC");
   const [appLanguage, setAppLanguage] = useState<AppLanguageCode | "">("");
   const [quote, setQuote] = useState<PaymentQuote | null>(null);
   const [autoPolling, setAutoPolling] = useState(false);
   const [renderFlow, setRenderFlow] = useState<RenderFlowState>({ status: "idle", message: "" });
+  const [lastValidGenerationPayloadPreview, setLastValidGenerationPayloadPreview] = useState("");
   const [renderSessionLocked, setRenderSessionLocked] = useState(false);
   const [renderOrientationWarning, setRenderOrientationWarning] = useState<RenderOrientationWarning | null>(null);
   const [showOlderTasks, setShowOlderTasks] = useState(false);
@@ -569,10 +576,11 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     [selectedPaymentToken, settlementToken]
   );
   const hasWalletAddress = Boolean(walletAddress.trim());
-  const generationPayloadPreview = useMemo(
+  const generationPayloadPreviewState = useMemo(
     () => previewGenerationPayload(generationForm),
     [generationForm]
   );
+  const generationPayloadPreview = generationPayloadPreviewState.json || lastValidGenerationPayloadPreview;
   const renderSubmitDisabled = busy === "generation" || busy === "orientation" || renderSessionLocked || imageCount === 0;
 
   function updateGenerationForm(patch: RenderFormPatch) {
@@ -614,7 +622,6 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
   function syncRenderWizardState(form: GenerationFormState) {
     setImageWizardItems(parseImageWizardItems(form.imageUrls));
     setMetadataWizardItems(parseMetadataWizardItems(form.metadata));
-    setOutroFocusAreaWizard(parseOutroFocusAreaWizard(form.outroFocusArea));
   }
 
   function openRenderFormMode(mode: RenderFormMode) {
@@ -701,11 +708,11 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     commitMetadataWizardItems(metadataWizardItems.filter((_, itemIndex) => itemIndex !== index));
   }
 
-  function updateOutroFocusAreaWizard(field: keyof OutroFocusAreaWizard, value: string) {
-    const nextFocusArea = { ...outroFocusAreaWizard, [field]: value };
-    setOutroFocusAreaWizard(nextFocusArea);
-    updateGenerationForm({ outroFocusArea: serializeOutroFocusAreaWizard(nextFocusArea) });
-  }
+  useEffect(() => {
+    if (generationPayloadPreviewState.json) {
+      setLastValidGenerationPayloadPreview(generationPayloadPreviewState.json);
+    }
+  }, [generationPayloadPreviewState.json]);
 
   useEffect(() => {
     if (!customer || !renderFormStorageKey || renderFormHydratedKey === renderFormStorageKey) {
@@ -1137,7 +1144,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
 
   function updateRenderFlow(next: RenderFlowState) {
     setRenderFlow(next);
-    setMessage(next.message);
+    setMessage(next.status === "failed" ? "" : next.message);
   }
 
   async function executePaymentForRender(activeQuote: PaymentQuote, account: SubAccount) {
@@ -1283,6 +1290,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       if (renderAccessError) {
         throw new Error(renderAccessError);
       }
+      const generationPayload = buildGenerationPayload(generationForm);
       const paymentToken = paymentTokenForCurrency(currency);
       setPaymentCurrency(paymentToken.symbol);
       const account = await ensureWalletSubAccount();
@@ -1296,7 +1304,6 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
         message: `Payment transaction ${shortHash(paymentTxHash)} confirmed. Starting video render task.`,
         txHash: paymentTxHash
       });
-      const generationPayload = buildGenerationPayload(generationForm);
       const response = await fetch("/api/generations", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1564,7 +1571,6 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
                 form={generationForm}
                 imageWizardItems={imageWizardItems}
                 metadataWizardItems={metadataWizardItems}
-                outroFocusAreaWizard={outroFocusAreaWizard}
                 imageCount={imageCount}
                 defaultCopyPurchasePriceUsd={defaultCopyPurchasePriceUsd}
                 onPatch={updateGenerationForm}
@@ -1575,12 +1581,12 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
                 onMetadataChange={updateMetadataWizardItem}
                 onMetadataAdd={addMetadataWizardItem}
                 onMetadataRemove={removeMetadataWizardItem}
-                onFocusAreaChange={updateOutroFocusAreaWizard}
               />
             ) : (
               <AdvancedRenderForm
                 form={generationForm}
                 generationPayloadPreview={generationPayloadPreview}
+                generationPayloadPreviewError={generationPayloadPreviewState.error}
                 defaultCopyPurchasePriceUsd={defaultCopyPurchasePriceUsd}
                 onPatch={updateGenerationForm}
               />
@@ -1703,7 +1709,6 @@ function SimpleRenderForm({
   form,
   imageWizardItems,
   metadataWizardItems,
-  outroFocusAreaWizard,
   imageCount,
   defaultCopyPurchasePriceUsd,
   onPatch,
@@ -1713,13 +1718,11 @@ function SimpleRenderForm({
   onImageMove,
   onMetadataChange,
   onMetadataAdd,
-  onMetadataRemove,
-  onFocusAreaChange
+  onMetadataRemove
 }: {
   form: GenerationFormState;
   imageWizardItems: ImageWizardItem[];
   metadataWizardItems: MetadataWizardItem[];
-  outroFocusAreaWizard: OutroFocusAreaWizard;
   imageCount: number;
   defaultCopyPurchasePriceUsd: number;
   onPatch: (patch: RenderFormPatch) => void;
@@ -1730,7 +1733,6 @@ function SimpleRenderForm({
   onMetadataChange: (index: number, patch: Partial<MetadataWizardItem>) => void;
   onMetadataAdd: () => void;
   onMetadataRemove: (index: number) => void;
-  onFocusAreaChange: (field: keyof OutroFocusAreaWizard, value: string) => void;
 }) {
   const [uploadingImageIndex, setUploadingImageIndex] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState("");
@@ -2015,52 +2017,10 @@ function SimpleRenderForm({
                 onChange={(ctaLogo) => onPatch({ ctaLogo })}
                 full
               />
-              <label className="toggle-row" title={renderFormTooltips.outroAnimation}>
-                <input
-                  type="checkbox"
-                  checked={form.addOutroAnimation}
-                  onChange={(event) => onPatch({ addOutroAnimation: event.target.checked })}
-                />
-                Animate server-generated outro
-              </label>
-              <label className="toggle-row" title={renderFormTooltips.outroFocusAnimation}>
-                <input
-                  type="checkbox"
-                  checked={form.addOutroFocusArea}
-                  onChange={(event) => onPatch({ addOutroFocusArea: event.target.checked })}
-                />
-                Animate outro image focus area
-              </label>
-              <label className="toggle-row" title={renderFormTooltips.footerAnimation}>
-                <input
-                  type="checkbox"
-                  checked={form.addFooterAnimation}
-                  onChange={(event) => onPatch({ addFooterAnimation: event.target.checked })}
-                />
-                Animate per-scene CTA footer
-              </label>
             </>
           )}
         </div>
       </WizardSection>
-
-      {usesServerGeneratedOutro && form.addOutroFocusArea && (
-        <WizardSection title="Outro focus area" tooltip={renderFormTooltips.outroFocusArea}>
-          <div className="focus-area-grid">
-            {(["x", "y", "width", "height"] as Array<keyof OutroFocusAreaWizard>).map((field) => (
-              <div className="field" key={field}>
-                <label><LabelWithTooltip label={field} tooltip={renderFormTooltips.outroFocusArea} /></label>
-                <input
-                  type="number"
-                  min="0"
-                  value={outroFocusAreaWizard[field]}
-                  onChange={(event) => onFocusAreaChange(field, event.target.value)}
-                />
-              </div>
-            ))}
-          </div>
-        </WizardSection>
-      )}
 
       <TextField
         label="Payment tx hash (manual fallback)"
@@ -2292,11 +2252,13 @@ function CopyPurchaseControls({
 function AdvancedRenderForm({
   form,
   generationPayloadPreview,
+  generationPayloadPreviewError,
   defaultCopyPurchasePriceUsd,
   onPatch
 }: {
   form: GenerationFormState;
   generationPayloadPreview: string;
+  generationPayloadPreviewError: string;
   defaultCopyPurchasePriceUsd: number;
   onPatch: (patch: RenderFormPatch) => void;
 }) {
@@ -2341,42 +2303,66 @@ function AdvancedRenderForm({
       <TextField label="CTA top text" tooltip={renderFormTooltips.ctaTextTop} value={form.ctaTextTop} onChange={(ctaTextTop) => onPatch({ ctaTextTop })} />
       <TextField label="CTA bottom text" tooltip={renderFormTooltips.ctaTextBottom} value={form.ctaTextBottom} onChange={(ctaTextBottom) => onPatch({ ctaTextBottom })} />
       <TextField label="CTA logo URL" tooltip={renderFormTooltips.ctaLogo} value={form.ctaLogo} onChange={(ctaLogo) => onPatch({ ctaLogo })} full />
+      <div className="field full">
+        <label><LabelWithTooltip label="Footer metadata JSON array" tooltip={renderFormTooltips.footerMetadataJson} /></label>
+        <textarea value={form.footerMetadata} onChange={(event) => onPatch({ footerMetadata: event.target.value })} />
+      </div>
       <TextField label="Payment tx hash (manual fallback)" tooltip={renderFormTooltips.paymentTxHash} value={form.txHash} onChange={(txHash) => onPatch({ txHash })} full />
-      <label className="toggle-row" title={renderFormTooltips.outroAnimation}>
-        <input
-          type="checkbox"
-          checked={form.addOutroAnimation}
-          onChange={(event) => onPatch({ addOutroAnimation: event.target.checked })}
-        />
-        Animate server-generated outro
-      </label>
-      <label className="toggle-row" title={renderFormTooltips.outroFocusAnimation}>
-        <input
-          type="checkbox"
-          checked={form.addOutroFocusArea}
-          onChange={(event) => onPatch({ addOutroFocusArea: event.target.checked })}
-        />
-        Animate outro image focus area
-      </label>
-      <label className="toggle-row" title={renderFormTooltips.footerAnimation}>
-        <input
-          type="checkbox"
-          checked={form.addFooterAnimation}
-          onChange={(event) => onPatch({ addFooterAnimation: event.target.checked })}
-        />
-        Animate per-scene CTA footer
-      </label>
-      <div className="field full">
-        <label><LabelWithTooltip label="Outro focus area JSON" tooltip={renderFormTooltips.outroFocusArea} /></label>
-        <textarea
-          value={form.outroFocusArea}
-          onChange={(event) => onPatch({ outroFocusArea: event.target.value })}
-        />
-      </div>
-      <div className="field full">
-        <label><LabelWithTooltip label="Generated SuperReferrals payload preview" tooltip={renderFormTooltips.payloadPreview} /></label>
-        <textarea className="payload-preview" value={generationPayloadPreview} readOnly />
-      </div>
+      <PayloadPreviewSection
+        error={generationPayloadPreviewError}
+        payloadJson={generationPayloadPreview}
+      />
+    </div>
+  );
+}
+
+function PayloadPreviewSection({ error, payloadJson }: { error: string; payloadJson: string }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const canCopy = Boolean(payloadJson.trim()) && !error;
+
+  async function copyPayload() {
+    if (!canCopy) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(payloadJson);
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 1400);
+    } catch {
+      setCopyState("failed");
+      window.setTimeout(() => setCopyState("idle"), 1800);
+    }
+  }
+
+  return (
+    <div className="field full payload-preview-wrapper">
+      {error && <p className="notice error compact">{error}</p>}
+      <details className="payload-preview-section">
+        <summary className="payload-preview-summary">
+          <span>
+            <Code2 size={16} />
+            <LabelWithTooltip label="Generated SuperReferrals input JSON payload" tooltip={renderFormTooltips.payloadPreview} />
+          </span>
+          <button
+            type="button"
+            className="btn small"
+            disabled={!canCopy}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              copyPayload().catch(() => undefined);
+            }}
+          >
+            {copyState === "copied" ? <Check size={15} /> : <Clipboard size={15} />}
+            {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy JSON"}
+          </button>
+        </summary>
+        {payloadJson ? (
+          <textarea className="payload-preview" value={payloadJson} readOnly />
+        ) : (
+          <p className="subtle compact">Fix the payload error to generate a JSON preview.</p>
+        )}
+      </details>
     </div>
   );
 }
@@ -3240,34 +3226,6 @@ function serializeMetadataWizardItems(items: MetadataWizardItem[]) {
   return JSON.stringify(metadata, null, 2);
 }
 
-function parseOutroFocusAreaWizard(raw: string): OutroFocusAreaWizard {
-  try {
-    const parsed = parseOutroFocusArea(raw);
-    return {
-      x: String(parsed.x),
-      y: String(parsed.y),
-      width: String(parsed.width),
-      height: String(parsed.height)
-    };
-  } catch {
-    return { x: "", y: "", width: "", height: "" };
-  }
-}
-
-function serializeOutroFocusAreaWizard(focusArea: OutroFocusAreaWizard) {
-  return JSON.stringify({
-    x: parseWizardNumber(focusArea.x),
-    y: parseWizardNumber(focusArea.y),
-    width: parseWizardNumber(focusArea.width),
-    height: parseWizardNumber(focusArea.height)
-  }, null, 2);
-}
-
-function parseWizardNumber(value: string) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-}
-
 function formatWizardValue(value: unknown) {
   if (value === null || value === undefined) {
     return "";
@@ -3299,9 +3257,53 @@ function parseJsonObject(raw: string) {
   }
   const parsed = JSON.parse(raw);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("metadata must be a JSON object");
+    throw new Error("metadata must be a JSON object. Footer metadata belongs in the Footer metadata JSON array field.");
   }
   return parsed as Record<string, unknown>;
+}
+
+function parseFooterMetadata(raw: string): GenerationInput["footer_metadata"] | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const parsed = JSON.parse(trimmed);
+  if (!Array.isArray(parsed)) {
+    throw new Error("footer_metadata must be a JSON array");
+  }
+  return parsed.map((item, index) => normalizeFooterMetadataItem(item, index));
+}
+
+function normalizeFooterMetadataItem(item: unknown, index: number): NonNullable<GenerationInput["footer_metadata"]>[number] {
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    throw new Error(`footer_metadata item ${index + 1} must be an object`);
+  }
+  const record = item as Record<string, unknown>;
+  const url = firstStringFromRecord(record, "url", "cta_url", "ctaUrl");
+  const title = firstStringFromRecord(record, "title", "text", "cta_text", "ctaText");
+  const ctaLogo = firstStringFromRecord(record, "cta_logo", "ctaLogo", "logoUrl", "logoImagePath", "footerLogoImagePath");
+  if (!url) {
+    throw new Error(`footer_metadata item ${index + 1} must include url`);
+  }
+  assertUsableHttpUrl(url, `footer_metadata item ${index + 1} url`);
+  if (ctaLogo) {
+    assertUsableHttpUrl(ctaLogo, `footer_metadata item ${index + 1} cta_logo`);
+  }
+  return {
+    url,
+    ...(title ? { title } : {}),
+    ...(ctaLogo ? { cta_logo: ctaLogo } : {})
+  };
+}
+
+function firstStringFromRecord(record: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
 }
 
 function extractMetadataTitle(raw: string) {
@@ -3319,8 +3321,8 @@ function buildGenerationPayload(form: GenerationFormState): GenerationInput {
   const ctaTextTop = form.ctaTextTop.trim();
   const ctaTextBottom = form.ctaTextBottom.trim();
   const ctaLogo = form.ctaLogo.trim();
-  const addOutroFocusArea = form.addOutroFocusArea !== false;
   const metadata = parseJsonObject(form.metadata);
+  const footerMetadata = parseFooterMetadata(form.footerMetadata);
   const inftTitle = form.inftTitle.trim();
   if (!ctaUrl) {
     throw new Error("cta_url is required for the server-generated CTA outro image");
@@ -3339,9 +3341,9 @@ function buildGenerationPayload(form: GenerationFormState): GenerationInput {
     enable_subtitles: form.enableSubtitles,
     generate_outro_image: true,
     cta_url: ctaUrl,
-    add_outro_animation: form.addOutroAnimation,
-    add_outro_focus_area: addOutroFocusArea,
-    add_footer_animation: form.addFooterAnimation
+    add_outro_animation: true,
+    add_outro_focus_area: false,
+    add_footer_animation: true
   };
 
   if (ctaTextTop) {
@@ -3353,13 +3355,7 @@ function buildGenerationPayload(form: GenerationFormState): GenerationInput {
   if (ctaLogo) {
     payload.cta_logo = ctaLogo;
   }
-  if (form.addFooterAnimation) {
-    payload.footer_metadata = buildFooterMetadata(imageInputs, ctaUrl);
-  }
-
-  if (addOutroFocusArea) {
-    payload.outro_focust_area = parseOutroFocusArea(form.outroFocusArea);
-  }
+  payload.footer_metadata = footerMetadata || buildFooterMetadata(imageInputs, ctaUrl);
   return payload;
 }
 
@@ -3559,13 +3555,17 @@ function buildAspectSizedSampleImageUrl(rawUrl: string, aspectRatio: VideoAspect
   return url.toString();
 }
 
-function previewGenerationPayload(form: GenerationFormState) {
+function previewGenerationPayload(form: GenerationFormState): GenerationPayloadPreviewState {
   try {
-    return JSON.stringify(buildGenerationPayload(form), null, 2);
+    return {
+      json: JSON.stringify(buildGenerationPayload(form), null, 2),
+      error: ""
+    };
   } catch (error) {
-    return JSON.stringify({
+    return {
+      json: "",
       error: error instanceof Error ? error.message : "Invalid render payload"
-    }, null, 2);
+    };
   }
 }
 
@@ -3681,7 +3681,7 @@ function greatestCommonDivisor(left: number, right: number): number {
   return a || 1;
 }
 
-function assertUsableImageUrl(rawUrl: string, label: string) {
+function assertUsableHttpUrl(rawUrl: string, label: string) {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -3692,22 +3692,12 @@ function assertUsableImageUrl(rawUrl: string, label: string) {
     throw new Error(`${label} must be an http(s) URL`);
   }
   if (url.hostname === "example.com" || url.hostname.endsWith(".example.com")) {
-    throw new Error(`${label} must use a real reachable image URL, not an example.com placeholder`);
+    throw new Error(`${label} must use a real reachable URL, not an example.com placeholder`);
   }
 }
 
-function parseOutroFocusArea(raw: string) {
-  const parsed = parseJsonObject(raw);
-  const focusArea = {
-    x: Number(parsed.x),
-    y: Number(parsed.y),
-    width: Number(parsed.width),
-    height: Number(parsed.height)
-  };
-  if (!Object.values(focusArea).every((value) => Number.isFinite(value) && value >= 0)) {
-    throw new Error("outro focus area must include valid x, y, width, and height numbers");
-  }
-  return focusArea;
+function assertUsableImageUrl(rawUrl: string, label: string) {
+  assertUsableHttpUrl(rawUrl, label);
 }
 
 function sameWallet(left?: string, right?: string) {

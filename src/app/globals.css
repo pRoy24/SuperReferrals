@@ -2690,6 +2690,50 @@ textarea {
   font-size: 12px;
 }
 
+.payload-preview-wrapper {
+  display: grid;
+  gap: 10px;
+}
+
+.payload-preview-section {
+  border: 1px solid rgba(31, 91, 160, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+  overflow: hidden;
+}
+
+.payload-preview-summary {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 12px;
+}
+
+.payload-preview-summary::-webkit-details-marker {
+  display: none;
+}
+
+.payload-preview-summary > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.payload-preview-section[open] .payload-preview-summary {
+  border-bottom: 1px solid rgba(31, 91, 160, 0.12);
+}
+
+.payload-preview-section textarea,
+.payload-preview-section .subtle {
+  margin: 12px;
+  width: calc(100% - 24px);
+}
+
 select option {
   background: #ffffff;
   color: var(--ink);

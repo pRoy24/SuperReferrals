@@ -234,8 +234,18 @@ export interface GenerationInput {
   cta_logo?: string;
   add_footer_animation?: boolean;
   footer_metadata?: Array<{
-    url: string;
+    url?: string;
+    cta_url?: string;
+    ctaUrl?: string;
     title?: string;
+    text?: string;
+    cta_text?: string;
+    ctaText?: string;
+    cta_logo?: string;
+    ctaLogo?: string;
+    logoUrl?: string;
+    logoImagePath?: string;
+    footerLogoImagePath?: string;
   }>;
 }
 

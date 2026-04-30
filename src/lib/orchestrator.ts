@@ -2703,10 +2703,19 @@ function normalizeFooterMetadata(
 ): GenerationInput["footer_metadata"] {
   if (Array.isArray(footerMetadata) && footerMetadata.length > 0) {
     return footerMetadata
-      .map((item) => ({
-        url: String(item?.url || fallbackUrl || "").trim(),
-        ...(item?.title ? { title: String(item.title).trim() } : {})
-      }))
+      .map((item) => {
+        const record = item && typeof item === "object" && !Array.isArray(item)
+          ? item as Record<string, unknown>
+          : undefined;
+        const url = firstString(record, ["url", "cta_url", "ctaUrl"]) || String(fallbackUrl || "").trim();
+        const title = firstString(record, ["title", "text", "cta_text", "ctaText"]);
+        const ctaLogo = firstString(record, ["cta_logo", "ctaLogo", "logoUrl", "logoImagePath", "footerLogoImagePath"]);
+        return {
+          url,
+          ...(title ? { title } : {}),
+          ...(ctaLogo ? { cta_logo: ctaLogo } : {})
+        };
+      })
       .filter((item) => item.url);
   }
   const ctaUrl = String(fallbackUrl || "").trim();
@@ -2805,8 +2814,16 @@ function validateGenerationAssetUrls(input: GenerationInput) {
     assertReachableUrlShape(input.cta_url, "cta_url");
   }
   for (const [index, item] of (input.footer_metadata || []).entries()) {
-    if (item?.url) {
-      assertReachableUrlShape(item.url, `footer_metadata item ${index + 1}`);
+    const record = item && typeof item === "object" && !Array.isArray(item)
+      ? item as Record<string, unknown>
+      : undefined;
+    const url = firstString(record, ["url", "cta_url", "ctaUrl"]);
+    const ctaLogo = firstString(record, ["cta_logo", "ctaLogo", "logoUrl", "logoImagePath", "footerLogoImagePath"]);
+    if (url) {
+      assertReachableUrlShape(url, `footer_metadata item ${index + 1}`);
+    }
+    if (ctaLogo) {
+      assertReachableUrlShape(ctaLogo, `footer_metadata item ${index + 1} cta_logo`);
     }
   }
 }
