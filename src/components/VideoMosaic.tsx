@@ -2,8 +2,10 @@
 
 import { ArrowRight, Check, Copy, ExternalLink, Maximize2, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { readStoredAppLanguage, subscribeAppLanguage } from "@/lib/app-language-client";
 import { DEFAULT_FEED_VIDEO_VOLUME, persistFeedVideoVolume, readFeedVideoVolume, subscribeFeedVideoVolume } from "@/lib/feed-video-preferences";
-import type { PublicFeedItem } from "@/lib/types";
+import { DEFAULT_APP_LANGUAGE, videoLanguageMatchesAppLanguage } from "@/lib/localization";
+import type { AppLanguageCode, PublicFeedItem } from "@/lib/types";
 
 type MosaicAspectRatio = "16:9" | "9:16";
 type MosaicLayout = {
@@ -27,6 +29,7 @@ type VideoMosaicProps = {
   actions?: (item: PublicFeedItem) => ReactNode;
   className?: string;
   emptyText?: string;
+  filterByLanguage?: boolean;
   getCreatorWallet?: (item: PublicFeedItem) => string | undefined;
   limit?: number;
   maxRows?: 2 | 3;
@@ -42,6 +45,7 @@ export default function VideoMosaic({
   items,
   className = "",
   emptyText = "No published videos yet.",
+  filterByLanguage = true,
   getCreatorWallet,
   limit,
   maxRows,
@@ -51,9 +55,16 @@ export default function VideoMosaic({
   showFeedLink = true,
   showInftLink = true
 }: VideoMosaicProps) {
+  const [appLanguage, setAppLanguage] = useState<AppLanguageCode>(DEFAULT_APP_LANGUAGE);
+  const languageItems = useMemo(
+    () => filterByLanguage
+      ? items.filter((item) => videoLanguageMatchesAppLanguage(item.languageCode, appLanguage))
+      : items,
+    [appLanguage, filterByLanguage, items]
+  );
   const visibleItems = useMemo(
-    () => typeof limit === "number" ? items.slice(0, limit) : items,
-    [items, limit]
+    () => typeof limit === "number" ? languageItems.slice(0, limit) : languageItems,
+    [languageItems, limit]
   );
   const aspectReadyItems = useMemo(
     () => visibleItems.filter((item) => Boolean(normalizeMosaicAspectRatio(item.aspectRatio))),
@@ -75,7 +86,12 @@ export default function VideoMosaic({
   const mosaicGridRef = useRef<HTMLDivElement | null>(null);
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const displayedItems = aspectReadyItems;
-  const hiddenCount = Math.max(0, items.length - displayedItems.length);
+  const hiddenCount = Math.max(0, languageItems.length - displayedItems.length);
+
+  useEffect(() => {
+    setAppLanguage(readStoredAppLanguage() || DEFAULT_APP_LANGUAGE);
+    return subscribeAppLanguage(setAppLanguage);
+  }, []);
 
   useEffect(() => {
     const storedVolume = readFeedVideoVolume();
@@ -390,7 +406,7 @@ export default function VideoMosaic({
           );
         })}
       </div>
-      {moreHref && items.length > 0 && (
+      {moreHref && languageItems.length > 0 && (
         <div className="video-mosaic-footer">
           <a className="video-mosaic-more" href={moreHref}>
             {hiddenCount > 0 ? `${moreLabel} (${hiddenCount})` : moreLabel}

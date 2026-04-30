@@ -8,6 +8,7 @@ export async function GET(request: Request) {
     search: url.searchParams.get("q") || undefined,
     tag: url.searchParams.get("tag") || undefined,
     sort: url.searchParams.get("sort") || undefined,
+    language: url.searchParams.get("language") || undefined,
     viewerId: url.searchParams.get("viewerId") || undefined,
     focusId: url.searchParams.get("focusId") || undefined,
     limit

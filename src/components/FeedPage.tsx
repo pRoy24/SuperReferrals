@@ -23,9 +23,11 @@ import {
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent, type PointerEvent, type RefObject, type UIEvent, type WheelEvent } from "react";
 import BreadcrumbNav from "@/components/BreadcrumbNav";
 import LanguageSelector from "@/components/LanguageSelector";
+import { readStoredAppLanguage, subscribeAppLanguage } from "@/lib/app-language-client";
 import { DEFAULT_FEED_VIDEO_VOLUME, persistFeedVideoVolume, readFeedVideoVolume, subscribeFeedVideoVolume } from "@/lib/feed-video-preferences";
+import { DEFAULT_APP_LANGUAGE } from "@/lib/localization";
 import { samsarAuthHeaders } from "@/lib/storefront-auth-client";
-import type { FeedSortOption, PublicFeedItem } from "@/lib/types";
+import type { AppLanguageCode, FeedSortOption, PublicFeedItem } from "@/lib/types";
 
 type FeedViewMode = "mobile" | "desktop";
 type FeedPageProps = {
@@ -83,6 +85,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
   const [items, setItems] = useState<PublicFeedItem[]>([]);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<FeedSortOption>("newest");
+  const [appLanguage, setAppLanguage] = useState<AppLanguageCode>(DEFAULT_APP_LANGUAGE);
   const [viewMode, setViewMode] = useState<FeedViewMode>("mobile");
   const [viewerId, setViewerId] = useState("");
   const [authorName, setAuthorName] = useState("");
@@ -122,6 +125,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
 
   useEffect(() => {
     setViewerId(getOrCreateViewerId());
+    setAppLanguage(readStoredAppLanguage() || DEFAULT_APP_LANGUAGE);
     setAuthorName(window.localStorage.getItem("superreferrals:feed-author") || "");
     const storedVolume = readFeedVideoVolume();
     setVolume(storedVolume);
@@ -130,6 +134,8 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
     }
     setViewMode(initialViewMode || (window.matchMedia("(max-width: 760px)").matches ? "mobile" : "desktop"));
   }, [initialViewMode]);
+
+  useEffect(() => subscribeAppLanguage(setAppLanguage), []);
 
   useEffect(() => subscribeFeedVideoVolume((nextVolume) => {
     setVolume(nextVolume);
@@ -148,7 +154,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
       loadFeed().catch((error) => setMessage(error.message));
     }, 180);
     return () => window.clearTimeout(timeout);
-  }, [viewerId, query, sort, initialGenerationId]);
+  }, [viewerId, query, sort, appLanguage, initialGenerationId]);
 
   useEffect(() => {
     if (visibleItems.length > 0 && activeIndex >= visibleItems.length) {
@@ -261,6 +267,7 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
       const params = new URLSearchParams({
         viewerId,
         sort,
+        language: appLanguage,
         limit: "80"
       });
       if (query.trim()) {

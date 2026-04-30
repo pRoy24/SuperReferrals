@@ -44,7 +44,7 @@ const valuePoints = [
 
 export default async function Home() {
   const store = await readStore();
-  const featuredFeed = await listPublicFeedItems({ sort: "ranked", limit: 10 });
+  const featuredFeed = await listPublicFeedItems({ sort: "ranked", limit: 100 });
   const customer = store.customers[0];
   const demoReferrer = customer ? store.subAccounts.find((account) => account.customerId === customer.id) : null;
   const latestInft = store.infts[0];

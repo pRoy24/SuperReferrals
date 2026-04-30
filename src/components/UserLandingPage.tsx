@@ -36,6 +36,7 @@ import {
   getStorefrontMaxImages,
   resolveModelPriceDetails
 } from "@/lib/pricing";
+import { appLanguageToRenderFormLanguage } from "@/lib/localization";
 import { getStorefrontAccessError } from "@/lib/storefront-access";
 import { isUsableEvmAddress } from "@/lib/wallet-address";
 import type {
@@ -209,7 +210,10 @@ const renderFormTooltips = {
   payloadPreview: "Read-only preview of the SuperReferrals generation payload assembled from this form."
 };
 
-function createDefaultGenerationForm(modelSelection?: Pick<GenerationFormState, "videoModel" | "aspectRatio">): GenerationFormState {
+function createDefaultGenerationForm(
+  modelSelection?: Pick<GenerationFormState, "videoModel" | "aspectRatio">,
+  language = "auto"
+): GenerationFormState {
   return {
     imageUrls: "",
     inftTitle: "",
@@ -217,7 +221,7 @@ function createDefaultGenerationForm(modelSelection?: Pick<GenerationFormState, 
     prompt: "",
     videoModel: modelSelection?.videoModel || ("RUNWAYML" as VideoModel),
     aspectRatio: modelSelection?.aspectRatio || ("9:16" as VideoAspectRatio),
-    language: "auto",
+    language,
     enableSubtitles: true,
     addOutroAnimation: true,
     addOutroFocusArea: true,
@@ -418,6 +422,18 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
     return subscribeAppLanguage(setAppLanguage);
   }, []);
 
+  useEffect(() => {
+    if (!appLanguage) {
+      return;
+    }
+    const nextRenderLanguage = appLanguageToRenderFormLanguage(appLanguage);
+    setGenerationForm((current) =>
+      current.language === "auto" || current.language === "en" || current.language === "zh"
+        ? { ...current, language: nextRenderLanguage }
+        : current
+    );
+  }, [appLanguage]);
+
   const routeAccount = useMemo(
     () => store?.subAccounts.find((account) => account.referrerCode === referrerCode),
     [store, referrerCode]
@@ -563,7 +579,7 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
 
   function resetGenerationForm() {
     const selection = resolveValidModelSelection(pricingOptions, generationForm);
-    const nextForm = createDefaultGenerationForm(selection);
+    const nextForm = createDefaultGenerationForm(selection, appLanguage ? appLanguageToRenderFormLanguage(appLanguage) : "auto");
     setGenerationForm(nextForm);
     syncRenderWizardState(nextForm);
     setRenderFormMode("simple");

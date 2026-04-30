@@ -1,4 +1,6 @@
 import { createId, nowIso } from "./ids";
+import { videoLanguageMatchesAppLanguage } from "./localization";
+import { resolveRenditionLanguageCode } from "./rendition-language";
 import { mutateStore, readStore } from "./store";
 import type {
   FeedComment,
@@ -61,6 +63,7 @@ export async function listPublicFeedItems(filters: {
   tag?: string;
   sort?: string;
   limit?: number;
+  language?: string;
   viewerId?: string;
   focusId?: string;
 } = {}) {
@@ -79,6 +82,9 @@ export async function listPublicFeedItems(filters: {
   }
   if (tag) {
     items = items.filter((item) => item.tags.includes(tag));
+  }
+  if (filters.language) {
+    items = items.filter((item) => videoLanguageMatchesAppLanguage(item.languageCode, filters.language));
   }
 
   items.sort((left, right) => compareFeedItems(left, right, sort));
@@ -229,7 +235,13 @@ function buildPublicFeedItem(
     posterUrl: firstImageUrl(generation.input),
     aspectRatio: generation.input.aspect_ratio,
     videoModel: generation.input.video_model,
-    languageCode: generation.languageCode || inft?.languageCode,
+    languageCode: resolveRenditionLanguageCode(
+      generation.languageCode,
+      generation.samsarVideoMetadata,
+      generation.input.language,
+      inft?.languageCode,
+      inft?.samsarVideoMetadata
+    ),
     tags: uniqueTags(baseTags),
     metrics,
     comments,

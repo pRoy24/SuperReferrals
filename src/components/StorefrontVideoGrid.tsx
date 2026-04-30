@@ -3,8 +3,11 @@
 import { ChevronDown, Eye, EyeOff, MoreHorizontal, RefreshCw, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import VideoMosaic from "@/components/VideoMosaic";
+import { readStoredAppLanguage, subscribeAppLanguage } from "@/lib/app-language-client";
+import { DEFAULT_APP_LANGUAGE, videoLanguageMatchesAppLanguage } from "@/lib/localization";
+import { resolveRenditionLanguageCode } from "@/lib/rendition-language";
 import { fetchWithSamsarAuth } from "@/lib/storefront-auth-client";
-import type { Generation, INFTRecord, PublicFeedItem, SuperReferralsStore } from "@/lib/types";
+import type { AppLanguageCode, Generation, INFTRecord, PublicFeedItem, SuperReferralsStore } from "@/lib/types";
 
 type StorefrontVideoItem = PublicFeedItem & {
   creatorWallet?: string;
@@ -44,16 +47,21 @@ export default function StorefrontVideoGrid({
   const [localStore, setLocalStore] = useState(store);
   const [listVersion, setListVersion] = useState(0);
   const [mode, setMode] = useState<StorefrontVideoMode>("published");
+  const [appLanguage, setAppLanguage] = useState<AppLanguageCode>(DEFAULT_APP_LANGUAGE);
   const [message, setMessage] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(initialPageSize);
-  const items = useMemo(
+  const allItems = useMemo(
     () => buildStorefrontVideoItems(localStore, {
       customerId,
       published: mode === "published",
       subAccountId
     }),
     [customerId, mode, localStore, subAccountId]
+  );
+  const items = useMemo(
+    () => allItems.filter((item) => videoLanguageMatchesAppLanguage(item.languageCode, appLanguage)),
+    [allItems, appLanguage]
   );
   const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
   const normalizedPage = Math.min(page, pageCount);
@@ -66,8 +74,13 @@ export default function StorefrontVideoGrid({
   }, [store]);
 
   useEffect(() => {
+    setAppLanguage(readStoredAppLanguage() || DEFAULT_APP_LANGUAGE);
+    return subscribeAppLanguage(setAppLanguage);
+  }, []);
+
+  useEffect(() => {
     setPage(1);
-  }, [customerId, pageSize, mode, subAccountId]);
+  }, [appLanguage, customerId, pageSize, mode, subAccountId]);
 
   useEffect(() => {
     if (page > pageCount) {
@@ -449,6 +462,13 @@ function buildStorefrontVideoItem(store: SuperReferralsStore, generation: Genera
     posterUrl: firstImageUrl(generation),
     aspectRatio: generation.input.aspect_ratio,
     videoModel: generation.input.video_model,
+    languageCode: resolveRenditionLanguageCode(
+      generation.languageCode,
+      generation.samsarVideoMetadata,
+      generation.input.language,
+      inft?.languageCode,
+      inft?.samsarVideoMetadata
+    ),
     tags: generation.feed?.tags || [],
     metrics: {
       likes,

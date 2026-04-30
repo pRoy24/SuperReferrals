@@ -1,4 +1,5 @@
 import type { AppLanguageCode } from "./types";
+import { resolveRenditionLanguageCode } from "./rendition-language";
 
 export const APP_LANGUAGE_STORAGE_KEY = "superreferrals:language";
 export const DEFAULT_APP_LANGUAGE: AppLanguageCode = "en";
@@ -36,6 +37,20 @@ export function appLanguageHtmlLang(language: unknown) {
 export function appLanguageForCountryCode(countryCode?: string | null): AppLanguageCode {
   const normalized = countryCode?.trim().toUpperCase();
   return normalized && chinaRegionCountryCodes.has(normalized) ? "zh" : DEFAULT_APP_LANGUAGE;
+}
+
+export function appLanguageToRenditionLanguageCode(language: unknown) {
+  return normalizeAppLanguage(language) === "zh" ? "ZH" : "EN";
+}
+
+export function appLanguageToRenderFormLanguage(language: unknown) {
+  return normalizeAppLanguage(language) === "zh" ? "zh" : "en";
+}
+
+export function videoLanguageMatchesAppLanguage(videoLanguage: unknown, language: unknown) {
+  const target = appLanguageToRenditionLanguageCode(language);
+  const code = resolveRenditionLanguageCode(videoLanguage);
+  return code === target || code.split("-")[0] === target;
 }
 
 export function countryCodeFromHeaders(headers: Headers) {
