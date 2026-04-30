@@ -87,8 +87,8 @@ export default async function Home() {
             Give every recommendation a product story, visual style, and clear next step.
           </p>
           <p className="landing-support">
-            SuperReferrals turns catalog assets into personalized videos and referral pages for creators,
-            affiliates, and storefront teams.
+            SuperReferrals turns your product links or marketing ref links into unstoppable promo videos
+            with scannable QR codes, drawing data and images straight from your product catalog.
           </p>
           <div className="landing-actions" aria-label="Open project routes">
             <a className="btn primary large" href={referrerHref} target="_blank" rel="noreferrer">
@@ -110,7 +110,6 @@ export default async function Home() {
       <section className="landing-showcase" aria-label="SuperReferrals product flow">
         <div className="showcase-header">
           <div>
-            <span className="mono">superreferrals.link</span>
             <strong>Campaign builder</strong>
           </div>
           <span className="badge ok">Catalog ready</span>
@@ -134,8 +133,7 @@ export default async function Home() {
           </div>
         </div>
         <div className="showcase-outcome">
-          <span className="eyebrow">Customer outcome</span>
-          <h2>A recommendation that helps buyers decide.</h2>
+          <h2>Your ref links showcase your product and your vision.</h2>
           <p>
             Buyers see the product, creator context, campaign style, and purchase action in one place.
           </p>
@@ -197,7 +195,7 @@ export default async function Home() {
           items={featuredFeed.items}
           emptyText="No published storefront videos yet."
           limit={10}
-          maxRows={2}
+          maxRows={3}
           moreHref="/feed"
           moreLabel="More videos"
         />
