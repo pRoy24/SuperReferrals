@@ -3452,6 +3452,11 @@ button.item {
   min-width: 0;
 }
 
+.inft-owner-status {
+  display: flex;
+  margin-top: 14px;
+}
+
 .inft-action-picker {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3548,7 +3553,7 @@ button.item {
   min-width: 0;
 }
 
-.inft-action-status-icon {
+.inft-action-status-top .inft-action-status-icon {
   width: 34px;
   height: 34px;
   display: inline-grid;
@@ -3557,6 +3562,10 @@ button.item {
   border-radius: 50%;
   background: var(--soft-blue);
   color: #1d4ed8;
+}
+
+.inft-action-status-icon svg {
+  display: block;
 }
 
 .inft-action-status-icon > span {

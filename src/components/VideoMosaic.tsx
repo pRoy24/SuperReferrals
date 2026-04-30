@@ -3,7 +3,7 @@
 import { ArrowRight, Check, Copy, ExternalLink, Maximize2, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { readStoredAppLanguage, subscribeAppLanguage } from "@/lib/app-language-client";
-import { DEFAULT_FEED_VIDEO_VOLUME, persistFeedVideoVolume, readFeedVideoVolume, subscribeFeedVideoVolume } from "@/lib/feed-video-preferences";
+import { DEFAULT_FEED_VIDEO_VOLUME, persistFeedVideoVolume, readFeedVideoVolume, subscribeFeedVideoHardwareVolumeSync, subscribeFeedVideoVolume } from "@/lib/feed-video-preferences";
 import { DEFAULT_APP_LANGUAGE, videoLanguageMatchesAppLanguage } from "@/lib/localization";
 import type { AppLanguageCode, PublicFeedItem } from "@/lib/types";
 
@@ -72,7 +72,7 @@ export default function VideoMosaic({
   );
   const [activeId, setActiveId] = useState("");
   const [copiedWalletId, setCopiedWalletId] = useState("");
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(true);
   const [volume, setVolume] = useState(DEFAULT_FEED_VIDEO_VOLUME);
   const [volumePanelItemId, setVolumePanelItemId] = useState("");
   const [videoProgressById, setVideoProgressById] = useState<Record<string, VideoMosaicProgress>>({});
@@ -96,12 +96,14 @@ export default function VideoMosaic({
   useEffect(() => {
     const storedVolume = readFeedVideoVolume();
     setVolume(storedVolume);
-    setMuted(storedVolume === 0);
+    setMuted(true);
     return subscribeFeedVideoVolume((nextVolume) => {
       setVolume(nextVolume);
       setMuted(nextVolume === 0);
     });
   }, []);
+
+  useEffect(() => subscribeFeedVideoHardwareVolumeSync(), []);
 
   useEffect(() => {
     for (const [id, video] of Object.entries(videoRefs.current)) {

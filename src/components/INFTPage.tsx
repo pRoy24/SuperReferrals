@@ -166,6 +166,9 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
   const walletActionLabel = walletConnectedOnTransactionChain ? "Switch wallet" : "Connect wallet";
   const metadataItems = useMemo(() => buildINFTMetadataItems(activeInft), [activeInft]);
   const showActionReview = Boolean(lastVideoOperation && actionPoll?.status.toUpperCase() === "COMPLETED");
+  const downloadUnavailableReason = isUsableEvmAddress(walletAddress)
+    ? "Only the NFT owner can download this video."
+    : "Connect the owner wallet to download this video.";
 
   useEffect(() => {
     const firstToken = selectablePaymentTokens[0];
@@ -944,11 +947,23 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
       <div className="inft-grid">
         <section className="stack">
           <div className="panel">
-            <video className="video" src={activeInft.videoUrl} controls />
+            <video
+              className="video"
+              src={activeInft.videoUrl}
+              controls
+              controlsList={connectedWalletIsOwner ? undefined : "nodownload"}
+              onContextMenu={connectedWalletIsOwner ? undefined : (event) => event.preventDefault()}
+            />
             <div className="button-row">
-              <a className="btn primary" href={activeInft.videoUrl} download target="_blank" rel="noreferrer">
-                <Download size={16} /> Download video
-              </a>
+              {connectedWalletIsOwner ? (
+                <a className="btn primary" href={activeInft.videoUrl} download target="_blank" rel="noreferrer">
+                  <Download size={16} /> Download video
+                </a>
+              ) : (
+                <button className="btn primary" type="button" disabled title={downloadUnavailableReason}>
+                  <Download size={16} /> Download video
+                </button>
+              )}
               <button className="btn" onClick={shareInft}>
                 <Share2 size={16} /> Share
               </button>
@@ -1006,7 +1021,12 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
               </p>
             )}
             {editUnavailableReason && <p className="notice">{editUnavailableReason}</p>}
-            {copyListing && selectedPaymentToken && settlementToken && (
+            {connectedWalletIsOwner && (
+              <div className="inft-owner-status" aria-label="Connected wallet owns this NFT">
+                <span className="badge ok">NFT owner</span>
+              </div>
+            )}
+            {!connectedWalletIsOwner && copyListing && selectedPaymentToken && settlementToken && (
               <div className="item inft-copy-purchase">
                 <div className="item-title">
                   <div>
@@ -1032,7 +1052,6 @@ export default function INFTPage({ inft }: { inft: INFTRecord }) {
                   onPay={() => runPaidAction(INFT_COPY_OPERATION)}
                 />
                 {!isUsableEvmAddress(walletAddress) && <p className="subtle compact">Connect a wallet to purchase a copy.</p>}
-                {connectedWalletIsOwner && <p className="subtle compact">This wallet already owns the original INFT.</p>}
               </div>
             )}
             <div className="inft-action-picker" role="tablist" aria-label="INFT edit video actions">

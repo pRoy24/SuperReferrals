@@ -23,7 +23,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEven
 import BreadcrumbNav from "@/components/BreadcrumbNav";
 import LanguageSelector from "@/components/LanguageSelector";
 import { readStoredAppLanguage, subscribeAppLanguage } from "@/lib/app-language-client";
-import { DEFAULT_FEED_VIDEO_VOLUME, persistFeedVideoVolume, readFeedVideoVolume, subscribeFeedVideoVolume } from "@/lib/feed-video-preferences";
+import { DEFAULT_FEED_VIDEO_VOLUME, persistFeedVideoVolume, readFeedVideoVolume, subscribeFeedVideoHardwareVolumeSync, subscribeFeedVideoVolume } from "@/lib/feed-video-preferences";
 import { DEFAULT_APP_LANGUAGE } from "@/lib/localization";
 import { samsarAuthHeaders } from "@/lib/storefront-auth-client";
 import type { AppLanguageCode, PublicFeedItem } from "@/lib/types";
@@ -132,6 +132,8 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
     setVolume(nextVolume);
     setMuted(nextVolume === 0);
   }), []);
+
+  useEffect(() => subscribeFeedVideoHardwareVolumeSync(), []);
 
   useEffect(() => {
     initialSelectionApplied.current = false;
