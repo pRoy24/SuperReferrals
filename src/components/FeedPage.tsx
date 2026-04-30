@@ -553,7 +553,7 @@ export default function FeedPage({
     const target = event.target as HTMLElement;
     if (
       viewMode !== "desktop" ||
-      target.closest("a, button, input, textarea, select, .feed-minimal-ui, .feed-comment-drawer, .feed-assistant-popdown") ||
+      target.closest("a, button, input, textarea, select, .feed-video-frame, .feed-minimal-ui, .feed-comment-drawer, .feed-assistant-popdown") ||
       (event.pointerType === "mouse" && event.button !== 0)
     ) {
       return;
@@ -651,16 +651,37 @@ export default function FeedPage({
     setMuted(normalized === 0);
   }
 
-  function toggleVolumePanel(item: PublicFeedItem) {
+  function unmuteWithUsableVolume() {
+    if (volume > 0) {
+      setMuted(false);
+      return;
+    }
+    const normalized = persistFeedVideoVolume(DEFAULT_FEED_VIDEO_VOLUME);
+    setVolume(normalized);
+    setMuted(false);
+  }
+
+  function toggleMuted() {
+    setVolumePanelItemId(null);
+    if (muted || volume <= 0) {
+      unmuteWithUsableVolume();
+      return;
+    }
+    setMuted(true);
+  }
+
+  function toggleControlVolume(item: PublicFeedItem) {
     setControlsVisible(true);
     if (controlsHideTimer.current !== null) {
       window.clearTimeout(controlsHideTimer.current);
       controlsHideTimer.current = null;
     }
-    if (volumePanelItemId !== item.id && muted && volume > 0) {
-      setMuted(false);
-    }
     setVolumePanelItemId((current) => current === item.id ? null : item.id);
+    if (muted || volume <= 0) {
+      unmuteWithUsableVolume();
+      return;
+    }
+    setMuted(true);
   }
 
   function openFullscreen(item: PublicFeedItem) {
@@ -738,10 +759,7 @@ export default function FeedPage({
           <button className={`icon-toggle ${viewMode === "desktop" ? "active" : ""}`} onClick={() => setViewMode("desktop")} title="Desktop feed">
             <Monitor size={18} />
           </button>
-          <button className="icon-toggle" onClick={() => {
-            setVolumePanelItemId(null);
-            setMuted((value) => !value);
-          }} title={muted ? "Unmute" : "Mute"}>
+          <button className="icon-toggle" onClick={toggleMuted} title={muted ? "Unmute" : "Mute"}>
             {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
           </button>
           <button className="icon-toggle" onClick={() => setPlaying((value) => !value)} title={playing ? "Pause" : "Play"}>
@@ -816,7 +834,7 @@ export default function FeedPage({
                 controlsVisible={controlsVisible && index === activeIndex}
                 onSeek={(time) => seekVideo(item, time)}
                 onTogglePlay={() => setPlaying((value) => !value)}
-                onToggleVolumePanel={() => toggleVolumePanel(item)}
+                onToggleVolumePanel={() => toggleControlVolume(item)}
                 onVolume={changeVolume}
                 onFullscreen={() => openFullscreen(item)}
                 onComments={() => openComments(item)}
@@ -878,7 +896,7 @@ export default function FeedPage({
               volumeOpen={Boolean(activeItem && volumePanelItemId === activeItem.id)}
               onSeek={(time) => activeItem && seekVideo(activeItem, time)}
               onTogglePlay={() => setPlaying((value) => !value)}
-              onToggleVolumePanel={() => activeItem && toggleVolumePanel(activeItem)}
+              onToggleVolumePanel={() => activeItem && toggleControlVolume(activeItem)}
               onVolume={changeVolume}
               onFullscreen={() => activeItem && openFullscreen(activeItem)}
               onComments={() => openComments(activeItem)}
