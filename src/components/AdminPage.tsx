@@ -5,14 +5,20 @@ import {
   ArrowUp,
   BarChart3,
   EyeOff,
+  Film,
   GripVertical,
+  Home,
   Lock,
   RefreshCw,
   Save,
+  Store,
   Trash2
 } from "lucide-react";
-import { useMemo, useState, type DragEvent, type FormEvent } from "react";
-import type { PublicFeedItem, VideoAspectRatio } from "@/lib/types";
+import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
+import LanguageSelector from "@/components/LanguageSelector";
+import { readStoredAppLanguage, subscribeAppLanguage } from "@/lib/app-language-client";
+import { DEFAULT_APP_LANGUAGE, appLanguages, videoLanguageMatchesAppLanguage } from "@/lib/localization";
+import type { AppLanguageCode, PublicFeedItem, VideoAspectRatio } from "@/lib/types";
 
 type AdminAspectFilter = "all" | VideoAspectRatio;
 
@@ -50,11 +56,21 @@ export default function AdminPage() {
   const [draggedId, setDraggedId] = useState("");
   const [dragOverId, setDragOverId] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [appLanguage, setAppLanguage] = useState<AppLanguageCode>(DEFAULT_APP_LANGUAGE);
 
   const visibleItems = useMemo(
-    () => items.filter((item) => aspectFilter === "all" || item.aspectRatio === aspectFilter),
-    [aspectFilter, items]
+    () => items.filter((item) =>
+      videoLanguageMatchesAppLanguage(item.languageCode, appLanguage) &&
+      (aspectFilter === "all" || item.aspectRatio === aspectFilter)
+    ),
+    [appLanguage, aspectFilter, items]
   );
+  const languageLabel = appLanguages.find((language) => language.code === appLanguage)?.label || appLanguage.toUpperCase();
+
+  useEffect(() => {
+    setAppLanguage(readStoredAppLanguage() || DEFAULT_APP_LANGUAGE);
+    return subscribeAppLanguage(setAppLanguage);
+  }, []);
 
   async function loadDashboard(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
@@ -139,7 +155,7 @@ export default function AdminPage() {
     if (!sourceId || !targetId || sourceId === targetId) {
       return;
     }
-    setItems((current) => reorderWithinVisibleItems(current, aspectFilter, sourceId, targetId));
+    setItems((current) => reorderWithinVisibleItems(current, appLanguage, aspectFilter, sourceId, targetId));
     setDirty(true);
   }
 
@@ -169,6 +185,28 @@ export default function AdminPage() {
 
   return (
     <main className="admin-shell">
+      <header className="admin-topbar">
+        <a className="admin-brand-link" href="/">
+          <img alt="" aria-hidden="true" height={28} src="/favicon.svg" width={28} />
+          <span>SuperReferrals Admin</span>
+        </a>
+        <nav className="admin-nav" aria-label="Admin navigation">
+          <a className="btn" href="/">
+            <Home size={16} /> Landing
+          </a>
+          <a className="btn" href="/feed">
+            <Film size={16} /> Feed
+          </a>
+          <a className="btn" href="/storefronts">
+            <Store size={16} /> Storefronts
+          </a>
+          <a className="btn" href="/dashboard">
+            <Lock size={16} /> Console
+          </a>
+          <LanguageSelector />
+        </nav>
+      </header>
+
       <section className="admin-auth-panel">
         <div>
           <span className="eyebrow">Admin</span>
@@ -217,9 +255,9 @@ export default function AdminPage() {
           <div className="admin-feed-header">
             <div>
               <span className="eyebrow">Published Feed Order</span>
-              <h2>Drag videos into the order shown across feed surfaces.</h2>
+              <h2>Drag {languageLabel} videos into their feed order.</h2>
               <p className="subtle">
-                Language filtering still happens on each public surface; matching videos keep this saved order.
+                Only videos matching the current language selector appear here. Saving preserves the global order for other languages.
               </p>
             </div>
             <div className="admin-feed-actions">
@@ -247,7 +285,7 @@ export default function AdminPage() {
           </div>
 
           {visibleItems.length === 0 ? (
-            <div className="admin-empty">No published videos match this view.</div>
+            <div className="admin-empty">No published {languageLabel} videos match this view.</div>
           ) : (
             <div className="admin-mosaic-grid">
               {visibleItems.map((item, visibleIndex) => (
@@ -322,11 +360,15 @@ function AdminStat({ label, value }: { label: string; value: number }) {
 
 function reorderWithinVisibleItems(
   items: PublicFeedItem[],
+  appLanguage: AppLanguageCode,
   aspectFilter: AdminAspectFilter,
   sourceId: string,
   targetId: string
 ) {
-  const visibleItems = items.filter((item) => aspectFilter === "all" || item.aspectRatio === aspectFilter);
+  const visibleItems = items.filter((item) =>
+    videoLanguageMatchesAppLanguage(item.languageCode, appLanguage) &&
+    (aspectFilter === "all" || item.aspectRatio === aspectFilter)
+  );
   const sourceIndex = visibleItems.findIndex((item) => item.id === sourceId);
   const targetIndex = visibleItems.findIndex((item) => item.id === targetId);
   if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {

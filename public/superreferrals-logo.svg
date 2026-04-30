@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1189 240" role="img" aria-label="SuperReferrals logo">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1117 240" role="img" aria-label="SuperReferrals logo">
   <defs>
     <linearGradient id="superreferrals-logo-gradient" x1="32" y1="32" x2="208" y2="208" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#f97316" />
@@ -14,6 +14,6 @@
       <circle cx="4" cy="20" r="2" />
     </g>
   </g>
-  <text x="296" y="157" fill="#f97316" stroke="#f97316" stroke-width="1.6" stroke-linejoin="round" paint-order="stroke fill" font-family="Avenir Next, Avenir, Arial Black, Helvetica Neue, Arial, sans-serif" font-size="108" font-weight="900" letter-spacing="0">Super</text>
-  <text x="591" y="157" fill="#1d2534" stroke="#1d2534" stroke-width="1.6" stroke-linejoin="round" paint-order="stroke fill" font-family="Avenir Next, Avenir, Arial Black, Helvetica Neue, Arial, sans-serif" font-size="108" font-weight="900" letter-spacing="0">Referrals</text>
+  <text x="296" y="156" fill="#f97316" font-family="Space Grotesk, Avenir Next, Avenir, Helvetica Neue, Arial, sans-serif" font-size="108" font-weight="700" letter-spacing="0">Super</text>
+  <text x="590" y="156" fill="#1d2534" font-family="Space Grotesk, Avenir Next, Avenir, Helvetica Neue, Arial, sans-serif" font-size="108" font-weight="700" letter-spacing="0">Referrals</text>
 </svg>

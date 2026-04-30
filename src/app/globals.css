@@ -1454,6 +1454,45 @@ a:hover {
     linear-gradient(180deg, #f8fbff 0%, #fff7f8 58%, #f7fbff 100%);
 }
 
+.admin-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid rgba(31, 91, 160, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 46px rgba(31, 91, 160, 0.08);
+  padding: 12px 14px;
+}
+
+.admin-brand-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 900;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.admin-brand-link img {
+  border-radius: 8px;
+}
+
+.admin-nav {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.admin-nav .language-selector select {
+  min-height: 40px;
+}
+
 .admin-auth-panel,
 .admin-feed-panel {
   display: grid;
@@ -1689,6 +1728,24 @@ a:hover {
 @media (max-width: 760px) {
   .admin-shell {
     padding: 18px 14px 36px;
+  }
+
+  .admin-topbar {
+    display: grid;
+    gap: 12px;
+  }
+
+  .admin-nav {
+    justify-content: stretch;
+  }
+
+  .admin-nav .btn,
+  .admin-nav .language-selector {
+    flex: 1 1 140px;
+  }
+
+  .admin-nav .language-selector select {
+    width: 100%;
   }
 
   .admin-auth-panel,
