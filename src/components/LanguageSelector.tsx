@@ -5,6 +5,7 @@ import {
   applyDocumentAppLanguage,
   persistAppLanguage,
   persistAppLanguagePreference,
+  readRouteAppLanguage,
   readStoredAppLanguage
 } from "@/lib/app-language-client";
 import {
@@ -15,17 +16,31 @@ import {
 import { samsarAuthHeaders } from "@/lib/storefront-auth-client";
 import type { AppLanguageCode } from "@/lib/types";
 
-export default function LanguageSelector({ className = "" }: { className?: string }) {
-  const [language, setLanguage] = useState<AppLanguageCode>(DEFAULT_APP_LANGUAGE);
+export default function LanguageSelector({
+  className = "",
+  initialLanguage,
+  label = "Language"
+}: {
+  className?: string;
+  initialLanguage?: AppLanguageCode;
+  label?: string;
+}) {
+  const [language, setLanguage] = useState<AppLanguageCode>(
+    normalizeAppLanguage(initialLanguage) || DEFAULT_APP_LANGUAGE
+  );
   const [resolved, setResolved] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    const localLanguage = readStoredAppLanguage();
-    if (localLanguage) {
-      setLanguage(localLanguage);
-      applyDocumentAppLanguage(localLanguage);
-      persistAppLanguagePreference(localLanguage).catch(() => undefined);
+    const preferredLanguage = readRouteAppLanguage() || readStoredAppLanguage() || normalizeAppLanguage(initialLanguage);
+    if (preferredLanguage) {
+      setLanguage(preferredLanguage);
+      if (readRouteAppLanguage()) {
+        persistAppLanguage(preferredLanguage);
+      } else {
+        applyDocumentAppLanguage(preferredLanguage);
+      }
+      persistAppLanguagePreference(preferredLanguage).catch(() => undefined);
     }
 
     fetch("/api/localization", {
@@ -39,7 +54,7 @@ export default function LanguageSelector({ className = "" }: { className?: strin
           return;
         }
         const serverLanguage = normalizeAppLanguage(data.language) || DEFAULT_APP_LANGUAGE;
-        if (!localLanguage) {
+        if (!preferredLanguage) {
           setLanguage(serverLanguage);
           persistAppLanguage(serverLanguage);
           persistAppLanguagePreference(serverLanguage).catch(() => undefined);
@@ -55,7 +70,7 @@ export default function LanguageSelector({ className = "" }: { className?: strin
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialLanguage]);
 
   function selectLanguage(value: string) {
     const nextLanguage = normalizeAppLanguage(value);
@@ -70,9 +85,9 @@ export default function LanguageSelector({ className = "" }: { className?: strin
   return (
     <div className={`language-selector ${resolved ? "resolved" : ""} ${className}`.trim()}>
       <label>
-        <span className="sr-only">Language</span>
+        <span className="sr-only">{label}</span>
         <select
-          aria-label="Language"
+          aria-label={label}
           value={language}
           onChange={(event) => selectLanguage(event.target.value)}
         >

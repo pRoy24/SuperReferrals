@@ -686,7 +686,11 @@ a:hover {
 }
 
 .landing-two-row > div:first-child {
-  max-width: min(980px, 100%);
+  max-width: 100%;
+}
+
+.landing-two-row h2 {
+  max-width: none;
 }
 
 .value-list {

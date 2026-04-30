@@ -6,6 +6,7 @@ import {
 } from "@/lib/account-session";
 import { restoreConsoleCustomer } from "@/lib/console-auth";
 import {
+  appLanguageFromCookieHeader,
   appLanguageForCountryCode,
   countryCodeFromHeaders,
   normalizeAppLanguage
@@ -25,6 +26,7 @@ import type { Customer } from "@/lib/types";
 export async function GET(request: Request) {
   const countryCode = countryCodeFromHeaders(request.headers);
   const defaultLanguage = appLanguageForCountryCode(countryCode);
+  const cookieLanguage = appLanguageFromCookieHeader(request.headers.get("cookie"));
   const authCustomer = processorAuthTokenFromRequest(request)
     ? await restoreConsoleCustomer(request).catch(() => undefined)
     : undefined;
@@ -34,11 +36,12 @@ export async function GET(request: Request) {
   const persistedLanguage = normalizeAppLanguage(accountCustomer?.preferences?.language);
 
   return NextResponse.json({
-    language: persistedLanguage || defaultLanguage,
+    language: persistedLanguage || cookieLanguage || defaultLanguage,
     persistedLanguage,
+    cookieLanguage,
     defaultLanguage,
     countryCode: countryCode || null,
-    source: persistedLanguage ? "account" : countryCode ? "geo" : "default"
+    source: persistedLanguage ? "account" : cookieLanguage ? "cookie" : countryCode ? "geo" : "default"
   });
 }
 

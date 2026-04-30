@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import AppLanguageRouteSync from "@/components/AppLanguageRouteSync";
 import PageAssistant from "@/components/PageAssistant";
 import ProductionHackathonBanner from "@/components/ProductionHackathonBanner";
 import TextareaAutosizeInstaller from "@/components/TextareaAutosizeInstaller";
@@ -33,6 +34,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
+        <AppLanguageRouteSync />
         <TextareaAutosizeInstaller />
         <ProductionHackathonBanner
           enabled={deploymentEnvironment === "production"}

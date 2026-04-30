@@ -31,6 +31,7 @@ type VideoMosaicProps = {
   emptyText?: string;
   filterByLanguage?: boolean;
   getCreatorWallet?: (item: PublicFeedItem) => string | undefined;
+  labels?: Partial<VideoMosaicLabels>;
   limit?: number;
   maxRows?: 2 | 3;
   moreHref?: string;
@@ -40,6 +41,40 @@ type VideoMosaicProps = {
   showInftLink?: boolean;
 };
 
+export type VideoMosaicLabels = {
+  preparingLayout: string;
+  playVideo: string;
+  pauseVideo: string;
+  play: string;
+  pause: string;
+  volume: string;
+  fullScreen: string;
+  copyCreatorWallet: string;
+  openInft: string;
+  inft: string;
+  viewInFeed: string;
+  feed: string;
+  wallet: string;
+  seek: (title: string) => string;
+};
+
+const defaultVideoMosaicLabels: VideoMosaicLabels = {
+  preparingLayout: "Preparing video layout...",
+  playVideo: "Play video",
+  pauseVideo: "Pause video",
+  play: "Play",
+  pause: "Pause",
+  volume: "Volume",
+  fullScreen: "Full screen",
+  copyCreatorWallet: "Copy creator wallet",
+  openInft: "Open INFT",
+  inft: "INFT",
+  viewInFeed: "View in feed",
+  feed: "Feed",
+  wallet: "wallet",
+  seek: (title) => `Seek ${title}`
+};
+
 export default function VideoMosaic({
   actions,
   items,
@@ -47,6 +82,7 @@ export default function VideoMosaic({
   emptyText = "No published videos yet.",
   filterByLanguage = true,
   getCreatorWallet,
+  labels,
   limit,
   maxRows,
   moreHref = "/feed",
@@ -55,6 +91,7 @@ export default function VideoMosaic({
   showFeedLink = true,
   showInftLink = true
 }: VideoMosaicProps) {
+  const mosaicLabels = { ...defaultVideoMosaicLabels, ...labels };
   const [appLanguage, setAppLanguage] = useState<AppLanguageCode>(DEFAULT_APP_LANGUAGE);
   const languageItems = useMemo(
     () => filterByLanguage
@@ -281,7 +318,7 @@ export default function VideoMosaic({
   }
 
   if (aspectReadyItems.length === 0) {
-    return <div className={`video-mosaic-empty ${className}`.trim()}>Preparing video layout...</div>;
+    return <div className={`video-mosaic-empty ${className}`.trim()}>{mosaicLabels.preparingLayout}</div>;
   }
 
   return (
@@ -350,7 +387,7 @@ export default function VideoMosaic({
                     event.stopPropagation();
                     togglePlayback(item);
                   }}
-                  title={isActive ? "Pause video" : "Play video"}
+                  title={isActive ? mosaicLabels.pauseVideo : mosaicLabels.playVideo}
                   type="button"
                 >
                   {isActive ? <Pause size={22} /> : <Play size={22} />}
@@ -362,42 +399,44 @@ export default function VideoMosaic({
                   <strong>{item.title}</strong>
                   <small>{item.videoModel} · {item.aspectRatio}</small>
                   {creatorWallet && (
-                    <button className="video-mosaic-wallet" onClick={() => copyWallet(item, creatorWallet)} title="Copy creator wallet" type="button">
-                      <span>{shortWallet(creatorWallet)}</span>
+                    <button className="video-mosaic-wallet" onClick={() => copyWallet(item, creatorWallet)} title={mosaicLabels.copyCreatorWallet} type="button">
+                      <span>{shortWallet(creatorWallet, mosaicLabels.wallet)}</span>
                       {copiedWalletId === item.id ? <Check size={13} /> : <Copy size={13} />}
                     </button>
                   )}
                 </div>
                 <div className="video-mosaic-controls">
-                  <button className="video-mosaic-icon" onClick={() => togglePlayback(item)} title={isActive ? "Pause" : "Play"} type="button">
+                  <button className="video-mosaic-icon" onClick={() => togglePlayback(item)} title={isActive ? mosaicLabels.pause : mosaicLabels.play} type="button">
                     {isActive ? <Pause size={16} /> : <Play size={16} />}
                   </button>
                   <VideoMosaicVolumeControl
+                    label={mosaicLabels.volume}
                     muted={muted}
                     open={volumePanelItemId === item.id}
                     onToggle={() => toggleVolumePanel(item)}
                     onVolume={(value) => changeVolume(item, value)}
                     value={volume}
                   />
-                  <button className="video-mosaic-icon" onClick={() => openFullscreen(item)} title="Full screen" type="button">
+                  <button className="video-mosaic-icon" onClick={() => openFullscreen(item)} title={mosaicLabels.fullScreen} type="button">
                     <Maximize2 size={16} />
                   </button>
                   <VideoMosaicScrubber
                     item={item}
                     progress={videoProgressById[item.id]}
                     onSeek={(time) => seekVideo(item, time)}
+                    seekLabel={mosaicLabels.seek}
                   />
                   {actions && <div className="video-mosaic-actions">{actions(item)}</div>}
                   {(shouldShowInftLink || shouldShowFeedLink) && (
                     <div className="video-mosaic-link-row">
                       {shouldShowInftLink && (
-                        <a className="video-mosaic-feed-link" href={`/inft/${item.inftId}`} title="Open INFT">
-                          <ExternalLink size={16} /> INFT
+                        <a className="video-mosaic-feed-link" href={`/inft/${item.inftId}`} title={mosaicLabels.openInft}>
+                          <ExternalLink size={16} /> {mosaicLabels.inft}
                         </a>
                       )}
                       {shouldShowFeedLink && (
-                        <a className="video-mosaic-feed-link" href={feedHrefForItem(item)} title="View in feed">
-                          <ExternalLink size={16} /> Feed
+                        <a className="video-mosaic-feed-link" href={feedHrefForItem(item)} title={mosaicLabels.viewInFeed}>
+                          <ExternalLink size={16} /> {mosaicLabels.feed}
                         </a>
                       )}
                     </div>
@@ -421,12 +460,14 @@ export default function VideoMosaic({
 }
 
 function VideoMosaicVolumeControl({
+  label,
   muted,
   open,
   onToggle,
   onVolume,
   value
 }: {
+  label: string;
   muted: boolean;
   open: boolean;
   onToggle: () => void;
@@ -440,18 +481,18 @@ function VideoMosaicVolumeControl({
     <div className={`video-mosaic-volume-control ${open ? "open" : ""}`}>
       <button
         aria-expanded={open}
-        aria-label="Volume"
+        aria-label={label}
         className="video-mosaic-icon"
         onClick={onToggle}
-        title="Volume"
+        title={label}
         type="button"
       >
         {muted || value === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
       </button>
       {open && (
-        <label className="video-mosaic-volume-popover" title="Volume">
+        <label className="video-mosaic-volume-popover" title={label}>
           <input
-            aria-label="Volume"
+            aria-label={label}
             aria-orientation="vertical"
             className="video-mosaic-volume-slider"
             max="100"
@@ -470,11 +511,13 @@ function VideoMosaicVolumeControl({
 function VideoMosaicScrubber({
   item,
   progress,
-  onSeek
+  onSeek,
+  seekLabel
 }: {
   item: PublicFeedItem;
   progress?: VideoMosaicProgress;
   onSeek: (time: number) => void;
+  seekLabel: (title: string) => string;
 }) {
   const duration = progress?.duration || 0;
   const currentTime = duration > 0 ? Math.min(progress?.currentTime || 0, duration) : 0;
@@ -484,7 +527,7 @@ function VideoMosaicScrubber({
   return (
     <div className="video-mosaic-scrubber" onClick={(event) => event.stopPropagation()}>
       <input
-        aria-label={`Seek ${item.title}`}
+        aria-label={seekLabel(item.title)}
         disabled={duration <= 0}
         max={duration || 0}
         min="0"
@@ -523,10 +566,10 @@ function getMosaicRowSpan(aspectRatio: MosaicAspectRatio, columnSpan: number, la
   return Math.max(1, Math.ceil((tileHeight + layout.gap) / (layout.rowHeight + layout.gap)));
 }
 
-function shortWallet(value = "") {
+function shortWallet(value = "", fallback = "wallet") {
   const trimmed = value.trim();
   if (trimmed.length <= 12) {
-    return trimmed || "wallet";
+    return trimmed || fallback;
   }
   return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`;
 }

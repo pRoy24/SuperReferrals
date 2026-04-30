@@ -72,6 +72,8 @@ const WHEEL_SEEK_PIXELS_PER_SECOND = 42;
 const MAX_WHEEL_SEEK_SECONDS = 12;
 const DESKTOP_SWIPE_NAV_THRESHOLD = 82;
 const DESKTOP_SWIPE_NAV_LOCK_MS = 620;
+const PRELOAD_READY_STATE = 2; // HAVE_CURRENT_DATA
+const PRELOAD_NETWORK_LOADING_STATE = 2; // NETWORK_LOADING
 
 export default function FeedPage({ initialGenerationId = "", initialViewMode }: FeedPageProps = {}) {
   const [items, setItems] = useState<PublicFeedItem[]>([]);
@@ -111,6 +113,10 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
     [items, viewMode]
   );
   const activeItem = visibleItems[activeIndex] || visibleItems[0];
+  const activeVisibleIndex = activeItem ? visibleItems.findIndex((item) => item.id === activeItem.id) : -1;
+  const nextPreloadItem = activeVisibleIndex >= 0 && visibleItems.length > 1
+    ? visibleItems[(activeVisibleIndex + 1) % visibleItems.length]
+    : undefined;
   const commentItem = commentItemId ? visibleItems.find((item) => item.id === commentItemId) : undefined;
   const emptyFormatLabel = viewMode === "desktop" ? "landscape" : "portrait";
 
@@ -189,6 +195,16 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
       }
     }
   }, [activeItem?.id, muted, playing, volume, items, viewMode]);
+
+  useEffect(() => {
+    if (!activeItem || activeVisibleIndex < 0 || visibleItems.length < 2) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      preloadFeedVideo(activeVisibleIndex + 1);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeItem?.id, activeVisibleIndex, visibleItems]);
 
   useEffect(() => {
     if (viewMode !== "mobile") {
@@ -381,6 +397,26 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
         card?.scrollIntoView({ behavior, block: "start" });
       });
     }
+  }
+
+  function preloadFeedVideo(index: number) {
+    if (visibleItems.length < 2) {
+      return;
+    }
+    const targetIndex = (index + visibleItems.length) % visibleItems.length;
+    const targetItem = visibleItems[targetIndex];
+    if (!targetItem || targetItem.id === activeItem?.id) {
+      return;
+    }
+    const video = videoRefs.current[targetItem.id];
+    if (!video) {
+      return;
+    }
+    video.preload = "auto";
+    if (video.readyState >= PRELOAD_READY_STATE || video.networkState === PRELOAD_NETWORK_LOADING_STATE) {
+      return;
+    }
+    video.load();
   }
 
   function handleVideoProgress(id: string, video: HTMLVideoElement) {
@@ -730,7 +766,18 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
                 mobileCardRefs.current[item.id] = node;
               }}
             >
-              <FeedVideo item={item} active={index === activeIndex} muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => selectItem(index + 1)} onProgress={handleVideoProgress} onPlayStateChange={setPlaying} />
+              <FeedVideo
+                item={item}
+                active={index === activeIndex}
+                muted={muted}
+                playing={playing}
+                preloadAhead={item.id === nextPreloadItem?.id}
+                videoRefs={videoRefs}
+                onEnded={() => selectItem(index + 1)}
+                onProgress={handleVideoProgress}
+                onPlayStateChange={setPlaying}
+                onReadyToPreloadNext={() => preloadFeedVideo(index + 1)}
+              />
               <MobileOverlay
                 item={item}
                 muted={muted}
@@ -775,7 +822,18 @@ export default function FeedPage({ initialGenerationId = "", initialViewMode }: 
                 className={`desktop-feed-card ${index === activeIndex ? "active" : ""}`}
                 key={item.id}
               >
-                <FeedVideo item={item} active={index === activeIndex} muted={muted} playing={playing} videoRefs={videoRefs} onEnded={() => selectItem(index + 1)} onProgress={handleVideoProgress} onPlayStateChange={setPlaying} />
+                <FeedVideo
+                  item={item}
+                  active={index === activeIndex}
+                  muted={muted}
+                  playing={playing}
+                  preloadAhead={item.id === nextPreloadItem?.id}
+                  videoRefs={videoRefs}
+                  onEnded={() => selectItem(index + 1)}
+                  onProgress={handleVideoProgress}
+                  onPlayStateChange={setPlaying}
+                  onReadyToPreloadNext={() => preloadFeedVideo(index + 1)}
+                />
               </article>
             ))}
             <DesktopStepNavigation
@@ -983,19 +1041,23 @@ function FeedVideo({
   active,
   muted,
   playing,
+  preloadAhead,
   videoRefs,
   onEnded,
   onProgress,
-  onPlayStateChange
+  onPlayStateChange,
+  onReadyToPreloadNext
 }: {
   item: PublicFeedItem;
   active: boolean;
   muted: boolean;
   playing: boolean;
+  preloadAhead: boolean;
   videoRefs: RefObject<Record<string, HTMLVideoElement | null>>;
   onEnded: () => void;
   onProgress: (id: string, video: HTMLVideoElement) => void;
   onPlayStateChange: (nextPlaying: boolean) => void;
+  onReadyToPreloadNext: () => void;
 }) {
   const ratio = feedAspectRatioStyle(item);
   const frameRef = useRef<HTMLDivElement | null>(null);
@@ -1036,6 +1098,13 @@ function FeedVideo({
 
   function revealVideoFrame() {
     setPosterVisible(false);
+  }
+
+  function handleVideoLoaded(video: HTMLVideoElement) {
+    onProgress(item.id, video);
+    if (active) {
+      onReadyToPreloadNext();
+    }
   }
 
   function handleVideoPointerDown(event: PointerEvent<HTMLVideoElement>) {
@@ -1090,13 +1159,14 @@ function FeedVideo({
         muted={muted}
         loop={false}
         playsInline
-        preload={active ? "auto" : "metadata"}
+        preload={active || preloadAhead ? "auto" : "metadata"}
         autoPlay={active && playing}
         width={item.aspectRatio === "9:16" ? 9 : 16}
-        onCanPlay={(event) => onProgress(item.id, event.currentTarget)}
+        onCanPlay={(event) => handleVideoLoaded(event.currentTarget)}
         onClick={handleVideoClick}
         onDurationChange={(event) => onProgress(item.id, event.currentTarget)}
         onEnded={onEnded}
+        onLoadedData={(event) => handleVideoLoaded(event.currentTarget)}
         onLoadedMetadata={(event) => onProgress(item.id, event.currentTarget)}
         onPointerDown={handleVideoPointerDown}
         onPlaying={revealVideoFrame}

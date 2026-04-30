@@ -2,6 +2,7 @@ import type { AppLanguageCode } from "./types";
 import { resolveRenditionLanguageCode } from "./rendition-language";
 
 export const APP_LANGUAGE_STORAGE_KEY = "superreferrals:language";
+export const APP_LANGUAGE_COOKIE_NAME = "superreferrals_language";
 export const DEFAULT_APP_LANGUAGE: AppLanguageCode = "en";
 
 export const appLanguages: Array<{
@@ -10,7 +11,7 @@ export const appLanguages: Array<{
   htmlLang: string;
 }> = [
   { code: "en", label: "English", htmlLang: "en" },
-  { code: "zh", label: "Chinese (Simplified)", htmlLang: "zh-CN" }
+  { code: "zh", label: "简体中文", htmlLang: "zh-CN" }
 ];
 
 const chinaRegionCountryCodes = new Set(["CN", "HK", "MO", "TW"]);
@@ -25,6 +26,25 @@ export function normalizeAppLanguage(value: unknown): AppLanguageCode | undefine
   }
   if (["cn", "zh", "zh-cn", "zh-hans", "zh-hant", "chinese"].includes(normalized)) {
     return "zh";
+  }
+  return undefined;
+}
+
+export function appLanguageFromCookieHeader(cookieHeader?: string | null): AppLanguageCode | undefined {
+  if (!cookieHeader) {
+    return undefined;
+  }
+  for (const part of cookieHeader.split(";")) {
+    const [rawName, ...rawValueParts] = part.trim().split("=");
+    if (rawName !== APP_LANGUAGE_COOKIE_NAME) {
+      continue;
+    }
+    const rawValue = rawValueParts.join("=");
+    try {
+      return normalizeAppLanguage(decodeURIComponent(rawValue));
+    } catch {
+      return normalizeAppLanguage(rawValue);
+    }
   }
   return undefined;
 }

@@ -1,236 +1,355 @@
 # SuperReferrals
 
-Turn referral links into product marketing videos.
+<p align="center">
+  <img src="public/superreferrals-logo.png" alt="SuperReferrals" width="290" />
+</p>
 
-SuperReferrals helps product teams and creators turn a plain referral URL into a guided campaign page with product images, product details, video generation, CTA actions, and shareable output.
+<p align="center">
+  <strong>Turn referral links into videos that convert.</strong>
+</p>
 
-Instead of sending buyers through a bare tracking URL, a creator shares a page that explains the product, shows the offer, and can generate a tailored marketing video before or after purchase. Customers get enough context to feel good about the recommendation, while referrers and brands get reusable product media instead of another passive link.
+<p align="center">
+  Give every recommendation a product story, visual style, QR-ready call to action, and editable onchain video record.
+</p>
 
-Built for the ETHGlobal Open Agents hackathon, SuperReferrals focuses on practical referral commerce: connect product data, generate campaign videos, route users through a branded referral experience, and keep the operational workflow auditable.
+<p align="center">
+  <a href="https://super-referrals-git-develop-proy24s-projects.vercel.app/">Live staging</a>
+  · <a href="#quick-tour">Quick tour</a>
+  · <a href="#view-map">View map</a>
+  · <a href="#run-locally">Run locally</a>
+  · <a href="docs/ARCHITECTURE.md">Architecture</a>
+</p>
 
-## ETHGlobal Hackathon Judging
+![SuperReferrals live landing page](docs/screenshots/staging-landing.png)
 
-For hackathon testing and judging, use the staging website:
+SuperReferrals replaces bare tracking links with product video storefronts. A storefront owner configures products, models, pricing, wallet rules, and render policies. A creator or buyer opens a referral route, connects a wallet, pays the storefront price, generates a product video, and receives a public iNFT record that can be shared, copied, translated, edited, or audited.
 
-[https://super-referrals-git-develop-proy24s-projects.vercel.app](https://super-referrals-git-develop-proy24s-projects.vercel.app)
+The app is built for crypto-native referral commerce: catalog-driven videos, storefront-controlled pricing, 0G storage and compute, KeeperHub payment settlement, Uniswap swap support, Samsar video generation, and public feed discovery.
 
-## Unique Offering
+## Live Staging
 
-- Product/admin integration: plug into merchant dashboards, catalog systems, or admin frameworks to pull product images, descriptions, price points, CTA URLs, and campaign metadata.
-- Flexible video styles: generate natural explainers, fast-paced launch ads, anime promos, futuristic edits, product walkthroughs, or brand-specific creative variants.
-- Customer-friendly referral pages: buyers see the product story and creator context instead of landing on an opaque tracking URL.
-- Creator-ready campaigns: referrers promote with useful product media, not just a code or link.
-- Reusable output: generated videos can be viewed, shared, and reused as campaign assets.
+Use this deployment for hackathon review and product testing:
 
-## What To Review
+[https://super-referrals-git-develop-proy24s-projects.vercel.app/](https://super-referrals-git-develop-proy24s-projects.vercel.app/)
 
-- `/`: product landing page with entry points into the demo surfaces.
-- `/dashboard`: customer console for store setup, pricing, campaign automation, render history, and Samsar Processor credits.
-- `/r/:referrerCode`: public user referral page for wallet connection, ETH/USDC payment, image-to-video generation, and prior renders.
-- `/feed`: public feed for generated referral videos.
-- `/inft/:id`: public output page with video playback, attribution, assistant actions, and share/download actions.
-- `Agent Town`: campaign automation console for planning, pricing, settlement, rollback, and media operations.
+The current staging deployment includes a demo storefront, a referral route, completed renders, public feed items, and iNFT pages. Read-only review works without a wallet. Rendering, copy purchases, and paid edits require a browser wallet on the configured payment network and must satisfy the storefront's wallet access policy.
+
+Screenshots in this README were captured from live staging on 2026-04-30.
+
+## What It Is
+
+SuperReferrals is three products in one:
+
+| Audience | What they get |
+| --- | --- |
+| Storefront owners | A console to publish video storefronts, buy credits, link payout wallets, set render rules, choose models, price videos and iNFT actions, and inspect render/agent history. |
+| Creators and buyers | A clean referral page where they connect a wallet, build a product video from images, catalog metadata, prompts, CTAs, and language settings, then pay and track the render. |
+| Hackathon judges and developers | A full-stack demo of product referral commerce across Next.js, Samsar video generation, EVM payments, 0G storage/compute, iNFT records, assistant UX, and agent receipts. |
+
+## Quick Tour
+
+### 1. Start From A Storefront
+
+The storefront directory lets users browse created storefronts, compare model limits and pricing, then open the storefront that matches their render needs.
+
+![Live storefront directory](docs/screenshots/staging-storefront-directory.png)
+
+### 2. Generate A Product Video
+
+The public creator page supports wallet connection, storefront pricing, simple wizard mode, advanced JSON mode, image uploads, metadata, prompts, language selection, CTA outro/footer options, feed publishing, and copy-purchase settings.
+
+![Live product video creator](docs/screenshots/staging-video-creator.png)
+
+### 3. Browse The Video Feed
+
+The feed is a public discovery surface for completed renders. It supports mobile and desktop layouts, deep links to specific renders, language-aware filtering, views, likes, comments, share links, and a page assistant.
+
+![Live video feed](docs/screenshots/staging-feed.png)
+
+### 4. Inspect And Operate On The iNFT
+
+Every completed render can become a public iNFT page with playback, ownership metadata, 0G persistence records, share actions, copy purchase, and paid edit operations such as retranslation, subtitle updates, outro updates, and footer updates.
+
+![Live iNFT viewer](docs/screenshots/staging-inft-viewer.png)
+
+### 5. Manage The Storefront
+
+The owner console is where storefront owners purchase credits, connect their owner wallet, configure public storefront details, set USDC pricing, control model/aspect/image limits, manage wallet allowlists, review videos, run Agent Town, and inspect render history.
+
+![Live storefront owner console](docs/screenshots/staging-owner-console.png)
 
 ## Core Flow
 
-1. A customer configures a public referral page, product context, pricing, wallet, currency, refund policy, and render API access from `/dashboard`.
-2. The customer publishes the storefront route.
-3. A creator or buyer opens the referral page and connects a wallet.
-4. The app creates or reuses an internal wallet user record for that customer/referrer route; the public user does not need a Samsar JS account or subaccount.
-5. The user submits or reuses product image URLs, product metadata, CTA URL, prompt, model, style, and aspect ratio.
-6. The app quotes ETH or USDC payment on the configured network, verifies the mined transaction, and starts the render with the configured Samsar API key.
-7. Samsar generates the video.
-8. Completion saves the video metadata, creates the public output record, and exposes the generated campaign asset.
-9. The public output page exposes the video, attribution, campaign metadata, and post-render actions.
+1. A storefront owner opens `/dashboard`, signs in or buys credits, connects an owner wallet, and publishes a storefront.
+2. The owner chooses allowed video models, aspect ratios, max images, wallet access mode, daily limits, and pricing.
+3. A creator opens `/storefronts`, `/storefronts/:customerId`, or `/r/:referrerCode`.
+4. The creator connects a wallet and creates a render from product images, listing metadata, prompt direction, CTA URL, language, and publish settings.
+5. The app quotes payment in the selected token and verifies the mined transaction before starting the render.
+6. Samsar generates the video, SuperReferrals stores render metadata, and 0G persistence/iNFT records make the result auditable.
+7. The completed video appears on the creator's storefront history, the public feed if published, and `/inft/:id`.
+8. Owners or purchasers can run paid iNFT operations: translate, join, add/remove subtitles, add/update outro, and update footer.
 
-## Product Data And Creative Styles
+## View Map
 
-SuperReferrals is designed to sit next to existing merchant/admin tooling. A production integration can pull:
+| View | Route | What it does |
+| --- | --- | --- |
+| Landing page | `/` | Explains the product, shows the campaign flow, links to the console, storefront directory, feed, and latest video, and embeds the page assistant. |
+| Storefront owner console | `/dashboard` | Storefront setup, Samsar account/credit purchase, owner wallet linking, public pricing, model rules, allowlists, published videos, Agent Town, and render history. |
+| Storefront directory | `/storefronts` | Lists public storefronts with pricing, render limits, wallet policy, rating summary, render count, route links, and open-store actions. |
+| Storefront creator | `/storefronts/:customerId` | Direct public storefront page for creating product videos and iNFTs from a selected customer storefront. |
+| Referral creator | `/r/:referrerCode` | Referral-specific creator route with the same generation workflow plus referrer attribution. |
+| Public feed | `/feed` | Public video gallery with mobile/desktop modes, search, language filtering, playback controls, likes, comments, and assistant. |
+| Focused feed item | `/feed/:generationId` | Opens the feed focused on one generation. |
+| Focused feed mode | `/feed/:generationId/:viewMode` | Opens one generation in `mobile` or `desktop` feed mode. |
+| iNFT viewer | `/inft/:id` | Public render ownership page with video playback, owner-gated download, copy purchase, paid edit actions, AXL peer message, 0G persistence, metadata, and sharing. |
+| Admin dashboard | `/admin` | Secret-protected feed operations: analytics, language/aspect filters, drag reorder, unpublish, and delete. |
+| Payment success | `/payment_success` | Handles credit checkout completion and redirects back to the owner console when credits are ready. |
+| Payment cancelled | `/payment_cancel` | Confirms checkout cancellation and routes the user back to the console. |
+| Samsar callback | `/samsar/callback` | Receives Samsar account connection credentials and returns the owner to the console. |
 
-- Product images and alternate media.
-- Names, descriptions, variants, prices, tags, and availability.
-- Brand voice, campaign copy, CTA URLs, and referrer metadata.
-- Creative presets such as natural demo, fast-paced launch, anime, futuristic, luxury, educational, or UGC-style explainers.
+## Why It Matters
 
-## Technical Network Notes
+- Referral links become useful media, not opaque redirects.
+- Product pages can pull catalog data once and reuse it across campaigns.
+- Storefront owners keep control of model menus, prices, accepted wallets, render limits, and iNFT operation prices.
+- Buyers get context before they purchase or share.
+- Creators get reusable videos, QR-ready CTAs, public gallery placement, and editable iNFT ownership.
+- Judges can inspect a complete cross-system workflow: payments, generation, storage, onchain records, assistant UX, and agent orchestration.
 
-Staging uses 0G staging/Galileo and Ethereum Sepolia.
+## Product Capabilities
 
-- Payment chain: Ethereum Sepolia, `TRANSACTION_CHAIN_ID=11155111`.
-- Sepolia USDC: `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`.
-- 0G chain: Galileo, `OG_CHAIN_ID=16602`.
-- 0G RPC: `https://evmrpc-testnet.0g.ai`.
-- 0G Storage indexer: `https://indexer-storage-testnet-turbo.0g.ai`.
+| Capability | Details |
+| --- | --- |
+| Catalog-ready generation | Product images, scene text, campaign metadata, listing details, CTA URLs, logo URLs, and feed tags can be composed into each render. |
+| Simple and advanced creation | The simple wizard is optimized for storefront users. Advanced JSON exposes the assembled SuperReferrals generation payload. |
+| Model and policy control | Storefronts can enable specific models, aspect ratios, max image counts, daily wallet limits, and whitelist-only access. |
+| Payment rails | Direct token transfers, KeeperHub settlement paths, and Uniswap-assisted swaps are supported through quote and verification APIs. |
+| iNFT lifecycle | Completed videos can be copied, translated, joined, subtitled, and updated while preserving lineage and ownership context. |
+| Public discovery | Published renders appear in the feed with view, like, comment, language, and aspect-mode behavior. |
+| Page assistant | Landing, storefront, feed, and iNFT views include a contextual assistant backed by 0G compute. |
+| Agent Town | The owner console can run a multi-agent workflow with 0G receipts, KeeperHub settlement context, AXL messages, and rollback controls. |
 
-Mainnet uses 0G mainnet plus Ethereum mainnet and Base mainnet payment deployments.
+## For Hackathon Judges
 
-- Default payment chain: Ethereum mainnet, `TRANSACTION_NETWORK=mainnet`, `TRANSACTION_CHAIN_ID=1`.
-- Optional Base payment chain: `TRANSACTION_NETWORK=base`, `TRANSACTION_CHAIN_ID=8453`.
-- Base USDC: `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`.
-- 0G chain: mainnet, `OG_CHAIN_ID=16661`.
-- 0G RPC: `https://evmrpc.0g.ai`.
-- 0G Storage indexer: `https://indexer-storage-turbo.0g.ai`.
+Suggested review path:
 
-Important runtime guardrails:
+1. Open the [live staging landing page](https://super-referrals-git-develop-proy24s-projects.vercel.app/).
+2. Open `/storefronts` and inspect the demo storefront policy and pricing.
+3. Open `/r/ref-98cbb24f14` to see the wallet-based video creation flow.
+4. Open `/feed` or `/feed/gen_7193267ac75f4cb8b8/desktop` to review public video discovery.
+5. Open `/inft/gen_48ee3d15c3354dc0bf` to inspect iNFT ownership, 0G persistence, and paid edit controls.
+6. Open `/dashboard` to review the owner console and how storefronts are configured.
 
-- Non-production runtime maps Ethereum mainnet and Base mainnet transaction configs back to Sepolia unless `NODE_ENV=production` and `DEPLOYMENT_ENV=production`.
-- `pricing.chainId` on the customer account is the source of truth for render payment quotes.
-- Renders do not start until the server verifies payment sender, recipient, chain, token, and amount.
-- `ALLOW_MOCK_RENDER_PAYMENT=true` is only for local demos.
-- 0G records, INFT minting, and agent registry use the configured 0G network, not the payment network.
-- Completed public INFT pages recover from the configured INFT collection and 0G token metadata when the server runtime index is missing. Keep `INFT_CONTRACT_ADDRESS`, `INFT_RPC_URL`, and `OG_STORAGE_INDEXER_RPC` configured in staging and production.
-- Live ETH-to-USDC render payments require KeeperHub platform wallet and payment workflow configuration; the app quotes a buffered ETH amount and KeeperHub settles the storefront's USDC amount to the merchant payout wallet.
+What to look for:
 
-## Local Run
+- Referral commerce flow from storefront setup to public generation page.
+- Storefront-defined pricing, model constraints, and wallet access controls.
+- Payment-before-render guardrails.
+- Completed video feed and iNFT ownership pages.
+- 0G storage/compute positioning, KeeperHub settlement path, and agent receipt design.
+- Clear separation between storefront owner tools and public creator/user tools.
 
-Install note: `package.json` uses the published `samsar-js` package. Run `npm install` to install the locked client version.
+## For Storefront Owners
+
+Use `/dashboard` to:
+
+- Buy or refresh Samsar-backed SuperReferrals credits.
+- Connect the owner payout wallet.
+- Create multiple storefronts under one account.
+- Set public name, category, tags, support email, website, ENS name, and referral base URL.
+- Configure render pricing through model-specific USDC-per-second settings.
+- Price iNFT actions such as translate, join, subtitles, outro, and footer updates.
+- Restrict render access by model, aspect ratio, max images, daily wallet limit, and wallet allowlist.
+- Publish a storefront into `/storefronts`.
+- Review generated videos, publish/unpublish them, and inspect recent render tasks.
+- Run Agent Town for agent-planned campaign operations and 0G receipts.
+
+## For Creators And Users
+
+Use `/storefronts` or a referral route to:
+
+- Choose a storefront.
+- Connect a browser wallet.
+- Build a video with product images, scene titles, scene text, metadata, prompt direction, language, subtitles, and CTA assets.
+- Choose portrait or landscape output when allowed by the storefront.
+- Get a quote, pay with the selected token, and start the render only after payment is verified.
+- Track render status on the page.
+- Publish to the feed or keep the video private to the storefront/user history.
+- Rate the storefront after a render or iNFT operation.
+- Open the final `/inft/:id` page to share, copy, or run paid edits.
+
+## For Developers
+
+SuperReferrals is a Next.js app using the App Router, React client components, local or Redis-backed mutable state, Samsar video APIs, EVM wallet flows, 0G services, and Solidity contracts.
+
+### Stack
+
+| Layer | Implementation |
+| --- | --- |
+| Web app | Next.js, React, TypeScript, and global CSS in `src/app/globals.css` |
+| Video generation | `samsar-js` processor APIs |
+| Payments | EVM wallet transactions, USDC/ETH/WETH/USDT token support, KeeperHub, Uniswap quote/swap helpers |
+| Storage and AI | 0G chain, 0G storage, 0G DA, 0G compute |
+| Contracts | Hardhat plus Solidity contracts in `contracts/` |
+| App state | Local `.superreferrals/*.json` in development or Vercel KV/Upstash Redis in deployed runtimes |
+
+### Important Source Areas
+
+| Path | Purpose |
+| --- | --- |
+| `src/app/page.tsx` | Landing page data loader. |
+| `src/components/LandingPageClient.tsx` | Futuristic landing page UI and route launcher. |
+| `src/components/Dashboard.tsx` | Storefront owner console. |
+| `src/components/UserLandingPage.tsx` | Public storefront/referral creator workflow. |
+| `src/components/StorefrontDirectory.tsx` | Public storefront marketplace. |
+| `src/components/FeedPage.tsx` | Public video feed and social actions. |
+| `src/components/INFTPage.tsx` | iNFT playback, paid actions, metadata, and sharing. |
+| `src/components/AdminPage.tsx` | Admin feed controls and analytics. |
+| `src/components/PageAssistant.tsx` | Page-aware assistant UI. |
+| `src/lib/pricing.ts` | Model pricing, render limits, and iNFT action prices. |
+| `src/lib/payment-verification.ts` | Payment verification before render execution. |
+| `src/lib/zero-g.ts`, `src/lib/zero-g-chain.ts` | 0G storage/chain helpers. |
+| `src/lib/agent-framework.ts` | Agent Town plan, receipts, settlement context, and AXL timeline. |
+
+## Run Locally
+
+Install dependencies:
 
 ```bash
 npm install
+```
+
+Create a local env file:
+
+```bash
 cp .env.example .env.local
+```
+
+Run the app:
+
+```bash
 npm run dev
 ```
 
 Open `http://localhost:3000`.
 
-For a no-key demo, keep the global mock switch on:
+For a no-key local demo, keep mocks enabled:
 
 ```bash
 SUPERREFERRALS_MOCKS=true
 ```
 
-For staging with live Samsar, KeeperHub Sepolia payments, 0G Galileo records, and live 0G Compute:
+For staging-like live providers:
 
 ```bash
 cp .env.staging.example .env.local
 ```
 
-For production:
+For production-like live providers:
 
 ```bash
 cp .env.production.example .env.local
 ```
 
-Use private RPC providers for production reliability.
-
-Local development uses `.superreferrals/data.json` and `.superreferrals/kv.json` by default when Redis env vars are absent. Keep `SUPERREFERRALS_STORE_BACKEND=auto` unless you deliberately want to force `redis` or `file`. Vercel KV/Upstash env vars are normally injected by the deploy setup. Only put `KV_REST_API_URL` and `KV_REST_API_TOKEN` in a local env file when deliberately running against local or manually managed Redis.
-
-0G Compute does not require endpoint, model, or API-key env vars. The server uses the 0G serving broker with the deployed platform signer from `OG_PRIVATE_KEY` by default, discovers live inference providers, and selects the top documented chatbot model for the current 0G environment: `qwen-2.5-7b-instruct` on Galileo/testnet and `GLM-5-FP8` on mainnet. Set `OG_COMPUTE_PRIVATE_KEY` only when assistant compute should use a separate platform-funded wallet. If the platform wallet is funded with a specific provider, set `OG_COMPUTE_PROVIDER_ADDRESS`. On testnet, `OG_COMPUTE_AUTO_FUND` defaults on and will initialize the 0G Compute ledger and provider sub-account from the platform wallet when the selected provider has no sub-account yet. The default provider sub-account transfer is `0.1` 0G.
+Useful checks:
 
 ```bash
-cp .env.production.example .env.local
+npm run typecheck
+npm run build
+npm run contracts:compile
 ```
 
-## Vercel Environment Sync
+## Environment Notes
 
-The Vercel project is `proy24s-projects/super-referrals`. Keep deploy credentials out of app env files:
+The app defaults to local JSON state in development when Redis env vars are absent. Deployed serverless runtimes require Vercel KV/Upstash Redis through `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
 
-- `.env.staging` is the local source for Vercel Preview env vars scoped to the `develop` branch.
-- `.env.production` is the local source for Vercel Production env vars.
-- `.vercel-token` may hold a personal Vercel token for this project and is ignored by Git. You can also set `VERCEL_TOKEN` in your shell.
+Key env groups:
 
-Create local env files from the examples, then replace placeholders before syncing:
+| Group | Variables |
+| --- | --- |
+| Runtime mode | `SUPERREFERRALS_MOCKS`, `SUPERREFERRALS_STORE_BACKEND`, `DEPLOYMENT_ENV` |
+| Samsar | `SAMSAR_APP_SECRET` plus account/session credentials created through the app |
+| Payment chain | `TRANSACTION_NETWORK`, `TRANSACTION_CHAIN_ID`, `TRANSACTION_RPC_URL`, `NEXT_PUBLIC_TRANSACTION_*` |
+| Settlement | `KEEPERHUB_API_KEY`, `KEEPERHUB_WALLET_ADDRESS`, `KEEPERHUB_PAYMENT_WORKFLOW_ID_<NETWORK>`, `UNISWAP_API_KEY` |
+| 0G | `OG_NETWORK`, `OG_CHAIN_ID`, `OG_RPC_URL`, `OG_STORAGE_INDEXER_RPC`, `OG_PRIVATE_KEY`, optional `OG_COMPUTE_*` |
+| Contracts | `USER_REGISTRY_CONTRACT_ADDRESS`, `INFT_CONTRACT_ADDRESS` |
+| Admin | `ADMIN_SECRET` |
 
-```bash
-cp .env.staging.example .env.staging
-cp .env.production.example .env.production
-chmod 600 .env.staging .env.production
-```
+<details>
+<summary>Network guardrails</summary>
 
-For a project-specific Vercel token, either export `VERCEL_TOKEN` for the current shell or put the token in `.vercel-token` and run `chmod 600 .vercel-token`. If the project belongs to a different Vercel account than the globally logged-in CLI account, create the token from the account that owns the project and do not use `--use-global-token`. The script defaults to scope `proy24s-projects`; override with `--scope <vercel-account-or-team-slug>` if the owner scope differs.
+Staging uses Ethereum Sepolia for payment and 0G Galileo for storage/compute/iNFT infrastructure.
 
-Preview what would change without touching Vercel:
+- Payment chain: Ethereum Sepolia, `TRANSACTION_CHAIN_ID=11155111`.
+- Sepolia USDC: `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`.
+- 0G Galileo chain: `OG_CHAIN_ID=16602`.
+- 0G Galileo RPC: `https://evmrpc-testnet.0g.ai`.
+- 0G Galileo storage indexer: `https://indexer-storage-testnet-turbo.0g.ai`.
 
-```bash
-npm run vercel:env:sync -- staging --dry-run
-npm run vercel:env:staging:local -- --dry-run
-npm run vercel:env:sync -- production --dry-run
-```
+Production is designed for 0G mainnet plus Ethereum mainnet or Base payment deployments.
 
-Dry runs warn about placeholder values. Actual sync runs fail until placeholders are replaced with real values.
+- Ethereum mainnet chain id: `1`.
+- Base mainnet chain id: `8453`.
+- Base USDC: `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`.
+- 0G mainnet chain id: `16661`.
+- 0G mainnet RPC: `https://evmrpc.0g.ai`.
+- 0G mainnet storage indexer: `https://indexer-storage-turbo.0g.ai`.
 
-Apply changes only when you intentionally run the script:
+Non-production runtime maps mainnet transaction configs back to Sepolia unless both `NODE_ENV=production` and `DEPLOYMENT_ENV=production` are set. Renders do not start until the server verifies sender, recipient, chain, token, and amount. `ALLOW_MOCK_RENDER_PAYMENT=true` is only for local demos.
+</details>
 
-```bash
-npm run vercel:env:staging
-npm run vercel:env:staging:local
-npm run vercel:env:production
-```
+## Deploy And Ops
 
-The sync stores local hashes under `.vercel-env-sync/` so later runs update only changed keys. It does not print env values, refuses obvious placeholder values, blocks `VERCEL_*` control credentials from upload, and only removes remote keys when run with `--delete-removed`.
+The Vercel project is `proy24s-projects/super-referrals`.
 
-By default staging maps to Vercel `preview` for branch `develop`, and production maps to Vercel `production`. Override with `VERCEL_STAGING_ENVIRONMENT`, `VERCEL_STAGING_BRANCH`, `VERCEL_PRODUCTION_ENVIRONMENT`, or command flags such as `--environment` and `--branch`.
-
-Vercel env changes apply to new deployments only; redeploy or push after syncing if the running deployment needs the new values. See the [Vercel env CLI docs](https://vercel.com/docs/cli/env) and [environment variable docs](https://vercel.com/docs/environment-variables).
-
-## Deploy Storage Bootstrap
-
-`deploy.json` describes the Vercel project, required Upstash Redis resource, disabled-by-default Blob store, staging/production env files, and required 0G storage variables. The default `./deploy.sh` path runs the storage bootstrap first, so a first deploy creates or links the Vercel Upstash Redis integration without requiring a user-provided Redis connection string:
+Bootstrap storage and deploy:
 
 ```bash
 ./deploy.sh
 ./deploy.sh --production
 ```
 
-Use `--skip-bootstrap` or `DEPLOY_SKIP_BOOTSTRAP=true` only when the Vercel storage integration is already ready and you intentionally want to skip the check. A new operator can also run the bootstrap script directly to validate 0G env, launch Vercel login/link flows when needed, and create the Upstash Redis resource:
+Preview env sync:
+
+```bash
+npm run vercel:env:sync -- staging --dry-run
+npm run vercel:env:sync -- production --dry-run
+```
+
+Apply env sync only when the target env files contain real values:
+
+```bash
+npm run vercel:env:staging
+npm run vercel:env:production
+```
+
+Direct storage bootstrap:
 
 ```bash
 npm run deploy:setup:staging
 npm run deploy:setup:production
 ```
 
-Production is currently configured to reuse the staging Redis REST env vars instead of provisioning a second database. Runtime keys are still separated by environment namespaces such as `superreferrals:store:staging` and `superreferrals:store:production`. Remove `targets.production.redisFromTarget` from `deploy.json` when you want production to provision its own Redis resource.
-
-Use `--dry-run` to preview actions:
-
-```bash
-npm run deploy:setup:staging -- --dry-run
-```
-
-The script can use `VERCEL_TOKEN`, `.vercel-token`, or an active Vercel CLI login. If Vercel asks for an auth challenge, complete the browser/email flow and rerun the command. Upstash Redis provisioning first checks for an existing linked Redis resource, accepts Marketplace terms by default when provisioning is needed, and should add `KV_REST_API_URL` and `KV_REST_API_TOKEN` to the linked project. Pass `--no-accept-marketplace-terms` only if you want to complete Marketplace terms manually. Environment sync is intentionally not run by default; pass `--sync-env` when the target env file is ready to upload. `./deploy.sh` uses `--skip-env-validation` so Redis provisioning is not blocked by incomplete local 0G env files; run the direct setup command without that flag before live 0G flows.
-
-Upstash Redis is required for deployed mutable app state: authenticated user/session state, Samsar account/session cache, credits, checkout state, quotes, render hot indexes, storefront ratings, and webhook/polling state. In local development the app falls back to file-backed state when Redis env vars are absent. In Vercel/serverless runtimes the application fails fast with setup instructions if `KV_REST_API_URL` and `KV_REST_API_TOKEN` are still missing after bootstrap. Vercel Blob is disabled by default because Redis holds mutable app state and 0G Storage holds render artifacts/metadata. Blob is only useful later for encrypted private object snapshots/backups or private non-KV files. Keep 0G Storage for public generation artifacts and durable public render metadata; do not put auth tokens or private user secrets into public 0G metadata.
-
-The local JSON store is the default development backend and is also read once to seed an empty Redis key during migration when Redis is configured. Completed INFT views should still be recoverable through the onchain INFT token URI and 0G metadata when live 0G/INFT env vars are configured.
-
-For staging previews, Vercel needs a Git event it can deploy. Push a new commit to `develop` or open a PR from `develop`; a local branch or a branch pointer that matches an already deployed `main` commit may not create a new Preview Deployment by itself.
-
-## Key Environment Variables
-
-- `SUPERREFERRALS_MOCKS`: global mock switch. Defaults to mocked behavior when unset.
-- `SUPERREFERRALS_MOCKS=false`: live mode for all providers. Provider-specific mock overrides are no longer needed in the minimal staging/production env files.
-- `SUPERREFERRALS_STORE_BACKEND`: `auto` uses Redis when KV env vars exist and local files otherwise. Use `redis` to require Redis locally, or `file` for explicit local file-backed development only.
-- `KV_REST_API_URL`, `KV_REST_API_TOKEN`: injected by Vercel/Upstash setup. Add them manually only for local Redis testing or to override the managed Vercel Redis resource.
-- `SAMSAR_APP_SECRET`: server-only secret, at least 32 characters, used to generate Samsar long-lived storefront APP_KEY credentials and to encrypt/hash stored APP_KEY values.
-- Samsar credentials are connected per storefront owner through Stripe checkout or account sign-in. The app uses the returned auth token only to provision a long-lived APP_KEY, stores an HMAC hash plus encrypted APP_KEY server-side, and sends APP_KEY + `SAMSAR_APP_SECRET` to `/v2` Samsar routes for generation and edit operations.
-- `TRANSACTION_NETWORK`, `TRANSACTION_CHAIN_ID`, `TRANSACTION_RPC_URL`: payment and wallet network.
-- `NEXT_PUBLIC_TRANSACTION_NETWORK`, `NEXT_PUBLIC_TRANSACTION_CHAIN_ID`, `NEXT_PUBLIC_TRANSACTION_RPC_URL`: browser wallet prompts.
-- `KEEPERHUB_API_KEY`, `KEEPERHUB_WALLET_ADDRESS`, `KEEPERHUB_PAYMENT_WORKFLOW_ID_<NETWORK>`: live KeeperHub payment and settlement.
-- `UNISWAP_API_KEY`: live Uniswap quote and swap transaction data.
-- `OG_NETWORK`, `OG_CHAIN_ID`, `OG_RPC_URL`, `OG_STORAGE_INDEXER_RPC`, `OG_PRIVATE_KEY`: 0G Chain, Storage, registry, INFT signer, and default platform 0G Compute signer.
-- `OG_COMPUTE_PRIVATE_KEY`, `OG_COMPUTE_PROVIDER_ADDRESS`: optional platform 0G Compute signer override and optional funded provider address for the embedded assistant. Runtime also accepts scoped variants such as `OG_COMPUTE_PRIVATE_KEY_STAGING_QWEN_2_5_7B_INSTRUCT` or `OG_COMPUTE_PRIVATE_KEY_MAINNET_GLM_5_FP8`.
-- `OG_COMPUTE_AUTO_FUND`, `OG_COMPUTE_AUTO_FUND_AMOUNT`, `OG_COMPUTE_AUTO_DEPOSIT_AMOUNT`: optional automatic 0G Compute ledger and provider sub-account initialization. Defaults to enabled on testnet and disabled on mainnet.
-- `OG_DA_URL`, `OG_SERVICE_MARKETPLACE_URL`: live 0G DA and service marketplace endpoints.
-- `USER_REGISTRY_CONTRACT_ADDRESS`: deployed `SuperReferralsUserRegistry` address.
-- `INFT_CONTRACT_ADDRESS`: deployed INFT collection. Minting uses `OG_PRIVATE_KEY`.
-- `AXL_BASE_URL`: local Gensyn AXL node API, default `http://localhost:9002`.
+`deploy.json` defines the Vercel project, Upstash Redis setup, staging/production env files, and 0G storage requirements. Vercel env changes apply to new deployments only, so redeploy or push after syncing.
 
 ## Contracts
 
 Contracts live in `contracts/`.
 
-- `SuperReferralsUserRegistry.sol`: wallet sub-account profile roots and referrer lookup.
-- `SuperReferralsINFT.sol`: ERC-7857-inspired INFT with encrypted metadata URI, metadata hash, agent wallet, referrer code, and executor permissions.
-- `SuperReferralsAgentRegistry.sol`: agent manifests and job lifecycle receipts for 0G Chain.
-- `SuperReferralsPaymentEscrow.sol`: generation payment intents, settlement, partial refund, and cancellation flows.
+| Contract | Role |
+| --- | --- |
+| `SuperReferralsUserRegistry.sol` | Wallet user profile roots and referrer lookup. |
+| `SuperReferralsINFT.sol` | ERC-7857-inspired iNFT with encrypted metadata URI, metadata hash, agent wallet, referrer code, and executor permissions. |
+| `SuperReferralsAgentRegistry.sol` | Agent manifests and job lifecycle receipts for 0G Chain. |
+| `SuperReferralsPaymentEscrow.sol` | Generation payment intents, settlement, partial refund, and cancellation flows. |
 
-Compile contracts:
+Compile:
 
 ```bash
 npm run contracts:compile
 ```
 
-Deploy one INFT collection per 0G network, then set `INFT_CONTRACT_ADDRESS`:
+Deploy iNFT collection:
 
 ```bash
 npm run contracts:deploy:inft:testnet

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  APP_LANGUAGE_COOKIE_NAME,
   APP_LANGUAGE_STORAGE_KEY,
   appLanguageHtmlLang,
   normalizeAppLanguage
@@ -15,10 +16,18 @@ export function readStoredAppLanguage() {
     return undefined;
   }
   try {
-    return normalizeAppLanguage(window.localStorage.getItem(APP_LANGUAGE_STORAGE_KEY));
+    return normalizeAppLanguage(window.localStorage.getItem(APP_LANGUAGE_STORAGE_KEY)) || readCookieAppLanguage();
   } catch {
+    return readCookieAppLanguage();
+  }
+}
+
+export function readRouteAppLanguage() {
+  if (typeof window === "undefined") {
     return undefined;
   }
+  const pathname = window.location.pathname.replace(/\/+/g, "/");
+  return pathname === "/zh" || pathname.startsWith("/zh/") ? "zh" : undefined;
 }
 
 export function applyDocumentAppLanguage(language: AppLanguageCode) {
@@ -38,6 +47,7 @@ export function persistAppLanguage(language: AppLanguageCode) {
   } catch {
     // The in-memory document language still changes when storage is unavailable.
   }
+  persistAppLanguageCookie(language);
   applyDocumentAppLanguage(language);
 }
 
@@ -66,6 +76,32 @@ export function subscribeAppLanguage(listener: (language: AppLanguageCode) => vo
     window.removeEventListener(APP_LANGUAGE_CHANGE_EVENT, handleLanguageChange);
     window.removeEventListener("storage", handleStorage);
   };
+}
+
+function readCookieAppLanguage() {
+  if (typeof document === "undefined") {
+    return undefined;
+  }
+  const cookie = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${APP_LANGUAGE_COOKIE_NAME}=`));
+  if (!cookie) {
+    return undefined;
+  }
+  const rawValue = cookie.slice(APP_LANGUAGE_COOKIE_NAME.length + 1);
+  try {
+    return normalizeAppLanguage(decodeURIComponent(rawValue));
+  } catch {
+    return normalizeAppLanguage(rawValue);
+  }
+}
+
+function persistAppLanguageCookie(language: AppLanguageCode) {
+  if (typeof document === "undefined") {
+    return;
+  }
+  document.cookie = `${APP_LANGUAGE_COOKIE_NAME}=${encodeURIComponent(language)}; Max-Age=31536000; Path=/; SameSite=Lax`;
 }
 
 export async function syncStoredAppLanguagePreference(target: {
