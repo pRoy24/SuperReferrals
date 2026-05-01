@@ -4,14 +4,11 @@ node_modules/
 .pnp.*
 
 # Environment files
-.env
-.env.*
-.env.local
-.env.*.local
-.env.staging
-.env.production
-!.env.example
-!.env*.example
+# Ignore real env files in every directory. Keep template examples commit-safe.
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env*.example
 
 # Next.js
 .next/
@@ -78,5 +75,3 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
-.vercel
-.env*.local

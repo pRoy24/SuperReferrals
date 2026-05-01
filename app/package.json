@@ -1,0 +1,44 @@
+{
+  "name": "superreferrals",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "vercel:env:sync": "node scripts/sync-vercel-env.mjs",
+    "vercel:env:staging": "node scripts/sync-vercel-env.mjs staging",
+    "vercel:env:staging:local": "node scripts/sync-vercel-env.mjs staging --file .env.local",
+    "vercel:env:production": "node scripts/sync-vercel-env.mjs production",
+    "deploy:setup": "node scripts/bootstrap-deploy.mjs",
+    "deploy:setup:staging": "node scripts/bootstrap-deploy.mjs staging",
+    "deploy:setup:production": "node scripts/bootstrap-deploy.mjs production",
+    "contracts:compile": "hardhat --config ../hardhat.config.cjs compile",
+    "contracts:deploy:inft": "node scripts/deploy-inft.mjs",
+    "contracts:deploy:inft:testnet": "node scripts/deploy-inft.mjs galileo",
+    "contracts:deploy:inft:mainnet": "node scripts/deploy-inft.mjs mainnet"
+  },
+  "dependencies": {
+    "@0gfoundation/0g-ts-sdk": "latest",
+    "@0glabs/0g-serving-broker": "^0.7.5",
+    "@openzeppelin/contracts": "latest",
+    "ethers": "latest",
+    "lucide-react": "latest",
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "samsar-js": "0.48.26",
+    "viem": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "hardhat": "2.26.3",
+    "ts-node": "^10.9.2",
+    "typescript": "latest"
+  }
+}

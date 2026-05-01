@@ -15,7 +15,7 @@ CUSTOM_MESSAGE=""
 
 usage() {
   cat <<USAGE
-Usage: ./deploy.sh <superreferrals|superstores> [--production] [--skip-bootstrap] [-m "commit message"]
+Usage: ./deploy.sh [superreferrals] [--production] [--skip-bootstrap] [-m "commit message"]
 
 Checks Vercel auth/project setup, lists existing deployed env key names, prompts only for missing values,
 syncs only missing env keys to Vercel, bootstraps storage, then commits and pushes all current changes to ${DEVELOP_BRANCH}.
@@ -72,15 +72,11 @@ ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git rep
 
 case "$APP_NAME" in
   superreferrals)
-    APP_DIR="$ROOT/apps/superreferrals"
+    APP_DIR="$ROOT/app"
     VERCEL_DEFAULT_PROJECT="${VERCEL_PROJECT:-super-referrals}"
     ;;
-  superstores)
-    APP_DIR="$ROOT/apps/superstores"
-    VERCEL_DEFAULT_PROJECT="${VERCEL_PROJECT:-superstores}"
-    ;;
   *)
-    die "unknown app: $APP_NAME"
+    die "unknown app: $APP_NAME. The only deployable app is superreferrals."
     ;;
 esac
 
@@ -623,9 +619,6 @@ prepare_env_file() {
     superreferrals)
       prepare_superreferrals_env_file "$env_file" "$remote_keys_file" "$target"
       ;;
-    superstores)
-      prepare_superstores_env_file "$env_file" "$remote_keys_file" "$target"
-      ;;
     *)
       die "unknown app: $APP_NAME"
       ;;
@@ -676,38 +669,6 @@ prepare_superreferrals_env_file() {
   prompt_env_value "$env_file" "$remote_keys_file" "INFT_CONTRACT_ADDRESS" \
     "iNFT contract address" \
     "Run npm run contracts:deploy:inft:testnet for staging or npm run contracts:deploy:inft:mainnet for production, then paste the address." \
-    "plain" "optional"
-  print_optional_env_warning "$target"
-}
-
-prepare_superstores_env_file() {
-  local env_file="$1"
-  local remote_keys_file="$2"
-  local target="$3"
-
-  prompt_env_value "$env_file" "$remote_keys_file" "SUPERSTORES_ADMIN_SECRET" \
-    "SuperStores admin secret" \
-    "Used to unlock the storefront admin wizard for deployment operators. Generate once per environment and keep it stable." \
-    "secret" "required" "generate"
-  prompt_env_value "$env_file" "$remote_keys_file" "SUPERSTORES_WEBHOOK_SECRET" \
-    "SuperStores webhook secret" \
-    "Used to authenticate sale distribution webhook deliveries and partner commission callbacks." \
-    "secret" "required" "generate"
-  prompt_env_value "$env_file" "$remote_keys_file" "SUPERSTORES_PLATFORM_TREASURY_WALLET" \
-    "Platform treasury wallet" \
-    "EVM wallet that receives SuperStores platform fees for this environment." \
-    "plain" "optional"
-  prompt_env_value "$env_file" "$remote_keys_file" "KEEPERHUB_API_KEY" \
-    "KeeperHub API key" \
-    "Used for internal ETH/USDC conversion and split settlement across seller, platform, and referral partner wallets." \
-    "secret" "optional"
-  prompt_env_value "$env_file" "$remote_keys_file" "KEEPERHUB_PAYMENT_WORKFLOW_ID_SEPOLIA" \
-    "KeeperHub Sepolia workflow" \
-    "Workflow used for staging ETH Sepolia payments and split settlement." \
-    "plain" "optional"
-  prompt_env_value "$env_file" "$remote_keys_file" "KEEPERHUB_PAYMENT_WORKFLOW_ID_BASE" \
-    "KeeperHub Base workflow" \
-    "Workflow used for production Base mainnet payments and split settlement." \
     "plain" "optional"
   print_optional_env_warning "$target"
 }
