@@ -23,6 +23,21 @@ export const STOREFRONT_LAYOUT_OPTIONS: Array<{
     id: "sidebar",
     label: "Split",
     description: "Wallet and pricing stay in a left column beside the render task."
+  },
+  {
+    id: "minimal",
+    label: "Minimal",
+    description: "A quiet Material-style storefront with flat cards and compact spacing."
+  },
+  {
+    id: "checkout",
+    label: "Checkout",
+    description: "Pricing leads the setup column for storefronts that optimize payment flow."
+  },
+  {
+    id: "command",
+    label: "Command",
+    description: "A sharper futuristic console layout with render controls leading the page."
   }
 ];
 

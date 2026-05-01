@@ -20,8 +20,14 @@ export type StorefrontThemeId =
   | "theme-3"
   | "theme-4"
   | "theme-5"
-  | "theme-6";
-export type StorefrontLayoutId = "classic" | "studio" | "sidebar";
+  | "theme-6"
+  | "theme-7"
+  | "theme-8"
+  | "theme-9"
+  | "theme-10"
+  | "theme-11"
+  | "theme-12";
+export type StorefrontLayoutId = "classic" | "studio" | "sidebar" | "minimal" | "checkout" | "command";
 export type StorefrontEnsNetwork = "sepolia" | "mainnet" | "base";
 export type INFTPaidAction =
   | "translate"

@@ -1163,12 +1163,12 @@ export default function Dashboard() {
               <div className="theme-picker-section">
                 <div className="item-title">
                   <div>
-                    <strong>Public storefront layout</strong>
+                    <strong>Public storefront template</strong>
                     <p className="subtle">Choose how wallet, pricing, and render controls are arranged on public routes.</p>
                   </div>
                   <ImageIcon size={17} />
                 </div>
-                <div className="storefront-layout-picker" role="radiogroup" aria-label="Public storefront layout">
+                <div className="storefront-layout-picker" role="radiogroup" aria-label="Public storefront template">
                   {STOREFRONT_LAYOUT_OPTIONS.map((layout) => (
                     <button
                       aria-checked={customerForm.storefrontLayoutId === layout.id}
@@ -1188,7 +1188,7 @@ export default function Dashboard() {
                 <div className="item-title">
                   <div>
                     <strong>Public storefront theme</strong>
-                    <p className="subtle">Theme 1 keeps the current storefront look; the other themes are complementary presets.</p>
+                    <p className="subtle">All presets use solid backgrounds and audited nested control contrast.</p>
                   </div>
                   <Palette size={17} />
                 </div>
