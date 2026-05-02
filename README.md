@@ -84,10 +84,11 @@ The owner console is where storefront owners purchase credits, connect their own
 2. The owner chooses allowed video models, aspect ratios, max images, wallet access mode, daily limits, and pricing.
 3. A creator opens `/storefronts`, `/storefronts/:customerId`, or `/r/:referrerCode`.
 4. The creator connects a wallet and creates a render from product images, listing metadata, prompt direction, CTA URL, language, and publish settings.
-5. The app quotes payment in the selected token and verifies the mined transaction before starting the render.
-6. Samsar generates the video. SuperReferrals stores render metadata, publishes feed/iNFT records when requested, and writes 0G persistence references when live providers are configured.
-7. The completed video appears on the creator's storefront history, the public feed if published, and `/inft/:id`.
-8. Owners or purchasers can run paid iNFT operations exposed by storefront pricing, including retranslation, subtitle updates, outro updates, and footer updates.
+5. The app quotes payment in the selected token, verifies the mined KeeperHub payment transaction, and starts the render with owner settlement still pending.
+6. Samsar generates the video. SuperReferrals settles the storefront owner only after a completed `/status` response with a final video URL; failed or cancelled status refunds the payer through KeeperHub.
+7. SuperReferrals stores render metadata, publishes feed/iNFT records when requested, and writes 0G persistence references when live providers are configured.
+8. The completed video appears on the creator's storefront history, the public feed if published, and `/inft/:id`.
+9. Owners or purchasers can run paid iNFT operations exposed by storefront pricing, including retranslation, subtitle updates, outro updates, and footer updates.
 
 ## View Map
 
@@ -323,7 +324,7 @@ Production is designed for 0G mainnet plus Ethereum mainnet or Base payment depl
 - 0G mainnet RPC: `https://evmrpc.0g.ai`.
 - 0G mainnet storage indexer: `https://indexer-storage-turbo.0g.ai`.
 
-Non-production runtime maps mainnet transaction configs back to Sepolia unless both `NODE_ENV=production` and `DEPLOYMENT_ENV=production` are set. Renders do not start until the server verifies sender, recipient, chain, token, and amount. `ALLOW_MOCK_RENDER_PAYMENT=true` is only for local demos.
+Non-production runtime maps mainnet transaction configs back to Sepolia unless both `NODE_ENV=production` and `DEPLOYMENT_ENV=production` are set. Renders do not start until the server verifies sender, KeeperHub recipient, chain, token, and amount. Owner settlement waits for completed Samsar status; pending statuses do not transfer funds, and failed or cancelled statuses refund the payer through KeeperHub. `ALLOW_MOCK_RENDER_PAYMENT=true` is only for local demos.
 
 Storefront owners and users do not need to connect to 0G or hold 0G tokens for normal app actions. They only need funds on the configured payment chain, such as Sepolia in testnet/staging and Base for Base mainnet production deployments. The server-side iNFT minter/deployer wallet configured by `INFT_MINTER_PRIVATE_KEY` or `OG_PRIVATE_KEY` pays 0G gas for `mintINFT()` calls and must be funded with native 0G on the target 0G network.
 </details>

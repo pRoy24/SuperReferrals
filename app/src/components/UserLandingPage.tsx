@@ -1053,12 +1053,10 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
         generationId: trackedGeneration.id
       });
     }
-    if (trackedGeneration.status === "FAILED" && renderFlow.status !== "failed") {
+    if (isFailedRenderStatus(trackedGeneration.status) && renderFlow.status !== "failed") {
       updateRenderFlow({
         status: "failed",
-        message: trackedGeneration.errorMessage
-          ? `Render task ${trackedGeneration.id} failed: ${trackedGeneration.errorMessage}`
-          : `Render task ${trackedGeneration.id} failed.`,
+        message: renderFailureMessage(trackedGeneration),
         txHash: trackedGeneration.payment.txHash,
         generationId: trackedGeneration.id
       });
@@ -1282,10 +1280,12 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
       return settlementTxHash;
     }
 
-    if (activeQuote.paymentRail === "keeperhub" && !sameToken) {
+    if (activeQuote.paymentRail === "keeperhub") {
       updateRenderFlow({
         status: "payment",
-        message: `Requesting ${paymentToken.symbol} payment for KeeperHub ${activeSettlementToken.symbol} settlement.`
+        message: sameToken
+          ? `Requesting ${paymentToken.symbol} payment into KeeperHub escrow.`
+          : `Requesting ${paymentToken.symbol} payment for KeeperHub ${activeSettlementToken.symbol} settlement.`
       });
       const keeperPaymentTxHash = await requestTokenTransfer({
         provider: walletProvider.provider,
@@ -1494,8 +1494,8 @@ export default function UserLandingPage({ referrerCode = "", customerId = "" }: 
         setRenderTaskStatus(buildRenderTaskStatus(syncedGeneration, data.statusResponse));
       }
       await load();
-      setMessage(syncedGeneration?.status === "FAILED"
-        ? syncedGeneration.errorMessage || "Render task sync failed."
+      setMessage(syncedGeneration && isFailedRenderStatus(syncedGeneration.status)
+        ? renderFailureMessage(syncedGeneration)
         : "Render task synced.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Sync failed");
@@ -2788,7 +2788,7 @@ function paymentCurrencyTooltip(token: PaymentToken, settlementToken: PaymentTok
   if (rail === "direct") {
     return `Pay ${token.symbol} directly to the merchant settlement wallet.`;
   }
-  return `Pay ${token.symbol}; KeeperHub settles ${settlementToken.symbol} to the merchant.`;
+  return `Pay ${token.symbol}; KeeperHub holds the payment until the render completes, then settles ${settlementToken.symbol} to the merchant or refunds a failed render.`;
 }
 
 function PaymentSummary({
@@ -2867,7 +2867,7 @@ function paymentTokenRank(token: PaymentToken) {
 }
 
 function resolveUserPaymentRail(paymentToken: PaymentToken, settlementToken: PaymentToken): PaymentRail {
-  return paymentToken.address.toLowerCase() === settlementToken.address.toLowerCase() ? "direct" : "keeperhub";
+  return "keeperhub";
 }
 
 function generationTime(generation: Generation) {
@@ -2909,7 +2909,7 @@ function GenerationItem({
   wallet?: string;
   onSync: () => void;
 }) {
-  const badgeClass = generation.status === "COMPLETED" ? "badge ok" : generation.status === "FAILED" ? "badge fail" : "badge";
+  const badgeClass = generation.status === "COMPLETED" ? "badge ok" : isFailedRenderStatus(generation.status) ? "badge fail" : "badge";
   const paymentSummary = formatGenerationPaymentSummary(generation, quote);
   return (
     <div className="item task-status-item">
@@ -2925,6 +2925,12 @@ function GenerationItem({
         <span>{paymentSummary}</span>
       </p>
       {generation.errorMessage && <p className="subtle">{generation.errorMessage}</p>}
+      {generation.refund && (
+        <p className="subtle">
+          Refund {formatRefundStatus(generation.refund.status)}: {generation.refund.amountUsd.toFixed(2)} USDC
+          {generation.refund.keeperExecutionId ? ` via KeeperHub ${shortHash(generation.refund.keeperExecutionId)}` : ""}
+        </p>
+      )}
       <div className="button-row">
         <button className="btn" onClick={onSync} disabled={busy || generation.status === "COMPLETED"}>
           <RefreshCw size={16} /> Sync
@@ -2950,6 +2956,24 @@ function GenerationItem({
 function feedHrefForGeneration(generation: Generation) {
   const mode = generation.input.aspect_ratio === "9:16" ? "mobile" : "desktop";
   return `/feed/${encodeURIComponent(generation.id)}/${mode}`;
+}
+
+function isFailedRenderStatus(status: GenerationStatus) {
+  return status === "FAILED" || status === "CANCELLED" || status === "REFUNDED";
+}
+
+function renderFailureMessage(generation: Generation) {
+  const statusLabel = generation.status === "CANCELLED" ? "cancelled" : generation.status === "REFUNDED" ? "refunded" : "failed";
+  const refundMessage = generation.refund
+    ? ` Refund ${formatRefundStatus(generation.refund.status)} for ${generation.refund.amountUsd.toFixed(2)} USDC.`
+    : "";
+  return generation.errorMessage
+    ? `Render task ${generation.id} ${statusLabel}: ${generation.errorMessage}.${refundMessage}`
+    : `Render task ${generation.id} ${statusLabel}.${refundMessage}`;
+}
+
+function formatRefundStatus(status: NonNullable<Generation["refund"]>["status"]) {
+  return status.replaceAll("_", " ");
 }
 
 function formatGenerationPaymentSummary(generation: Generation, quote?: PaymentQuote | null) {

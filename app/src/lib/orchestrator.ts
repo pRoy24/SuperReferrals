@@ -7,11 +7,13 @@ import { buildGenerationFeedSettings } from "./feed";
 import { bytes32From, createId, nowIso, normalizeWallet } from "./ids";
 import { normalizeAppLanguage } from "./localization";
 import {
+  completeKeeperPaymentSettlement,
   confirmKeeperPaymentSettlement,
   createKeeperPaymentIntent,
   executeKeeperRefund,
   getKeeperHubPaymentWorkflowId,
-  getKeeperHubWalletAddress
+  getKeeperHubWalletAddress,
+  requestKeeperPaymentRefund
 } from "./keeperhub";
 import {
   amountToAtomic,
@@ -442,6 +444,7 @@ export async function quotePayment(input: {
   const requestedINFTOperation = String(input.action || input.operation || "").trim().toLowerCase();
   const isCopyOperation = requestedINFTOperation === INFT_COPY_OPERATION;
   const inftAction = isCopyOperation ? "" : normalizeINFTPaidAction(requestedINFTOperation);
+  const isRenderPaymentQuote = !input.inftId && !requestedINFTOperation;
   const quoteINFT = input.inftId
     ? store.infts.find((item) => item.id === input.inftId && item.customerId === customer.id)
     : undefined;
@@ -507,28 +510,28 @@ export async function quotePayment(input: {
   }
   const settlementAmountAtomic = amountToAtomic(pricing.totalUsd, settlementToken.decimals);
   const sameToken = paymentToken.address.toLowerCase() === settlementToken.address.toLowerCase();
-  const requestedRail = input.paymentRail || (sameToken ? "direct" : "uniswap");
+  const requestedRail = isRenderPaymentQuote ? "keeperhub" : input.paymentRail || (sameToken ? "direct" : "uniswap");
   const paymentRail = requestedRail === "direct" && !sameToken ? "uniswap" : requestedRail;
   if (
     paymentRail === "keeperhub" &&
+    !sameToken &&
     !getKeeperHubPaymentWorkflowId(chainId) &&
     !isMockMode() &&
-    !isProviderMock("KEEPERHUB") &&
-    !["USDC", "USDT"].includes(paymentToken.symbol)
+    !isProviderMock("KEEPERHUB")
   ) {
-    throw new Error("KEEPERHUB_PAYMENT_WORKFLOW_ID is required for non-stable token payments so KeeperHub can run the swap before settlement.");
+    throw new Error("KEEPERHUB_PAYMENT_WORKFLOW_ID is required for converted KeeperHub payments so KeeperHub can run settlement or refund automation.");
   }
   const keeperHubWallet = getKeeperHubWalletAddress();
   if (
     paymentRail === "keeperhub" &&
-    !sameToken &&
+    (isRenderPaymentQuote || !sameToken) &&
     !isUsableEvmAddress(keeperHubWallet) &&
     !isMockMode() &&
     !isProviderMock("KEEPERHUB")
   ) {
-    throw new Error(`ETH payments are not configured for this deployment. Set KEEPERHUB_WALLET_ADDRESS to a valid non-zero EVM address so KeeperHub can receive ${paymentToken.symbol} and settle ${settlementToken.symbol}.`);
+    throw new Error(`KeeperHub payments are not configured for this deployment. Set KEEPERHUB_WALLET_ADDRESS to a valid non-zero EVM address so KeeperHub can receive ${paymentToken.symbol}, defer owner settlement until render completion, and refund failed renders.`);
   }
-  const keeperPaymentRecipient = paymentRail === "keeperhub" && !sameToken
+  const keeperPaymentRecipient = paymentRail === "keeperhub" && (isRenderPaymentQuote || !sameToken)
     ? isUsableEvmAddress(keeperHubWallet)
       ? assertUsableEvmAddress(keeperHubWallet, "KEEPERHUB_WALLET_ADDRESS")
       : customerSettlementWallet
@@ -553,7 +556,7 @@ export async function quotePayment(input: {
       amountUsd: pricing.totalUsd,
       allowPriceHintFallback: paymentRail === "keeperhub"
     });
-  const paymentRecipientAddress = paymentRail === "keeperhub" && !sameToken
+  const paymentRecipientAddress = paymentRail === "keeperhub" && (isRenderPaymentQuote || !sameToken)
     ? keeperPaymentRecipient
     : customerSettlementWallet;
   const keeperIntent = paymentRail === "keeperhub"
@@ -568,6 +571,7 @@ export async function quotePayment(input: {
       settlementTokenAddress: settlementToken.address,
       settlementAmountAtomic,
       chainId,
+      deferSettlement: isRenderPaymentQuote,
       reason: inftAction
         ? `SuperReferrals INFT ${inftAction.replaceAll("_", " ")} action`
         : isCopyOperation
@@ -867,44 +871,19 @@ export async function createGeneration(input: {
       amountAtomic: expectedPaymentAmountAtomic
     }
   });
-  const keeperSettlement = paymentConfirmation.status === "confirmed" && shouldRunKeeperSettlement({
-    paymentRail,
-    quote,
-    expectedPaymentToken,
-    expectedSettlementToken,
-    expectedPaymentRecipient,
-    customer
-  })
-    ? await confirmKeeperPaymentSettlement({
-      payerAddress: input.payment?.payerWallet || subAccount.wallet,
-      recipientAddress: customerSettlementWallet,
-      amount: priced.totalUsd.toFixed(2),
-      amountUsd: priced.totalUsd,
-      paymentAmountAtomic: expectedPaymentAmountAtomic,
-      paymentRecipientAddress: expectedPaymentRecipient,
+  const keeperExecutionId = paymentConfirmation.keeperExecutionId;
+  const routeWithPaymentHold = paymentConfirmation.status === "confirmed" && paymentRail === "keeperhub"
+    ? withPaymentRouteMetadata(paymentRoute, "keeperPayment", {
+      status: "confirmed",
+      settlementStatus: "pending_render",
+      policy: "settle_after_render_completed",
       paymentTxHash: paymentConfirmation.txHash,
-      tokenAddress: expectedPaymentToken.address,
-      settlementTokenAddress: expectedSettlementToken.address,
-      settlementAmountAtomic: expectedSettlementAmountAtomic,
-      chainId: paymentChainId,
       quoteId: input.payment?.quoteId || quote?.id,
       generationId,
-      reason: `Settle SuperReferrals render ${generationId}`,
-      metadata: {
-        verification: paymentConfirmation.verification,
-        referrerCode: subAccount.referrerCode,
-        customerId: customer.id,
-        subAccountId: subAccount.id
-      }
+      paymentRecipientAddress: expectedPaymentRecipient,
+      recipientAddress: customerSettlementWallet,
+      createdAt: timestamp
     })
-    : undefined;
-  const keeperExecutionId = paymentConfirmation.keeperExecutionId ||
-    firstString(isRecord(keeperSettlement) ? keeperSettlement : undefined, ["executionId", "execution_id", "id", "runId"]);
-  const routeWithSettlement = keeperSettlement
-    ? {
-      ...(isRecord(paymentRoute) ? paymentRoute : { route: paymentRoute }),
-      keeperSettlement
-    }
     : paymentRoute;
   const payment: GenerationPayment = {
     amountUsd: priced.totalUsd,
@@ -921,7 +900,7 @@ export async function createGeneration(input: {
     chainId: paymentChainId,
     status: paymentConfirmation.status,
     keeperExecutionId,
-    route: routeWithSettlement,
+    route: routeWithPaymentHold,
     verification: paymentConfirmation.verification
   };
   const generation: Generation = {
@@ -964,10 +943,12 @@ export async function createGeneration(input: {
       payment
     }));
   } catch (error) {
-    await mutateStore((mutableStore) => updateGeneration(mutableStore, generationId, {
-      status: "FAILED",
-      errorMessage: error instanceof Error ? error.message : "SuperReferrals request failed"
-    }));
+    await failGeneration(
+      generation,
+      customer,
+      "FAILED",
+      error instanceof Error ? error.message : "SuperReferrals request failed"
+    );
     throw error;
   }
 }
@@ -1316,7 +1297,13 @@ async function finalizeGenerationUnlocked(
   subAccount: SubAccount,
   resultUrl: string
 ) {
-  const latestGeneration = await getGeneration(generation.id) || generation;
+  const latestGenerationBeforeSettlement = await getGeneration(generation.id) || generation;
+  const latestGeneration = await settleKeeperRenderPaymentIfNeeded(
+    latestGenerationBeforeSettlement,
+    customer,
+    subAccount,
+    resultUrl
+  );
   const existingInft = await findExistingINFTForGeneration(generation.id);
   if (latestGeneration.inftId || existingInft) {
     const feed = await publishGenerationToSamsarGalleryIfNeeded(
@@ -1611,12 +1598,88 @@ async function markGenerationFinalizedFromExistingINFT(
   });
 }
 
+async function settleKeeperRenderPaymentIfNeeded(
+  generation: Generation,
+  customer: Customer,
+  subAccount: SubAccount,
+  resultUrl: string
+) {
+  if (generation.payment.paymentRail !== "keeperhub" || generation.payment.status === "refunded") {
+    return generation;
+  }
+  if (hasCompletedKeeperSettlement(generation.payment.route)) {
+    return generation;
+  }
+  const context = await keeperRenderPaymentContext(generation, customer);
+  if (!shouldRunKeeperSettlement({
+    paymentRail: generation.payment.paymentRail,
+    quote: context.quote,
+    expectedPaymentToken: context.expectedPaymentToken,
+    expectedSettlementToken: context.expectedSettlementToken,
+    expectedPaymentRecipient: context.expectedPaymentRecipient,
+    customer
+  })) {
+    return generation;
+  }
+  if (!generation.payment.txHash && !generation.payment.verification?.txHash) {
+    throw new Error("Cannot settle KeeperHub render payment without a verified payment transaction hash.");
+  }
+
+  const keeperSettlement = await completeKeeperPaymentSettlement({
+    payerAddress: generation.payment.payerWallet || subAccount.wallet,
+    recipientAddress: context.customerSettlementWallet,
+    amount: generation.payment.amountUsd.toFixed(2),
+    amountUsd: generation.payment.amountUsd,
+    paymentAmountAtomic: context.expectedPaymentAmountAtomic,
+    paymentRecipientAddress: context.expectedPaymentRecipient,
+    paymentTxHash: generation.payment.txHash || generation.payment.verification?.txHash,
+    tokenAddress: context.expectedPaymentToken.address,
+    settlementTokenAddress: context.expectedSettlementToken.address,
+    settlementAmountAtomic: context.expectedSettlementAmountAtomic,
+    chainId: context.paymentChainId,
+    quoteId: generation.payment.quoteId || context.quote?.id,
+    generationId: generation.id,
+    reason: `Finalize SuperReferrals render ${generation.id}`,
+    metadata: {
+      verification: generation.payment.verification,
+      referrerCode: subAccount.referrerCode,
+      customerId: customer.id,
+      subAccountId: subAccount.id,
+      resultUrl,
+      statusGate: "samsar_render_completed"
+    }
+  });
+  const keeperExecutionId = firstString(isRecord(keeperSettlement) ? keeperSettlement : undefined, ["executionId", "execution_id", "id", "runId"]) ||
+    generation.payment.keeperExecutionId;
+
+  return requireGenerationUpdate(await mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
+    payment: {
+      ...generation.payment,
+      keeperExecutionId,
+      route: withPaymentRouteMetadata(generation.payment.route, "keeperSettlement", keeperSettlement)
+    }
+  })));
+}
+
+function hasCompletedKeeperSettlement(route: unknown) {
+  const routeRecord = isRecord(route) ? route : undefined;
+  const keeperSettlement = isRecord(routeRecord?.keeperSettlement) ? routeRecord.keeperSettlement : undefined;
+  if (!keeperSettlement) {
+    return false;
+  }
+  const status = firstString(keeperSettlement, ["status", "state", "resultStatus"]).toLowerCase();
+  if (["completed", "confirmed", "mock_confirmed", "mock_completed", "success", "succeeded"].includes(status)) {
+    return true;
+  }
+  return Boolean(firstString(keeperSettlement, ["executionId", "execution_id", "id", "runId"]));
+}
+
 async function markGenerationFinalizationFailed(
   generation: Generation,
   resultUrl: string,
   error: unknown
 ) {
-  const message = `Video render completed, but 0G persistence or INFT minting failed: ${formatErrorText(error)}. Fix the 0G configuration and click Sync to retry finalization.`;
+  const message = `Video render completed, but KeeperHub settlement, 0G persistence, or INFT minting failed: ${formatErrorText(error)}. Fix the payment or 0G configuration and click Sync to retry finalization.`;
   return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
     status: "FAILED",
     resultUrl,
@@ -1630,19 +1693,16 @@ async function failGeneration(
   status: string,
   errorMessage: string
 ) {
-  const refundAmount = refundAmountForFailure(customer, generation.payment.amountUsd);
+  const refundAmount = refundAmountForGenerationFailure(customer, generation);
   let refund = generation.refund;
   if (refundAmount > 0 && !refund) {
     try {
-      const keeper = await executeKeeperRefund({
-        recipientAddress: generation.payment.payerWallet || customer.ownerWallet,
-        amount: String(refundAmount),
-        reason: errorMessage
-      });
+      const keeper = await refundGenerationPayment(generation, customer, refundAmount, errorMessage);
       refund = {
         amountUsd: refundAmount,
         reason: errorMessage,
         keeperExecutionId: String(keeper.executionId || ""),
+        txHash: firstString(isRecord(keeper) ? keeper : undefined, ["txHash", "transactionHash", "hash"]),
         status: keeper.status === "mock_completed" ? "mock_completed" : "completed",
         createdAt: nowIso()
       };
@@ -1658,8 +1718,68 @@ async function failGeneration(
   return mutateStore((mutableStore) => updateGeneration(mutableStore, generation.id, {
     status: status === "CANCELLED" ? "CANCELLED" : "FAILED",
     errorMessage,
-    refund
+    refund,
+    ...(refund && ["completed", "mock_completed"].includes(refund.status)
+      ? {
+        payment: {
+          ...generation.payment,
+          status: "refunded" as const,
+          route: withPaymentRouteMetadata(generation.payment.route, "keeperRefund", refund)
+        }
+      }
+      : {})
   }));
+}
+
+function refundAmountForGenerationFailure(customer: Customer, generation: Generation) {
+  if (generation.payment.paymentRail === "keeperhub" && !hasCompletedKeeperSettlement(generation.payment.route)) {
+    return roundUsd(generation.payment.amountUsd);
+  }
+  return refundAmountForFailure(customer, generation.payment.amountUsd);
+}
+
+async function refundGenerationPayment(
+  generation: Generation,
+  customer: Customer,
+  refundAmount: number,
+  reason: string
+) {
+  if (generation.payment.paymentRail === "keeperhub" && !hasCompletedKeeperSettlement(generation.payment.route)) {
+    const context = await keeperRenderPaymentContext(generation, customer);
+    return requestKeeperPaymentRefund({
+      payerAddress: generation.payment.payerWallet || customer.ownerWallet,
+      recipientAddress: context.customerSettlementWallet,
+      amount: refundAmount.toFixed(2),
+      amountUsd: refundAmount,
+      paymentAmountAtomic: context.expectedPaymentAmountAtomic,
+      paymentRecipientAddress: context.expectedPaymentRecipient,
+      paymentTxHash: generation.payment.txHash || generation.payment.verification?.txHash,
+      tokenAddress: context.expectedPaymentToken.address,
+      settlementTokenAddress: context.expectedSettlementToken.address,
+      settlementAmountAtomic: context.expectedSettlementAmountAtomic,
+      chainId: context.paymentChainId,
+      quoteId: generation.payment.quoteId || context.quote?.id,
+      generationId: generation.id,
+      reason,
+      metadata: {
+        verification: generation.payment.verification,
+        customerId: customer.id,
+        statusGate: "samsar_render_failed"
+      }
+    });
+  }
+  return executeKeeperRefund({
+    recipientAddress: generation.payment.payerWallet || customer.ownerWallet,
+    amount: String(refundAmount),
+    tokenAddress: generation.payment.settlementTokenAddress || generation.payment.tokenAddress,
+    chainId: generation.payment.chainId,
+    reason,
+    metadata: {
+      generationId: generation.id,
+      quoteId: generation.payment.quoteId,
+      paymentTxHash: generation.payment.txHash || generation.payment.verification?.txHash
+    }
+  });
 }
 
 function formatErrorText(error: unknown) {
@@ -2963,13 +3083,66 @@ function shouldRunKeeperSettlement({
   expectedPaymentRecipient: string;
   customer: Customer;
 }) {
-  if (paymentRail !== "keeperhub" || !quote) {
+  if (paymentRail !== "keeperhub") {
     return false;
   }
   const tokenConversionRequired = expectedPaymentToken.address.toLowerCase() !== expectedSettlementToken.address.toLowerCase();
   const settlementRecipientWallet = resolveRenderPaymentRecipientWallet(customer);
   const paymentHeldByKeeper = normalizeWallet(expectedPaymentRecipient) !== normalizeWallet(settlementRecipientWallet);
   return tokenConversionRequired || paymentHeldByKeeper;
+}
+
+async function keeperRenderPaymentContext(generation: Generation, customer: Customer) {
+  const store = await readStore();
+  const quote = generation.payment.quoteId
+    ? store.quotes.find((item) => item.id === generation.payment.quoteId)
+    : undefined;
+  const paymentChainId = normalizeTransactionChainIdForEnvironment(
+    customer.pricing.chainId || quote?.chainId || generation.payment.chainId || getTransactionChainId()
+  );
+  const expectedSettlementToken =
+    findPaymentToken(generation.payment.settlementTokenAddress || quote?.settlementTokenAddress || customer.pricing.settlementTokenAddress || "", paymentChainId) ||
+    settlementTokenForCurrency(quote?.settlementCurrency || generation.payment.settlementTokenSymbol || customer.pricing.currency, paymentChainId);
+  if (!expectedSettlementToken) {
+    throw new Error("Unable to resolve render settlement token for KeeperHub settlement.");
+  }
+  const expectedPaymentToken =
+    findPaymentToken(generation.payment.tokenAddress || quote?.paymentTokenAddress || "", paymentChainId) ||
+    expectedSettlementToken;
+  const expectedSettlementAmountAtomic =
+    generation.payment.settlementAmountAtomic ||
+    quote?.settlementAmountAtomic ||
+    amountToAtomic(generation.payment.amountUsd, expectedSettlementToken.decimals);
+  const expectedPaymentAmountAtomic =
+    generation.payment.paymentAmountAtomic ||
+    quote?.paymentAmountAtomic ||
+    (expectedPaymentToken.address.toLowerCase() === expectedSettlementToken.address.toLowerCase()
+      ? expectedSettlementAmountAtomic
+      : amountToAtomic(generation.payment.amountUsd, expectedPaymentToken.decimals));
+  const customerSettlementWallet = resolveRenderPaymentRecipientWallet(customer);
+  const expectedPaymentRecipient = assertUsableEvmAddress(
+    quote?.paymentRecipientAddress ||
+      generation.payment.verification?.recipientWallet ||
+      customerSettlementWallet,
+    "Payment recipient wallet"
+  );
+  return {
+    quote,
+    paymentChainId,
+    expectedPaymentToken,
+    expectedSettlementToken,
+    expectedSettlementAmountAtomic,
+    expectedPaymentAmountAtomic,
+    expectedPaymentRecipient,
+    customerSettlementWallet
+  };
+}
+
+function withPaymentRouteMetadata(route: unknown, key: string, value: unknown) {
+  return {
+    ...(isRecord(route) ? route : route ? { route } : {}),
+    [key]: value
+  };
 }
 
 async function resolvePaymentConfirmation({

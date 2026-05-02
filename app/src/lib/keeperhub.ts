@@ -39,7 +39,8 @@ export async function createKeeperPaymentIntent({
   paymentRecipientAddress,
   amountUsd,
   chainId,
-  reason
+  reason,
+  deferSettlement = false
 }: {
   payerAddress: string;
   recipientAddress: string;
@@ -52,6 +53,7 @@ export async function createKeeperPaymentIntent({
   amountUsd?: number;
   chainId: number;
   reason: string;
+  deferSettlement?: boolean;
 }) {
   const apiKey = env("KEEPERHUB_API_KEY");
   if (isProviderMock("KEEPERHUB")) {
@@ -103,6 +105,29 @@ export async function createKeeperPaymentIntent({
       }
     };
   }
+  if (deferSettlement) {
+    return {
+      executionId: createId("keeper_deferred_quote"),
+      status: "payment_ready",
+      network,
+      reason,
+      instruction: {
+        event: "quote_created",
+        payerAddress,
+        recipientAddress,
+        amount,
+        amountUsd,
+        paymentAmountAtomic,
+        paymentRecipientAddress,
+        tokenAddress,
+        paymentTokenAddress: tokenAddress,
+        settlementTokenAddress,
+        settlementAmountAtomic,
+        chainId,
+        settlementPolicy: "defer_until_render_completed"
+      }
+    };
+  }
 
   const response = await fetch(`${baseUrl}/execute/transfer`, {
     method: "POST",
@@ -126,6 +151,78 @@ export async function createKeeperPaymentIntent({
     throw new Error(data?.error?.message || data?.message || "KeeperHub payment intent failed");
   }
   return data;
+}
+
+export async function completeKeeperPaymentSettlement({
+  payerAddress,
+  recipientAddress,
+  amount,
+  tokenAddress,
+  settlementTokenAddress,
+  settlementAmountAtomic,
+  paymentAmountAtomic,
+  paymentRecipientAddress,
+  paymentTxHash,
+  amountUsd,
+  chainId,
+  quoteId,
+  generationId,
+  reason,
+  metadata
+}: Omit<KeeperPaymentWorkflowPayload, "event">) {
+  if (isProviderMock("KEEPERHUB")) {
+    return {
+      executionId: createId("mock_keeper_completion"),
+      status: "mock_confirmed",
+      event: "payment_confirmed",
+      reason,
+      paymentTxHash,
+      quoteId,
+      generationId
+    };
+  }
+  const workflowId = getKeeperHubPaymentWorkflowId(chainId);
+  if (workflowId) {
+    return confirmKeeperPaymentSettlement({
+      payerAddress,
+      recipientAddress,
+      amount,
+      tokenAddress,
+      settlementTokenAddress,
+      settlementAmountAtomic,
+      paymentAmountAtomic,
+      paymentRecipientAddress,
+      paymentTxHash,
+      amountUsd,
+      chainId,
+      quoteId,
+      generationId,
+      reason,
+      metadata
+    });
+  }
+  if (tokenAddress && settlementTokenAddress && tokenAddress.toLowerCase() !== settlementTokenAddress.toLowerCase()) {
+    throw new Error("KEEPERHUB_PAYMENT_WORKFLOW_ID is required to settle converted KeeperHub render payments.");
+  }
+  return executeKeeperTransfer({
+    recipientAddress,
+    amount,
+    tokenAddress: settlementTokenAddress || tokenAddress,
+    chainId,
+    reason,
+    metadata: {
+      event: "payment_confirmed",
+      payerAddress,
+      paymentRecipientAddress,
+      paymentTxHash,
+      amountUsd,
+      paymentAmountAtomic,
+      settlementAmountAtomic,
+      quoteId,
+      generationId,
+      ...(metadata || {})
+    }
+  });
 }
 
 export async function confirmKeeperPaymentSettlement({
@@ -192,14 +289,130 @@ export async function confirmKeeperPaymentSettlement({
   });
 }
 
+export async function requestKeeperPaymentRefund({
+  payerAddress,
+  recipientAddress,
+  amount,
+  tokenAddress,
+  settlementTokenAddress,
+  settlementAmountAtomic,
+  paymentAmountAtomic,
+  paymentRecipientAddress,
+  paymentTxHash,
+  amountUsd,
+  chainId,
+  quoteId,
+  generationId,
+  reason,
+  metadata
+}: Omit<KeeperPaymentWorkflowPayload, "event">) {
+  if (isProviderMock("KEEPERHUB")) {
+    return {
+      executionId: createId("mock_keeper_refund"),
+      status: "mock_completed",
+      event: "render_failed",
+      reason,
+      paymentTxHash,
+      quoteId,
+      generationId
+    };
+  }
+  const apiKey = env("KEEPERHUB_API_KEY");
+  if (!apiKey) {
+    throw new Error("KEEPERHUB_API_KEY is required for live KeeperHub refund requests.");
+  }
+  const workflowId = getKeeperHubPaymentWorkflowId(chainId);
+  if (workflowId) {
+    const baseUrl = env("KEEPERHUB_BASE_URL", "https://app.keeperhub.com/api").replace(/\/$/, "");
+    const network = getKeeperHubPaymentNetwork(chainId);
+    return postKeeperPaymentWorkflow({
+      apiKey,
+      baseUrl,
+      workflowId,
+      network,
+      payload: {
+        event: "render_failed",
+        payerAddress,
+        recipientAddress,
+        amount,
+        amountUsd,
+        paymentAmountAtomic,
+        paymentRecipientAddress,
+        paymentTxHash,
+        tokenAddress,
+        settlementTokenAddress,
+        settlementAmountAtomic,
+        chainId,
+        quoteId,
+        generationId,
+        reason,
+        metadata
+      }
+    });
+  }
+  if (tokenAddress && settlementTokenAddress && tokenAddress.toLowerCase() !== settlementTokenAddress.toLowerCase()) {
+    throw new Error("KEEPERHUB_PAYMENT_WORKFLOW_ID is required to refund converted KeeperHub render payments.");
+  }
+  return executeKeeperRefund({
+    recipientAddress: payerAddress,
+    amount,
+    tokenAddress: tokenAddress || settlementTokenAddress,
+    chainId,
+    reason,
+    metadata: {
+      event: "render_failed",
+      storefrontRecipientAddress: recipientAddress,
+      paymentRecipientAddress,
+      paymentTxHash,
+      amountUsd,
+      paymentAmountAtomic,
+      settlementAmountAtomic,
+      quoteId,
+      generationId,
+      ...(metadata || {})
+    }
+  });
+}
+
 export async function executeKeeperRefund({
   recipientAddress,
   amount,
-  reason
+  reason,
+  tokenAddress,
+  chainId,
+  metadata
 }: {
   recipientAddress: string;
   amount: string;
   reason: string;
+  tokenAddress?: string;
+  chainId?: number;
+  metadata?: Record<string, unknown>;
+}) {
+  return executeKeeperTransfer({
+    recipientAddress,
+    amount,
+    tokenAddress,
+    chainId,
+    reason,
+    metadata
+  });
+}
+
+async function executeKeeperTransfer({
+  recipientAddress,
+  amount,
+  reason,
+  tokenAddress,
+  chainId,
+  metadata
+}: {
+  recipientAddress: string;
+  amount: string;
+  reason: string;
+  tokenAddress?: string;
+  chainId?: number;
+  metadata?: Record<string, unknown>;
 }) {
   const apiKey = env("KEEPERHUB_API_KEY");
   if (isProviderMock("KEEPERHUB")) {
@@ -212,6 +425,7 @@ export async function executeKeeperRefund({
   if (!apiKey) {
     throw new Error("KEEPERHUB_API_KEY is required for live KeeperHub requests.");
   }
+  const transferChain = chainId || getTransactionChainConfig().id;
   const response = await fetch(`${env("KEEPERHUB_BASE_URL", "https://app.keeperhub.com/api").replace(/\/$/, "")}/execute/transfer`, {
     method: "POST",
     headers: {
@@ -220,16 +434,18 @@ export async function executeKeeperRefund({
       authorization: `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      network: env("KEEPERHUB_REFUND_NETWORK", getTransactionChainConfig().keeperHubNetwork),
+      network: env("KEEPERHUB_REFUND_NETWORK", getTransactionChainConfig(transferChain).keeperHubNetwork),
       recipientAddress,
       amount,
-      chainId: getTransactionChainConfig().id,
-      gasLimitMultiplier: "1.2"
+      tokenAddress,
+      chainId: transferChain,
+      gasLimitMultiplier: "1.2",
+      metadata: { reason, ...(metadata || {}) }
     })
   });
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data?.error?.message || data?.message || "KeeperHub refund transfer failed");
+    throw new Error(data?.error?.message || data?.message || "KeeperHub transfer failed");
   }
   return data;
 }

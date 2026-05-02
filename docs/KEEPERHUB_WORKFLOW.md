@@ -17,17 +17,19 @@ All three workflows use a webhook trigger. Do not enable production traffic unti
    - Record the expected payer, payment recipient, payment token, payment amount, settlement token, customer recipient, network, and chain id.
    - Do not transfer funds in this event.
 2. User wallet transfer
-   - The browser asks the user to send ETH/WETH/USDC on the configured payment chain.
+   - The browser asks the user to send ETH/WETH/USDC on the configured payment chain to `KEEPERHUB_WALLET_ADDRESS` for storefront render payments.
    - The server verifies the mined transaction sender, recipient, chain, token, and amount before render start.
-3. `payment_confirmed`
-   - KeeperHub receives the verified `paymentTxHash`.
+3. Render execution
+   - The app starts the Samsar render only after the payment tx is verified.
+   - No storefront owner transfer runs while Samsar `/status` is pending or while the app is waiting for a final video URL.
+4. `payment_confirmed`
+   - The app sends this event only after Samsar `/status` returns a completed render and the app has a final video URL.
    - For ETH/WETH payments, convert the received value to the chain's USDC.
    - Transfer USDC to the customer `recipientAddress`.
    - Return execution/run ids and settlement tx hashes.
-4. Render execution
-   - Only after the payment tx is verified and KeeperHub settlement starts successfully, the app grants Samsar credits and starts the render.
 5. `render_failed` or `refund_requested`
-   - Run rollback/refund logic according to the customer refund policy.
+   - Run refund logic when Samsar `/status` returns `FAILED` or `CANCELLED`, or when the app cannot submit the render after collecting payment.
+   - Refund the payer from the held KeeperHub funds. Converted payments require the workflow id so KeeperHub can unwind or compensate the original payment.
    - Send status metadata back to the app if a callback URL is configured.
 
 ## Webhook Payload
@@ -52,8 +54,9 @@ The app sends this shape to `POST /api/workflow/{workflowId}/execute` with the e
   "amountUsd": 3.29,
   "quoteId": "quote_...",
   "generationId": "gen_...",
-  "reason": "Settle SuperReferrals render gen_...",
+  "reason": "Finalize SuperReferrals render gen_...",
   "metadata": {
+    "statusGate": "samsar_render_completed",
     "verification": {
       "txHash": "0x...",
       "chainId": 11155111,
@@ -75,9 +78,10 @@ Configure the draft nodes as:
    - Auth: `KEEPERHUB_API_KEY`.
 2. `Validate payload`
    - Code or condition node.
-   - Fail closed unless `chainId == 11155111`, `network == "sepolia"`, `paymentTxHash` exists for `payment_confirmed`, and amount fields are positive.
+   - Fail closed unless `chainId == 11155111`, `network == "sepolia"`, `paymentTxHash` exists, and amount fields are positive.
 3. `Settle customer in USDC`
    - For `payment_confirmed`.
+   - Require `metadata.statusGate == "samsar_render_completed"` or an equivalent completion marker before transfer.
    - If payment token is native ETH/WETH, swap to the target-chain USDC using the supported KeeperHub swap path or a contract-call route approved by the KeeperHub wallet.
    - Transfer target-chain USDC to `recipientAddress`.
 4. `Rollback or refund`
