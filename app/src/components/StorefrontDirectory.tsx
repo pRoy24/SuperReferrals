@@ -13,9 +13,15 @@ import { storefrontThemeStyle } from "@/lib/storefront-themes";
 import type { Customer, StorefrontRating, SuperReferralsStore } from "@/lib/types";
 import { isUsableEvmAddress } from "@/lib/wallet-address";
 
+type OwnerEnsNetwork = "sepolia" | "mainnet";
+type OwnerEnsLookup = {
+  name: string | null;
+};
+
 export default function StorefrontDirectory() {
   const [store, setStore] = useState<SuperReferralsStore | null>(null);
   const [message, setMessage] = useState("");
+  const [ownerEnsLookups, setOwnerEnsLookups] = useState<Record<string, OwnerEnsLookup>>({});
 
   async function load() {
     setMessage("");
@@ -37,6 +43,39 @@ export default function StorefrontDirectory() {
       .map((customer) => buildStorefrontDirectoryItem(store, customer)) || [],
     [store]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    const targets = uniqueOwnerEnsTargets(storefronts);
+    if (targets.length === 0) {
+      setOwnerEnsLookups({});
+      return () => {
+        cancelled = true;
+      };
+    }
+    setOwnerEnsLookups((current) => {
+      const keys = new Set(targets.map((target) => target.key));
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([key]) => keys.has(key))
+      ) as Record<string, OwnerEnsLookup>;
+      for (const target of targets) {
+        next[target.key] ||= { name: null };
+      }
+      return next;
+    });
+    Promise.all(targets.map(async (target) => {
+      const name = await resolveOwnerEnsName(target.wallet, target.network);
+      return [target.key, { name }] as const;
+    })).then((entries) => {
+      if (cancelled) {
+        return;
+      }
+      setOwnerEnsLookups((current) => ({ ...current, ...Object.fromEntries(entries) }));
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [storefronts]);
 
   return (
     <main className="public-main storefront-directory">
@@ -100,7 +139,9 @@ export default function StorefrontDirectory() {
             <p className="subtle">No storefronts have been created yet.</p>
           </div>
         )}
-        {storefronts.map((item) => (
+        {storefronts.map((item) => {
+          const ownerEnsName = ownerEnsLookups[item.ownerEnsLookupKey]?.name;
+          return (
           <article className="storefront-card storefront-theme" key={item.customer.id} style={storefrontThemeStyle(item.customer.storefront?.themeId)}>
             <div className="storefront-card-header">
               <div>
@@ -119,13 +160,15 @@ export default function StorefrontDirectory() {
               {item.customer.storefront?.description || "Product video storefront ready for wallet users and referral render tasks."}
             </p>
 
-            <div className="storefront-owner">
-              <Wallet size={16} />
-              <span>
-                <strong>Payout path</strong>
-                <code>{isUsableEvmAddress(item.customer.ownerWallet) ? item.customer.ownerWallet : "Platform settlement if configured"}</code>
-              </span>
-            </div>
+            {ownerEnsName && (
+              <div className="storefront-owner" aria-label={`Store owner ENS ${ownerEnsName}`}>
+                <Wallet size={16} />
+                <span>
+                  <span className="sr-only">Store owner ENS</span>
+                  <span className="storefront-owner-ens">{ownerEnsName}</span>
+                </span>
+              </div>
+            )}
 
             <div className="storefront-meta-row">
               <span><Film size={15} /> {item.renderCount} renders</span>
@@ -164,7 +207,8 @@ export default function StorefrontDirectory() {
               )}
             </div>
           </article>
-        ))}
+          );
+        })}
       </section>
     </main>
   );
@@ -183,6 +227,9 @@ function buildStorefrontDirectoryItem(store: SuperReferralsStore, customer: Cust
   const maxPrice = priceValues.length ? Math.max(...priceValues) : 0;
   return {
     customer,
+    ownerWallet: customer.ownerWallet,
+    ownerEnsNetwork: ownerEnsNetworkForCustomer(customer),
+    ownerEnsLookupKey: ownerEnsLookupKey(customer),
     routeCodes: routeAccounts.map((account) => account.referrerCode),
     subAccountCount: routeAccounts.length,
     renderCount: store.generations.filter((generation) => generation.customerId === customer.id).length,
@@ -197,6 +244,44 @@ function buildStorefrontDirectoryItem(store: SuperReferralsStore, customer: Cust
       `${item.videoModel} ${item.aspectRatio}: ${details.pricePerSecondUsd.toFixed(2)} USDC/sec`
     )
   };
+}
+
+function uniqueOwnerEnsTargets(items: ReturnType<typeof buildStorefrontDirectoryItem>[]) {
+  const targets = new Map<string, { key: string; wallet: string; network: OwnerEnsNetwork }>();
+  for (const item of items) {
+    if (!isUsableEvmAddress(item.ownerWallet)) {
+      continue;
+    }
+    targets.set(item.ownerEnsLookupKey, {
+      key: item.ownerEnsLookupKey,
+      wallet: item.ownerWallet,
+      network: item.ownerEnsNetwork
+    });
+  }
+  return [...targets.values()];
+}
+
+async function resolveOwnerEnsName(wallet: string, network: OwnerEnsNetwork) {
+  const response = await fetch("/api/ens/resolve", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ address: wallet, network })
+  });
+  if (!response.ok) {
+    return null;
+  }
+  const data = await response.json() as { result?: { name?: unknown } };
+  return typeof data.result?.name === "string" && data.result.name
+    ? data.result.name
+    : null;
+}
+
+function ownerEnsLookupKey(customer: Customer) {
+  return `${ownerEnsNetworkForCustomer(customer)}:${customer.ownerWallet.trim().toLowerCase()}`;
+}
+
+function ownerEnsNetworkForCustomer(customer: Customer): OwnerEnsNetwork {
+  return customer.pricing.chainId === 11155111 ? "sepolia" : "mainnet";
 }
 
 function summarizeRatings(ratings: StorefrontRating[]) {

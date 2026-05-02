@@ -1,6 +1,7 @@
 import { createPublicClient, http, namehash, parseAbi } from "viem";
 import { mainnet, sepolia } from "viem/chains";
 import { env } from "./env";
+import { isUsableEvmAddress } from "./wallet-address";
 
 const ENS_REGISTRY_ADDRESS = "0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -24,16 +25,9 @@ export async function resolveEnsName(name: string, options: { network?: string; 
   if (!normalized) {
     throw new Error("ENS name is required");
   }
-  const chainId = options.chainId || ensChainIdForNetwork(options.network) || Number(env("ENS_CHAIN_ID", "1"));
-  const chain = chainId === sepolia.id ? sepolia : mainnet;
+  const chain = ensChainForOptions(options);
   const node = namehash(normalized);
-  const defaultRpcUrl = chain.id === sepolia.id
-    ? "https://ethereum-sepolia-rpc.publicnode.com"
-    : "https://eth.llamarpc.com";
-  const client = createPublicClient({
-    chain,
-    transport: http(env("ENS_RPC_URL", defaultRpcUrl))
-  });
+  const client = createEnsClient(chain);
   const [address, contentHash, avatar, description, resolverAddress, textEntries] = await Promise.all([
     client.getEnsAddress({ name: normalized }).catch(() => null),
     client.getEnsText({ name: normalized, key: "contenthash" }).catch(() => null),
@@ -62,6 +56,54 @@ export async function resolveEnsName(name: string, options: { network?: string; 
     description,
     texts
   };
+}
+
+export async function reverseResolveEnsAddress(address: string, options: { network?: string; chainId?: number } = {}) {
+  const normalized = address.trim();
+  if (!isUsableEvmAddress(normalized)) {
+    throw new Error("A valid wallet address is required for reverse ENS lookup");
+  }
+  const chain = ensChainForOptions(options);
+  const client = createEnsClient(chain);
+  const name = await client.getEnsName({ address: normalized as `0x${string}` }).catch(() => null);
+  return {
+    address: normalized,
+    chainId: chain.id,
+    name
+  };
+}
+
+function ensChainForOptions(options: { network?: string; chainId?: number }) {
+  const chainId = options.chainId || ensChainIdForNetwork(options.network) || Number(env("ENS_CHAIN_ID", "1"));
+  return chainId === sepolia.id ? sepolia : mainnet;
+}
+
+function createEnsClient(chain: typeof mainnet | typeof sepolia) {
+  return createPublicClient({
+    chain,
+    transport: http(ensRpcUrl(chain.id))
+  });
+}
+
+function ensRpcUrl(chainId: number) {
+  const networkOverride = chainId === sepolia.id
+    ? env("ENS_SEPOLIA_RPC_URL")
+    : env("ENS_MAINNET_RPC_URL");
+  if (networkOverride) {
+    return networkOverride;
+  }
+  const genericChainId = Number(env("ENS_CHAIN_ID"));
+  const genericOverride = env("ENS_RPC_URL");
+  if (genericOverride && (!Number.isFinite(genericChainId) || genericChainId === chainId)) {
+    return genericOverride;
+  }
+  return defaultEnsRpcUrl(chainId);
+}
+
+function defaultEnsRpcUrl(chainId: number) {
+  return chainId === sepolia.id
+    ? "https://ethereum-sepolia-rpc.publicnode.com"
+    : "https://ethereum-rpc.publicnode.com";
 }
 
 function ensChainIdForNetwork(network: unknown) {

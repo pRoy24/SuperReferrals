@@ -3243,6 +3243,7 @@ h3 {
 }
 
 .storefront-owner strong,
+.storefront-owner-ens,
 .storefront-owner code {
   display: block;
 }
@@ -3251,6 +3252,18 @@ h3 {
   margin-bottom: 4px;
   font-size: 12px;
   color: var(--muted);
+}
+
+.storefront-owner-ens {
+  color: var(--storefront-text, var(--ink));
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.storefront-theme .storefront-owner-ens {
+  color: var(--storefront-text);
 }
 
 .storefront-owner code {
