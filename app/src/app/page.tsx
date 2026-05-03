@@ -30,9 +30,9 @@ const landingOgImagePath = "/landing/superreferrals-video-mosaic-og.jpg";
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
   const appLanguage = landingRouteLanguageFromHeaders(requestHeaders);
-  const heroCopy = landingCopy[appLanguage].hero;
-  const title = heroCopy.title;
-  const description = `${heroCopy.lede} ${heroCopy.support}`;
+  const pageCopy = landingCopy[appLanguage];
+  const title = pageCopy.hero.title;
+  const description = pageCopy.metadata.description;
   const baseUrl = appBaseUrl();
   const routePath = appLanguage === "zh" ? "/zh" : "/";
   const routeUrl = new URL(routePath, baseUrl).toString();

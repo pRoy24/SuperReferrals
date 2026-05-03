@@ -18,6 +18,9 @@ type LandingVideoMosaicLabels = {
 };
 
 export type LandingCopy = {
+  metadata: {
+    description: string;
+  };
   navAria: string;
   homeAria: string;
   nav: {
@@ -95,6 +98,9 @@ export type LandingCopy = {
 
 export const landingCopy: Record<AppLanguageCode, LandingCopy> = {
   en: {
+    metadata: {
+      description: "A framework for Open Agents that turns referral links into generative marketing video stores, where every render can become an editable, auditable iNFT."
+    },
     navAria: "Primary",
     homeAria: "SuperReferrals home",
     nav: {
@@ -220,6 +226,9 @@ export const landingCopy: Record<AppLanguageCode, LandingCopy> = {
     }
   },
   zh: {
+    metadata: {
+      description: "面向 Open Agents 的框架，可将推荐链接转化为生成式营销视频店铺，并让每一次渲染都成为可编辑、可审计的 iNFT。"
+    },
     navAria: "主导航",
     homeAria: "SuperReferrals 首页",
     nav: {
