@@ -37,6 +37,11 @@ export type LandingCopy = {
     manageStorefront: string;
     viewVideoGallery: string;
   };
+  introVideo: {
+    aria: string;
+    eyebrow: string;
+    title: string;
+  };
   showcase: {
     aria: string;
     header: string;
@@ -108,6 +113,11 @@ export const landingCopy: Record<AppLanguageCode, LandingCopy> = {
       storefrontDirectory: "Storefront directory",
       manageStorefront: "Manage Storefront",
       viewVideoGallery: "View Video Gallery"
+    },
+    introVideo: {
+      aria: "SuperReferrals intro demo video",
+      eyebrow: "Intro Demo",
+      title: "See the referral video workflow in motion."
     },
     showcase: {
       aria: "SuperReferrals product flow",
@@ -228,6 +238,11 @@ export const landingCopy: Record<AppLanguageCode, LandingCopy> = {
       storefrontDirectory: "店铺目录",
       manageStorefront: "管理店铺",
       viewVideoGallery: "查看视频图库"
+    },
+    introVideo: {
+      aria: "SuperReferrals 入门演示视频",
+      eyebrow: "入门演示",
+      title: "观看推荐视频工作流如何运转。"
     },
     showcase: {
       aria: "SuperReferrals 商品流程",

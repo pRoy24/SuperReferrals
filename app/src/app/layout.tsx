@@ -3,9 +3,11 @@ import AppLanguageRouteSync from "@/components/AppLanguageRouteSync";
 import PageAssistant from "@/components/PageAssistant";
 import ProductionHackathonBanner from "@/components/ProductionHackathonBanner";
 import TextareaAutosizeInstaller from "@/components/TextareaAutosizeInstaller";
+import { appBaseUrl } from "@/lib/env";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(appBaseUrl()),
   title: "SuperReferrals",
   description: "Turn referral links into product marketing videos with catalog data, creative styles, and creator campaign pages.",
   icons: {

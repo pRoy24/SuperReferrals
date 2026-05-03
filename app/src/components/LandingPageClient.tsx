@@ -42,6 +42,8 @@ const productPillarIcons = [Database, SlidersHorizontal, Film];
 const showcaseFlowIcons = [Database, SlidersHorizontal, Clapperboard, Link2];
 const blockchainIcons = [Coins, Film, Cpu, KeyRound, GitBranch, ShieldCheck];
 const howStepIcons = [Store, Link2, Sparkles, GitBranch, Coins, Database, Cpu];
+const introDemoPosterUrl = "/landing/superreferrals-intro-demo-poster.jpg";
+const introDemoVideoUrl = "https://static.samsar.one/temp_video/video%2Foutput%2Fvideo-69f694f16d01db468e412c9c_yo0o.mp4";
 
 export default function LandingPageClient({
   envDiagnostics,
@@ -120,6 +122,23 @@ export default function LandingPageClient({
               <Film size={18} /> {t.hero.viewVideoGallery}
             </a>
           </div>
+        </div>
+      </section>
+
+      <section className="landing-intro-video-section" aria-label={t.introVideo.aria}>
+        <div className="landing-intro-video-header">
+          <div className="eyebrow">{t.introVideo.eyebrow}</div>
+          <h2>{t.introVideo.title}</h2>
+        </div>
+        <div className="landing-intro-video-frame">
+          <video
+            controls
+            controlsList="nodownload"
+            poster={introDemoPosterUrl}
+            preload="metadata"
+            playsInline
+            src={introDemoVideoUrl}
+          />
         </div>
       </section>
 

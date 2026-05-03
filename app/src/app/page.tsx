@@ -1,11 +1,14 @@
+import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import LandingPageClient from "@/components/LandingPageClient";
 import FeedPage from "@/components/FeedPage";
 import StorefrontPublicGalleryPage from "@/components/StorefrontPublicGalleryPage";
 import UserLandingPage from "@/components/UserLandingPage";
+import { appBaseUrl } from "@/lib/env";
 import { getLandingEnvDiagnostics } from "@/lib/env-diagnostics";
 import { listPublicFeedItems } from "@/lib/feed";
+import { landingCopy } from "@/lib/landing-localization";
 import {
   appLanguageFromCookieHeader,
   DEFAULT_APP_LANGUAGE,
@@ -22,12 +25,58 @@ import {
 
 export const dynamic = "force-dynamic";
 
+const landingOgImagePath = "/landing/superreferrals-video-mosaic-og.jpg";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const requestHeaders = await headers();
+  const appLanguage = landingRouteLanguageFromHeaders(requestHeaders);
+  const heroCopy = landingCopy[appLanguage].hero;
+  const title = heroCopy.title;
+  const description = `${heroCopy.lede} ${heroCopy.support}`;
+  const baseUrl = appBaseUrl();
+  const routePath = appLanguage === "zh" ? "/zh" : "/";
+  const routeUrl = new URL(routePath, baseUrl).toString();
+  const imageUrl = new URL(landingOgImagePath, baseUrl).toString();
+
+  return {
+    title,
+    description,
+    alternates: {
+      canonical: routeUrl,
+      languages: {
+        en: new URL("/", baseUrl).toString(),
+        "zh-CN": new URL("/zh", baseUrl).toString()
+      }
+    },
+    openGraph: {
+      title,
+      description,
+      type: "website",
+      siteName: "SuperReferrals",
+      url: routeUrl,
+      locale: appLanguage === "zh" ? "zh_CN" : "en_US",
+      alternateLocale: appLanguage === "zh" ? ["en_US"] : ["zh_CN"],
+      images: [
+        {
+          url: imageUrl,
+          width: 1200,
+          height: 630,
+          alt: "SuperReferrals video mosaic"
+        }
+      ]
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: [imageUrl]
+    }
+  };
+}
+
 export default async function Home() {
   const requestHeaders = await headers();
-  const initialLanguage =
-    normalizeAppLanguage(requestHeaders.get("x-superreferrals-app-language")) ||
-    appLanguageFromCookieHeader(requestHeaders.get("cookie")) ||
-    DEFAULT_APP_LANGUAGE;
+  const initialLanguage = landingDisplayLanguageFromHeaders(requestHeaders);
   const store = await readStore();
   const requestHost = requestHostFromHeaders(requestHeaders);
   const customHostMatch = resolveStorefrontEnsPathMatch(store.customers, requestHost, "/");
@@ -61,4 +110,14 @@ export default async function Home() {
       referrerHref={referrerHref}
     />
   );
+}
+
+function landingRouteLanguageFromHeaders(requestHeaders: Headers) {
+  return requestHeaders.get("x-superreferrals-locale-prefix") === "zh" ? "zh" : DEFAULT_APP_LANGUAGE;
+}
+
+function landingDisplayLanguageFromHeaders(requestHeaders: Headers) {
+  return normalizeAppLanguage(requestHeaders.get("x-superreferrals-app-language")) ||
+    appLanguageFromCookieHeader(requestHeaders.get("cookie")) ||
+    DEFAULT_APP_LANGUAGE;
 }
