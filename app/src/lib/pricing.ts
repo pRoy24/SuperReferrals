@@ -12,6 +12,13 @@ type PricingOwner = { pricing?: Partial<CustomerPricing> };
 const allVideoModels: VideoModel[] = ["VEO3.1I2V", "SEEDANCEI2V", "KLING3.0", "RUNWAYML"];
 const allAspectRatios: VideoAspectRatio[] = ["16:9", "9:16"];
 
+export const defaultImageListVideoCreditsPerSecond: Record<VideoModel, number> = {
+  "VEO3.1I2V": 50,
+  SEEDANCEI2V: 50,
+  "KLING3.0": 34,
+  RUNWAYML: 17
+};
+
 export const paidINFTActions: INFTPaidAction[] = [
   "translate",
   "join",
@@ -38,7 +45,7 @@ export const defaultModelPricingConfigurations: ModelPricingConfiguration[] = [
     label: "RUNWAYML vertical",
     videoModel: "RUNWAYML",
     aspectRatio: "9:16",
-    baseCreditsPerSecond: 25,
+    baseCreditsPerSecond: defaultImageListVideoCreditsPerSecond.RUNWAYML,
     maxSecondsPerImage: 10,
     enabled: true
   },
@@ -47,7 +54,7 @@ export const defaultModelPricingConfigurations: ModelPricingConfiguration[] = [
     label: "RUNWAYML landscape",
     videoModel: "RUNWAYML",
     aspectRatio: "16:9",
-    baseCreditsPerSecond: 25,
+    baseCreditsPerSecond: defaultImageListVideoCreditsPerSecond.RUNWAYML,
     maxSecondsPerImage: 10,
     enabled: true
   },
@@ -56,7 +63,7 @@ export const defaultModelPricingConfigurations: ModelPricingConfiguration[] = [
     label: "VEO 3.1 vertical",
     videoModel: "VEO3.1I2V",
     aspectRatio: "9:16",
-    baseCreditsPerSecond: 75,
+    baseCreditsPerSecond: defaultImageListVideoCreditsPerSecond["VEO3.1I2V"],
     maxSecondsPerImage: 8,
     enabled: true
   },
@@ -65,7 +72,7 @@ export const defaultModelPricingConfigurations: ModelPricingConfiguration[] = [
     label: "VEO 3.1 landscape",
     videoModel: "VEO3.1I2V",
     aspectRatio: "16:9",
-    baseCreditsPerSecond: 75,
+    baseCreditsPerSecond: defaultImageListVideoCreditsPerSecond["VEO3.1I2V"],
     maxSecondsPerImage: 8,
     enabled: true
   },
@@ -74,7 +81,7 @@ export const defaultModelPricingConfigurations: ModelPricingConfiguration[] = [
     label: "Seedance vertical",
     videoModel: "SEEDANCEI2V",
     aspectRatio: "9:16",
-    baseCreditsPerSecond: 75,
+    baseCreditsPerSecond: defaultImageListVideoCreditsPerSecond.SEEDANCEI2V,
     maxSecondsPerImage: 10,
     enabled: true
   },
@@ -83,7 +90,7 @@ export const defaultModelPricingConfigurations: ModelPricingConfiguration[] = [
     label: "Seedance landscape",
     videoModel: "SEEDANCEI2V",
     aspectRatio: "16:9",
-    baseCreditsPerSecond: 75,
+    baseCreditsPerSecond: defaultImageListVideoCreditsPerSecond.SEEDANCEI2V,
     maxSecondsPerImage: 10,
     enabled: true
   },
@@ -92,7 +99,7 @@ export const defaultModelPricingConfigurations: ModelPricingConfiguration[] = [
     label: "Kling 3.0 vertical",
     videoModel: "KLING3.0",
     aspectRatio: "9:16",
-    baseCreditsPerSecond: 50,
+    baseCreditsPerSecond: defaultImageListVideoCreditsPerSecond["KLING3.0"],
     maxSecondsPerImage: 10,
     enabled: true
   },
@@ -101,7 +108,7 @@ export const defaultModelPricingConfigurations: ModelPricingConfiguration[] = [
     label: "Kling 3.0 landscape",
     videoModel: "KLING3.0",
     aspectRatio: "16:9",
-    baseCreditsPerSecond: 50,
+    baseCreditsPerSecond: defaultImageListVideoCreditsPerSecond["KLING3.0"],
     maxSecondsPerImage: 10,
     enabled: true
   }
