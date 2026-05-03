@@ -367,6 +367,7 @@ export default function VideoMosaic({
                   />
                 )}
                 <video
+                  height={isPortrait ? 16 : 9}
                   ref={(node) => {
                     videoRefs.current[item.id] = node;
                   }}
@@ -382,6 +383,7 @@ export default function VideoMosaic({
                   onPlaying={() => markVideoReady(item)}
                   onSeeked={(event) => updateVideoProgress(item.id, event.currentTarget)}
                   onTimeUpdate={(event) => updateVideoProgress(item.id, event.currentTarget)}
+                  width={isPortrait ? 9 : 16}
                 />
                 <button
                   className="video-mosaic-play"
